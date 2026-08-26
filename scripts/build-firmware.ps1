@@ -90,6 +90,83 @@ function Get-SymbolAddress {
 }
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+
+$versionSource = "auto_increment"
+$buildCounter = -1
+
+if ($Version) {
+    $versionSource = "manual_override"
+    Write-Host ""
+    Write-Host "WARNING: Manual version override: $Version" -ForegroundColor Yellow
+    Write-Host "  version_source will be set to manual_override in manifest." -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    $counterPath = Join-Path $repoRoot ".local\build-number.txt"
+
+    $initializeCounter = {
+        param([string]$ScanRoot)
+
+        $highest = -1
+        if (Test-Path -LiteralPath $ScanRoot -PathType Container) {
+            $manifests = Get-ChildItem -LiteralPath $ScanRoot -Filter "*.manifest.json" -Recurse -ErrorAction SilentlyContinue
+            foreach ($m in $manifests) {
+                try {
+                    $json = Get-Content -LiteralPath $m.FullName -Raw | ConvertFrom-Json
+                    if ($json.version -match '^0\.(\d{4})$') {
+                        $n = [int]$Matches[1]
+                        if ($n -gt $highest) { $highest = $n }
+                    }
+                } catch { }
+            }
+        }
+        if ($highest -lt 0) {
+            $highest = 408
+            Write-Host "No prior manifests found. Initializing counter with seed $highest."
+        } else {
+            Write-Host "Discovered highest prior version: 0.$($highest.ToString('D4')) (counter=$highest)."
+        }
+        return $highest
+    }
+
+    if (-not (Test-Path -LiteralPath $counterPath)) {
+        $buildDir = Join-Path $repoRoot ".build\M820_BL820"
+        $buildCounter = & $initializeCounter $buildDir
+        $newCounter = $buildCounter + 1
+
+        $localDir = Join-Path $repoRoot ".local"
+        if (-not (Test-Path -LiteralPath $localDir)) {
+            New-Item -ItemType Directory -Force -Path $localDir | Out-Null
+        }
+        $tempPath = "$counterPath.tmp"
+        Set-Content -LiteralPath $tempPath -Value $newCounter.ToString() -Encoding ascii -NoNewline
+        Move-Item -LiteralPath $tempPath -Destination $counterPath -Force
+
+        $Version = "0.{0:D4}" -f $newCounter
+        Write-Host "Initialized build counter: $buildCounter -> $newCounter"
+        Write-Host ""
+    } else {
+        $raw = (Get-Content -LiteralPath $counterPath -Raw).Trim()
+        if ($raw -notmatch '^\d+$') {
+            throw "Build counter file contains non-integer: $counterPath`nExpected a positive integer, got: $raw"
+        }
+        $buildCounter = [int]$raw
+        $newCounter = $buildCounter + 1
+
+        $tempPath = "$counterPath.tmp"
+        Set-Content -LiteralPath $tempPath -Value $newCounter.ToString() -Encoding ascii -NoNewline
+        Move-Item -LiteralPath $tempPath -Destination $counterPath -Force
+
+        $Version = "0.{0:D4}" -f $newCounter
+    }
+
+    Write-Host "Reserved build version: $Version (counter $buildCounter -> $newCounter)"
+    Write-Host ""
+}
+
+if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+-]{0,47}$') {
+    throw "Version must contain 1..48 safe characters: letters, digits, dot, underscore, plus or minus."
+}
+
 $toolchainPath = Get-ToolchainPath $Toolchain
 $gcc = Join-Path $toolchainPath "arm-none-eabi-gcc.exe"
 $objcopy = Join-Path $toolchainPath "arm-none-eabi-objcopy.exe"
@@ -113,36 +190,20 @@ $worktreeStatus = @(& git -c "safe.directory=$gitRepository" `
 Assert-NativeSuccess "git status"
 $dirty = $worktreeStatus.Count -gt 0
 
-if (-not $Version) {
-    $Version = $gitDescription
-    if ($dirty) {
-        $Version += "-dirty"
-    }
-}
-
-if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+-]{0,47}$') {
-    throw "Version must contain 1..48 safe characters: letters, digits, dot, underscore, plus or minus."
-}
-
 $outputRoot = if ([IO.Path]::IsPathRooted($OutputDir)) {
     [IO.Path]::GetFullPath($OutputDir)
 } else {
     [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDir))
 }
-$buildDir = Join-Path $outputRoot (Join-Path $Target (Join-Path $Profile $Variant))
-$generatedDir = Join-Path $buildDir "generated"
-$objectDir = Join-Path $buildDir "objects"
-New-Item -ItemType Directory -Force -Path $generatedDir, $objectDir | Out-Null
+$userFacingDir = Join-Path $outputRoot $Target
+$variantSuffix = if ($Variant -eq "diagnostic") { "_DIAG" } else { "" }
+New-Item -ItemType Directory -Force -Path $userFacingDir | Out-Null
 
-$buildVersionHeader = @(
-    "#ifndef BUILD_VERSION_H",
-    "#define BUILD_VERSION_H",
-    "/* Generated in the build directory; never edit or commit. */",
-    "#define EBICS_BUILD_VERSION `"$Version`"",
-    "#endif"
-)
-Set-Content -LiteralPath (Join-Path $generatedDir "build_version.h") `
-    -Value $buildVersionHeader -Encoding ascii
+$workDir = Join-Path $userFacingDir "work"
+$variantWorkDir = Join-Path $workDir $Variant
+$generatedDir = Join-Path $variantWorkDir "generated"
+$objectDir = Join-Path $variantWorkDir "objects"
+New-Item -ItemType Directory -Force -Path $generatedDir, $objectDir | Out-Null
 
 $diagnosticsEnabled = $Variant -eq "diagnostic"
 $diagnosticsValue = if ($diagnosticsEnabled) { "1" } else { "0" }
@@ -189,6 +250,16 @@ if ($sourceEntries.Count -eq 0) {
     throw "Source manifest is empty: $sourceManifest"
 }
 
+$buildVersionHeader = @(
+    "#ifndef BUILD_VERSION_H",
+    "#define BUILD_VERSION_H",
+    "/* Generated in the build directory; never edit or commit. */",
+    "#define EBICS_BUILD_VERSION `"$Version`"",
+    "#endif"
+)
+Set-Content -LiteralPath (Join-Path $generatedDir "build_version.h") `
+    -Value $buildVersionHeader -Encoding ascii
+
 $objects = @()
 Push-Location $repoRoot
 try {
@@ -213,13 +284,15 @@ try {
     $objects += $startupObject
 
     $artifactBase = $Version
-    $elf = Join-Path $buildDir "$artifactBase.elf"
-    $bin = Join-Path $buildDir "$artifactBase.bin"
-    $hex = Join-Path $buildDir "$artifactBase.hex"
-    $map = Join-Path $buildDir "$artifactBase.map"
-    $sizeReport = Join-Path $buildDir "$artifactBase.size.txt"
-    $programHeaderReport = Join-Path $buildDir "$artifactBase.program-headers.txt"
-    $manifestPath = Join-Path $buildDir "$artifactBase.manifest.json"
+
+    $elf = Join-Path $variantWorkDir "$artifactBase.elf"
+    $bin = Join-Path $variantWorkDir "$artifactBase.bin"
+    $hex = Join-Path $variantWorkDir "$artifactBase.hex"
+    $map = Join-Path $variantWorkDir "$artifactBase.map"
+    $sizeReport = Join-Path $variantWorkDir "$artifactBase.size.txt"
+    $programHeaderReport = Join-Path $variantWorkDir "$artifactBase.program-headers.txt"
+    $finalBin = Join-Path $userFacingDir "$artifactBase`_M820_BL820$variantSuffix.bin"
+    $manifestPath = Join-Path $userFacingDir "$artifactBase`_M820_BL820$variantSuffix.manifest.json"
 
     $linkerScript = Join-Path $repoRoot "ldscripts\gd32f30x_flash.ld"
     $linkArguments = $commonFlags + @(
@@ -263,13 +336,19 @@ try {
 
     $symbols = @(& $nm --defined-only $elf)
     Assert-NativeSuccess "nm symbol check"
+    # The marker symbol that proves CAN_DIAGNOSTICS_ENABLE actually reached the link. It used to
+    # be print_debug_on_CAN, which FW-106 deleted when the blocking 23-frame burst became the
+    # non-blocking session dump - so this check had been failing every diagnostic build since.
+    # diag_session_dump_step is that successor and carries the same property: diag_session.c
+    # compiles to nothing at CAN_DIAGNOSTICS_ENABLE=0, so the symbol exists in the diagnostic
+    # image and in no other.
     $hasDiagnosticSymbol = @($symbols |
-        Select-String -Pattern '\bprint_debug_on_CAN$').Count -gt 0
+        Select-String -Pattern '\bdiag_session_dump_step$').Count -gt 0
     if ($diagnosticsEnabled -and -not $hasDiagnosticSymbol) {
-        throw "Diagnostic build does not contain print_debug_on_CAN."
+        throw "Diagnostic build does not contain diag_session_dump_step."
     }
     if (-not $diagnosticsEnabled -and $hasDiagnosticSymbol) {
-        throw "Normal build unexpectedly contains print_debug_on_CAN."
+        throw "Normal build unexpectedly contains diag_session_dump_step."
     }
 
     $appFlashStart = Get-SymbolAddress $symbols "__app_flash_start"
@@ -302,7 +381,7 @@ try {
     $heapStackBytes = $heapStackEnd - $bssEnd
     $ramUsedBytes = $heapStackEnd - $TargetRamOrigin
 
-    $bootloaderBin = Join-Path $buildDir "$artifactBase`_M820_BL820.bin"
+    $bootloaderBin = $finalBin
     & (Join-Path $PSScriptRoot "prepare-m820-bl820.ps1") `
         -InputBin $bin -OutputBin $bootloaderBin | Out-Host
     if (-not (Test-Path -LiteralPath $bootloaderBin -PathType Leaf)) {
@@ -322,12 +401,15 @@ try {
         variant = $Variant
         diagnostics_enabled = $diagnosticsEnabled
         version = $Version
+        version_source = $versionSource
+        build_counter = if ($buildCounter -ge 0) { $buildCounter + 1 } else { -1 }
         git_commit = $commit
         git_description = $gitDescription
         worktree_dirty = $dirty
         hardware_approved_profile = $Profile -eq "debug"
         toolchain = "Arm GNU Toolchain arm-none-eabi"
         toolchain_version = $toolchainVersion
+        linker = "ldscripts/gd32f30x_flash.ld"
         source_manifest = "scripts/sources-m820.txt"
         source_count = $sourceEntries.Count
         flash = [ordered]@{
@@ -352,30 +434,47 @@ try {
             map = $map
             size_report = $sizeReport
             program_headers = $programHeaderReport
-            binary = $bin
-            binary_sha256 = $rawBinHash
-            bl820_binary = $bootloaderBin
-            bl820_binary_bytes = $bootloaderBinInfo.Length
-            bl820_binary_sha256 = $bootloaderBinHash
+            raw_binary = $bin
+            raw_binary_sha256 = $rawBinHash
+            final_binary = $bootloaderBin
+            final_binary_bytes = $bootloaderBinInfo.Length
+            final_binary_sha256 = $bootloaderBinHash
         }
     }
     $buildManifest | ConvertTo-Json -Depth 6 |
         Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
     Write-Host ""
-    Write-Host "Build completed:"
-    Write-Host "  target/profile/variant : $Target / $Profile / $Variant"
-    Write-Host "  version                : $Version"
-    Write-Host "  toolchain              : $toolchainVersion"
-    Write-Host "  source files           : $($sourceEntries.Count) + startup"
-    Write-Host "  Flash image            : $($rawBinInfo.Length) B, end $('0x{0:X8}' -f $flashImageEnd)"
-    Write-Host "  Flash limit            : $('0x{0:X8}' -f $appFlashLimit)"
-    Write-Host "  RAM used/reserved      : $ramUsedBytes B (includes heap + stack)"
-    Write-Host "  CAN diagnostics        : $(if ($diagnosticsEnabled) { 'ON' } else { 'OFF' })"
-    Write-Host "  RWE segment            : absent"
-    Write-Host "  BL820 binary           : $bootloaderBin"
-    Write-Host "  BL820 SHA-256          : $bootloaderBinHash"
-    Write-Host "  manifest               : $manifestPath"
+    Write-Host "=================================================="
+    Write-Host "eVistDrive M820_BL820 BUILD"
+    Write-Host "=================================================="
+    Write-Host ""
+    Write-Host "BUILD VERSION:    $Version"
+    Write-Host "Version source:   $versionSource"
+    Write-Host "Variant:          $(if ($diagnosticsEnabled) { 'DIAGNOSTIC' } else { 'NORMAL' })"
+    Write-Host "Git HEAD:         $($commit.Substring(0, [Math]::Min(12, $commit.Length)))"
+    Write-Host "Git describe:     $gitDescription"
+    Write-Host "Git dirty:        $dirty"
+    Write-Host ""
+    Write-Host "Compiler:         $toolchainVersion"
+    Write-Host "Sources:          $($sourceEntries.Count) + startup"
+    Write-Host ""
+    Write-Host "FLASH:            $($rawBinInfo.Length) B (image end: $('0x{0:X8}' -f $flashImageEnd), limit: $('0x{0:X8}' -f $appFlashLimit))"
+    Write-Host "RAM:              $ramUsedBytes B (includes heap + stack)"
+    Write-Host ""
+    Write-Host "BUILD VERSION:    $Version"
+    Write-Host ""
+    Write-Host "FINAL FIRMWARE:"
+    Write-Host "  $bootloaderBin"
+    Write-Host ""
+    Write-Host "SHA256:           $bootloaderBinHash"
+    Write-Host ""
+    if ($dirty) {
+        Write-Host "WARNING: WORKING TREE DIRTY" -ForegroundColor Yellow
+        Write-Host ""
+    }
+    Write-Host "RESULT:           PASS"
+    Write-Host "=================================================="
 }
 finally {
     Pop-Location

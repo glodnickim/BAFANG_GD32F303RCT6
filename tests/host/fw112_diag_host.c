@@ -30,14 +30,18 @@
  *       monotonic; each record is exactly 32 B.
  *   S9  the queue is per-session: count/peek/release only touch the named session; releasing one
  *       record shifts the ring correctly.
- *   S10 the queue refuses (not overwrites) when full: rejected_total rises, the first record
- *       survives, and enqueued/rejected counters are exact.
+ *   S10 the queue refuses (not overwrites) when a FULL ring has nothing to evict (one open saga
+ *       fills it): rejected_total rises, the first record survives, and enqueued/rejected counters
+ *       are exact. With the FW-112-STABILITY retention policy a full ring holding a CLOSED saga
+ *       EVICTS it instead of refusing - fw112_retention_host.c pins that down; this suite covers
+ *       the refusal case that remains.
  *   S11 (FW-112-DIAG.1) the capacity is FW112_DIAG_RECORDS=24: 24 driven events are all
  *       accepted, count == capacity, nothing refused below capacity.
- *   S12 (FW-112-DIAG.1) the 25th event is refused: rejected_total rises by one, count stays at
- *       capacity, enqueued unchanged - reject-on-full, never overwrite.
- *   S13 (FW-112-DIAG.1) the accepted records 0..(capacity-1) all survive, in order, none
- *       overwritten by the refused 25th.
+ *   S12 (FW-112-DIAG.1) the 25th event when the ring holds CLOSED sagas is ACCEPTED by evicting
+ *       the oldest one (evicted_sagas rises by 1, nothing refused); the refusal boundary of
+ *       S10/S12 covers the no-evictable case.
+ *   S13 (FW-112-DIAG.1) after that eviction the survivors are ids 2..25 in order - the evicted
+ *       saga's two records are gone and nothing was overwritten by the 25th.
  *   S14 (FW-112-DIAG.1) the realistic >8-event sequence that motivated the change - COLD BLOCKED,
  *       cold GRANTED, HOLD_ARMED, ZEROED, REVOKED, BLOCKED, fast-rearm GRANTED, RECOVERY_ENTER,
  *       COLLAPSE, EXIT, ZEROED - is recorded end to end with the exact types and cold/fast flags.
@@ -54,8 +58,8 @@
  *   M1  FW112_DIAG_RECORDS set back to 8 -> S11 (count == 24 fails, only 8 accepted) and S14
  *       (11 events > 8, the tail is refused) fail.
  *   M2  the reject check allows only capacity-1 records -> S11 fails (count == 23).
- *   M3  the reject guard is removed so the 25th is written out of bounds -> S12 (refused == 0,
- *       count drifts past capacity) and S13 (the oldest record is overwritten) fail.
+ *   M3  the reject guard is removed so the 25th is written out of bounds -> S12 (count drifts
+ *       past capacity, evicted_sagas never rises) and S13 (the oldest record is overwritten) fail.
  *
  * Each mutation is caught by the corresponding BEHAVIOURAL test above (the real module linked),
  * not by a source-text scan: S2/S7 name the reason, S1/S7 name the edge-vs-spam count, S3/S4
@@ -107,9 +111,6 @@ static void baseline(void)
 	in.recovery_state = REC_IDLE;
 	in.dir_state = 1;
 	in.fwd_run = 6;
-	in.crank_forward_steps = 6;
-	in.required_steps = 4;
-	in.start_steps = 4;
 	in.latched = true;
 	in.iq_setpoint = 500;
 	in.iq_request = 500;
@@ -146,7 +147,7 @@ static void test_session_edges_and_blocked(void)
 	CHECK(r.event_type == FW112_EVT_BLOCKED, "S1: event is BLOCKED");
 	CHECK(r.event_id == 0U, "S1: first event id 0");
 	CHECK(r.elapsed_ticks == 0U, "S1: first event elapsed 0");
-	CHECK(r.session_state == ST_COLD, "S1: snapshot session COLD");
+	CHECK((r.packed_state & 0x03U) == ST_COLD, "S1: snapshot session COLD");
 	CHECK(r.reason_bits == (FW112_REASON_START_STEPS | FW112_REASON_DIRECTION),
 	      "S2: BLOCKED carries the deciding-layer reason");
 	drain_queue(1);
@@ -172,7 +173,7 @@ static void test_session_edges_and_blocked(void)
 	CHECK((r.flags & FW112_FLAG_COLD_ARM) != 0U, "S3: COLD_ARM set");
 	CHECK((r.flags & FW112_FLAG_LATCHED) != 0U, "S3: LATCHED set");
 	CHECK((r.flags & FW112_FLAG_FAST_REARM) == 0U, "S3: not a fast rearm");
-	CHECK(r.session_state == ST_ACTIVE, "S3: snapshot ACTIVE");
+	CHECK((r.packed_state & 0x03U) == ST_ACTIVE, "S3: snapshot ACTIVE");
 	CHECK(r.iq_setpoint == 400, "S3: snapshot iq_setpoint");
 	drain_queue(1);
 
@@ -218,7 +219,7 @@ static void test_recovery_edges(void)
 	fw112_diag_record_t r;
 	CHECK(fw112_diag_queue_peek_session(1, &r) && r.event_type == FW112_EVT_RECOVERY_ENTER,
 	      "S5: event is RECOVERY_ENTER");
-	CHECK(r.recovery_state == REC_WAIT, "S5: snapshot recovery WAIT");
+	CHECK(((r.packed_state >> 4) & 0x03U) == REC_WAIT, "S5: snapshot recovery WAIT");
 	drain_queue(1);
 
 	/* WAIT -> TRACK : no collapse event (only TRACK -> WAIT collapses). */
@@ -233,7 +234,7 @@ static void test_recovery_edges(void)
 	CHECK(fw112_diag_queue_count_session(1) == 1U, "S5: RECOVERY_COLLAPSE recorded");
 	CHECK(fw112_diag_queue_peek_session(1, &r) && r.event_type == FW112_EVT_RECOVERY_COLLAPSE,
 	      "S5: event is RECOVERY_COLLAPSE");
-	CHECK(r.recovery_state == REC_WAIT, "S5: snapshot recovery WAIT");
+	CHECK(((r.packed_state >> 4) & 0x03U) == REC_WAIT, "S5: snapshot recovery WAIT");
 	drain_queue(1);
 
 	/* WAIT -> IDLE : EXIT. */
@@ -270,7 +271,7 @@ static void test_hold_edges(void)
 	fw112_diag_record_t r;
 	CHECK(fw112_diag_queue_peek_session(1, &r) && r.event_type == FW112_EVT_HOLD_ARMED,
 	      "S6: event is HOLD_ARMED");
-	CHECK(r.assist_hold_ticks == 40, "S6: snapshot hold ticks");
+	CHECK(r.hold_ticks_sat == 40, "S6: snapshot hold ticks");
 	drain_queue(1);
 
 	/* Decrement but stay positive: no edge. */
@@ -427,43 +428,54 @@ static void test_queue_full_refused(void)
 	reset();
 	baseline();
 	fw112_diag_set_session_id(1);
+	step();                        /* prime prev_* edge latches (no event fires) */
 
-	/* Generate FW112_DIAG_RECORDS + 1 distinct events by oscillating ACTIVE/SUSPENDED. */
-	uint32_t made = 0;
+	/* A single OPEN recovery saga fills the whole ring (REVOKED, GRANTED, ENTER, then
+	 * collapses). Nothing in it is COMPLETED, so the retention policy has nothing to evict
+	 * and every further event must be REFUSED - reject, never overwrite. */
+	uint32_t guard = 0;
+	in.session_state = ST_SUSPENDED;
+	in.latched = false;
+	in.fwd_run = 0;
+	in.iq_setpoint = 0;
+	step();                        /* REVOKED */
 	in.session_state = ST_ACTIVE;
 	in.latched = true;
+	in.fwd_run = 6;
 	in.iq_setpoint = 300;
-	step();                        /* (nothing: first tick from a fresh COLD-less baseline) */
-
-	/* Drive an alternating pattern to create one event per cycle. */
-	uint32_t guard = 0;
-	while (made < FW112_DIAG_RECORDS + 2U && guard < 1000U) {
+	step();                        /* GRANTED (fast rearm) */
+	in.recovery_state = REC_WAIT;
+	step();                        /* ENTER */
+	uint32_t made = 3;
+	while (fw112_diag_queue_count_session(1) < FW112_DIAG_RECORDS && guard < 1000U) {
 		guard++;
-		in.session_state = ST_SUSPENDED;
-		in.latched = false;
-		in.fwd_run = 0;            /* no cranking on the reverse: no BLOCKED edge */
-		in.iq_setpoint = 0;
-		step();                    /* REVOKED (id increments) */
-		made++;
-		in.session_state = ST_ACTIVE;
-		in.latched = true;
-		in.fwd_run = 6;
-		in.iq_setpoint = 300;
-		step();                    /* GRANTED (id increments) */
+		in.recovery_state = REC_TRACK;
+		step();
+		in.recovery_state = REC_WAIT;
+		step();                    /* COLLAPSE */
 		made++;
 	}
 
-	/* Count events that actually committed before saturation. */
-	fw112_diag_record_t r;
-	uint32_t n = 0;
-	while (fw112_diag_queue_peek_session(1, &r)) { n++; fw112_diag_queue_release_session(1); }
-	/* The queue can only ever hold FW112_DIAG_RECORDS; extra events must have been refused. */
-	CHECK(n == FW112_DIAG_RECORDS, "S10: queue holds at most FW112_DIAG_RECORDS");
-	CHECK(fw112_diag_queue_rejected() == (made - FW112_DIAG_RECORDS),
-	      "S10: refused count = events beyond capacity");
+	/* Two more events of the same open saga: no completed saga to evict -> refused. */
+	uint32_t before = fw112_diag_queue_rejected();
+	in.recovery_state = REC_TRACK;
+	step();
+	in.recovery_state = REC_WAIT;
+	step();                        /* COLLAPSE -> refused */
+	in.recovery_state = REC_TRACK;
+	step();
+	in.recovery_state = REC_WAIT;
+	step();                        /* COLLAPSE -> refused */
+
+	CHECK(made == FW112_DIAG_RECORDS, "S10: the ring was saturated by the open saga");
+	CHECK(fw112_diag_queue_count_session(1) == FW112_DIAG_RECORDS,
+	      "S10: queue holds exactly FW112_DIAG_RECORDS");
+	CHECK(fw112_diag_queue_rejected() == before + 2U,
+	      "S10: the overflow events were refused (nothing evictable)");
 	CHECK(fw112_diag_queue_enqueued() == FW112_DIAG_RECORDS,
 	      "S10: enqueued counts the committed (capacity) events");
-	CHECK(made > FW112_DIAG_RECORDS, "S10: test really saturated the queue");
+	CHECK(fw112_diag_queue_evicted_sagas() == 0U,
+	      "S10: no eviction happened (the in-flight saga is protected)");
 }
 
 /* ------- S11 / S12 / S13 : 24-record capacity, reject the 25th, no overwrite -------------------- */
@@ -512,31 +524,37 @@ static void test_capacity_reject_preserve(void)
 	      "S11: enqueued == 24");
 	CHECK(fw112_diag_queue_rejected() == 0U, "S11: nothing refused below capacity");
 
-	/* S12: the 25th event is refused; the queue stays exactly full and still valid. */
+	/* S12: the 25th is a REVOKED that closes the newest open saga; the ring holds CLOSED
+	 * sagas, so retention EVICTS the oldest one and ACCEPTS the 25th - not a refusal. */
 	in.session_state = ST_SUSPENDED;
 	in.latched = false;
 	in.fwd_run = 0;
 	in.iq_setpoint = 0;
-	step();                        /* REVOKED -> must be refused */
-	CHECK(fw112_diag_queue_rejected() == 1U, "S12: the 25th event was refused");
-	CHECK(fw112_diag_queue_count_session(1) == CAPACITY_REQUIRED,
-	      "S12: record_count unchanged after refusal (reject, never overwrite)");
-	CHECK(fw112_diag_queue_enqueued() == CAPACITY_REQUIRED,
-	      "S12: enqueued unchanged after refusal");
+	step();                        /* REVOKED -> evicts the oldest closed saga, accepted */
+	CHECK(fw112_diag_queue_rejected() == 0U,
+	      "S12: the 25th was NOT refused (a closed saga was evicted for it)");
+	CHECK(fw112_diag_queue_evicted_sagas() == 1U, "S12: exactly one saga evicted");
+	CHECK(fw112_diag_queue_evicted_records() == 2U,
+	      "S12: its two records (REVOKED, GRANTED) evicted");
+	CHECK(fw112_diag_queue_count_session(1) == CAPACITY_REQUIRED - 1U,
+	      "S12: queue holds 23 (22 survivors + the new REVOKED)");
+	CHECK(fw112_diag_queue_enqueued() == CAPACITY_REQUIRED + 1U,
+	      "S12: 25 events committed (the 25th was accepted)");
 
-	/* S13: records 0..23 all survived, in order, none overwritten by the 25th. */
+	/* S13: the evicted saga's two records (ids 0,1) are gone; survivors are ids 2..24 in
+	 * order, nothing overwritten by the 25th. */
 	fw112_diag_record_t r;
 	uint32_t n = 0;
-	uint16_t expect = 0;
+	uint16_t expect = 2;           /* saga 0 (ids 0,1) was evicted */
 	while (fw112_diag_queue_peek_session(1, &r)) {
-		CHECK(r.event_id == expect, "S13: record order preserved (id == position)");
+		CHECK(r.event_id == expect, "S13: record order preserved after eviction (id == position+2)");
 		CHECK(r.session_id == 1U, "S13: record still stamped with session 1");
 		n++;
 		expect++;
 		fw112_diag_queue_release_session(1);
 	}
-	CHECK(n == CAPACITY_REQUIRED, "S13: all 24 records survived");
-	CHECK(expect == CAPACITY_REQUIRED, "S13: ids 0..23 exactly once");
+	CHECK(n == CAPACITY_REQUIRED - 1U, "S13: all 23 survivors present");
+	CHECK(expect == CAPACITY_REQUIRED + 1U, "S13: ids 2..24 exactly once");
 }
 
 /* ------- S14 : the realistic >8-event sequence that triggered FW-112-DIAG.1 --------------------- */

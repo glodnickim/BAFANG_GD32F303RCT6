@@ -8,6 +8,7 @@
 #include "fw112_diag.h"
 #include "motor_core.h"
 #include "motor_service.h"
+#include "pedal_assist_gate.h"
 #include "ride_session.h"
 #include "rider_input.h"
 #include "torque_input.h"
@@ -57,23 +58,6 @@
  */
 static int32_t assist_hold_ticks;
 
-/*
- * FW-112 v2: the REARM PERMISSION grant for assist_modes_calculate() is open right now - set on
- * the exact tick a fast rearm happens (session_out.fast_rearm_this_tick), cleared once the
- * session is no longer ACTIVE or the forward step count has caught up to
- * tuning_config_start_steps() (see the begin/cancel block in ride_control_update). While set,
- * assist_modes_calculate() is granted a local "pedalling" signal - NEVER a global one (see the
- * grant comment in ride_control_update).
- *
- * This is DELIBERATELY a different lifecycle from the RUN estimator's recovery automaton
- * (torque_input.c): the grant is permission bookkeeping and expires with the ordinary start-step
- * requirement, while the estimator recovery is a temporary launch aid that closes on its own
- * (stability) or when the session stops being ACTIVE. One flag must never drive both - v2's split
- * is what lets a fast rearm grant permission immediately (pure direction fact) without pinning
- * the RUN estimator past its honest window.
- */
-static bool rearm_permission_active;
-
 #if CAN_DIAGNOSTICS_ENABLE
 /*
  * FW-112-DIAG: WHY current is held at 0 on the last tick, computed fresh by the layer that
@@ -82,10 +66,27 @@ static bool rearm_permission_active;
  * BLOCKED/ZEROED record names the exact holding stage instead of just "0".
  */
 static uint8_t ride_diag_reason;
+/* C0-PROOF: diagnostic mirrors — written every tick, read by getters. NOT a gate. */
+static uint8_t ride_diag_permission_bits;
+static uint8_t ride_diag_flags2;
 
 uint8_t ride_control_get_diag_reason(void)
 {
 	return ride_diag_reason;
+}
+
+/* C0-PROOF: diagnostic mirror getters — measurement only. */
+uint8_t ride_control_get_permission_bits(void)
+{
+	return ride_diag_permission_bits;
+}
+
+uint8_t ride_control_get_flags2(void)
+{
+	/* Returns the base flags computed by ride_control.c: FORCE_ZERO, HARD_CUT_SET,
+	 * RECOVERY_WAIT. FINAL_ZERO and PU_CLAMPED are added by main.c because they
+	 * require iq_setpoint/iq_before_pu which ride_control does not carry. */
+	return ride_diag_flags2;
 }
 #endif
 
@@ -105,7 +106,6 @@ uint8_t ride_control_get_diag_reason(void)
  */
 static void cancel_rearm_recovery(void)
 {
-	rearm_permission_active = false;
 	torque_input_cancel_rolling_rearm();
 	assist_hold_ticks = 0;
 }
@@ -252,8 +252,8 @@ uint16_t ride_control_get_assist_hold_ticks(void)
 void ride_control_init(void)
 {
 	assist_hold_ticks = 0;
-	rearm_permission_active = false;
 	ride_session_init();
+	pedal_assist_gate_init();
 	preload_active = false;
 	preload_ticks = 0;
 	walk_was_active = false;
@@ -406,8 +406,14 @@ void ride_control_update(const ride_control_input_t *input)
 		bool crank_moving_enough = rider->crank_direction_ok &&
 			rider->crank_forward_steps >= required_steps;
 		bool crank_ok = !hard_cut && !assist_off && crank_moving_enough;
+		/*
+		 * FW-112 B0a.1: the gate's load threshold uses crank_direction_ok (pure
+		 * direction fact) instead of crank_ok (which includes fwd_run >= start_steps).
+		 * The riding threshold applies as soon as forward pedaling is confirmed and the
+		 * bike is rolling — the step count gate is replaced by the pedal-assist gate.
+		 */
 		uint16_t engage_threshold_centikg = standstill_threshold_centikg;
-		if (crank_ok && bike_rolling) {
+		if (rider->crank_direction_ok && bike_rolling) {
 			engage_threshold_centikg = level->riding_start_load_centikg;
 		}
 		//FW-102: publish the gate as it stands THIS tick, live, so a measurement can
@@ -445,77 +451,55 @@ void ride_control_update(const ride_control_input_t *input)
 		ride_session_update(&session_in, &session_out);
 
 		/*
-		 * FW-112 v2: TWO independent lifecycles, both driven from the same session edges.
+		 * FW-112 PATCH B0a.1: the rolling-rearm RECOVERY (torque_input.c) — a one-shot
+		 * EVENT for AFILT/ARUN signal processing only. begin_rolling_rearm() seeds the
+		 * estimator to the current fast signal so the rearmed Iq returns at full magnitude
+		 * immediately instead of after the stale pre-reverse window swaps out.
+		 * Cancelled ONLY on terminal events — never by start_steps.
 		 *
-		 * 1. The REARM PERMISSION GRANT (rearm_permission_active) - permission bookkeeping for
-		 *    assist_modes_calculate() only. Begins on the exact tick ACTIVE is re-entered after a
-		 *    suspension (fast_rearm_this_tick - permission is a pure direction fact, see
-		 *    inc/ride_session.h), and expires when the session is no longer ACTIVE or the forward
-		 *    step count has caught up to the ordinary start requirement
-		 *    (tuning_config_start_steps()) - by then fwd_run itself vouches for the rider.
-		 * 2. The RUN estimator's ROLLING-REARM RECOVERY (torque_input.c) - a one-shot EVENT, not
-		 *    the latched WAIT-wide fast-track of v1. begin_rolling_rearm() seeds the estimator to
-		 *    the current fast signal and opens the IDLE/WAIT_FRESH_LOAD/TRACK_FAST automaton (see
-		 *    inc/torque_input.h), so the rearmed Iq returns at full magnitude immediately instead
-		 *    of after the stale pre-reverse window swaps out one sample per crank step.
-		 *
-		 *    The recovery automaton begins on the same fast_rearm_this_tick edge, but is cancelled
-		 *    ONLY when the session stops being ACTIVE (COLD, or re-suspended by a fresh
-		 *    reverse/invalid) - never by start_steps and never by a timeout: a fast rearm grants
-		 *    permission for start_steps steps, yet the estimator may still be finishing its
-		 *    recovery window when the step count crosses that mark, and pinning RUN to the fresh
-		 *    signal for those few extra ticks is harmless (it is honest - it follows the current
-		 *    pressure). The automaton otherwise closes itself in torque_input_update() once the
-		 *    recovery completes.
+		 * The old rearm_permission_active grant (which faked pedaling_active/pas_forward
+		 * for assist_modes_calculate) is REMOVED: prepare_assist_input() now runs on
+		 * valid sensor data (torque_sensor_valid, pas_sensor_valid, cadence) without
+		 * requiring fwd_run >= start_steps. The gate module owns permission; the
+		 * calculation always runs independently.
 		 */
 		if (session_out.fast_rearm_this_tick) {
 			torque_input_begin_rolling_rearm();
-			rearm_permission_active = true;
-		} else {
-			if (!session_out.latched ||
-			    rider->crank_forward_steps >= tuning_config_start_steps()) {
-				rearm_permission_active = false;
-			}
-			/* FW-112 v2: the session left ACTIVE (fresh reverse/INVALID, non-direction
-			 * safety cut, assist level 0 or a real stop all route here through the session
-			 * automaton) - a terminal edge. Cancel the permission grant AND the rolling-rearm
-			 * recovery AND the hold grace together, so a recovery opened before the edge cannot
-			 * survive it. */
-			if (!session_out.latched) {
-				cancel_rearm_recovery();
-			}
+		} else if (!session_out.latched) {
+			cancel_rearm_recovery();
 		}
 
 		/*
-		 * FW-109 / FW-112 v2 — a session-resumption GRANT for assist_modes_calculate() ONLY, on a
-		 * LOCAL copy of the rider snapshot. Never a global lie: rider_input_get()'s real, shared
-		 * copy is untouched, and every other consumer below (Extended Boost, the "last pedal Iq"
-		 * capture, the smooth-start/preload inputs, profile_pedaling_active) keeps reading the
-		 * REAL rider->pedaling_active. Applies only while the rearm PERMISSION grant is open -
-		 * fwd_run has only reached PAS_REVERSE_RECOVERY_CONFIRM_STEPS, not the full
-		 * tuning_config_start_steps() a cold ride_core_pedaling needs, so without this the mode
-		 * calculation would see "not pedalling" on the very tick permission was just restored;
-		 * fwd_run catches up naturally a few steps later, same as it always has. The grant fakes
-		 * PEDALLING, never load: the calculation still returns 0 when there is no real pressure
-		 * (deadband, ceiling, zero load), so "no current unless the current calculation itself
-		 * asks for it" holds on every tick - the exact invariant FW-109's two-phase commit tried
-		 * to enforce inside ride_session.c and FW-112 v2 moves back where it belongs.
+		 * FW-112 PATCH B0a.1: the pedal-assist gate. Single owner of pedal permission.
+		 *   SET:   forward_valid AND (start_load == 0 OR load >= start_load)
+		 *   KEEP:  once open, stays open until stop_or_reverse
+		 *   RESET: real_stop OR direction_inhibit OR session not latched (terminal event)
 		 *
-		 * FW-112 v2 STALE-SAMPLE FIX: the rider snapshot is built in main.c BEFORE
-		 * ride_control_update() runs, so on the very tick this block re-arms, torque_run_filtered
-		 * still carries the PRE-REARM window average - which, after a coast that filled the window
-		 * with zeros, is ~0 even though the rider is pressing again and the fast signal is already
-		 * high. The recovery automaton opened above (torque_input_begin_rolling_rearm) knows the
-		 * CURRENT fast signal; while it is active, substitute that value for the stale one in the
-		 * LOCAL copy ONLY, so the mode calculation on the rearm tick sees fresh pressure instead of
-		 * the stale sample. The real shared rider snapshot is left untouched, exactly like the
-		 * pedalling grant above.
+		 * forward_valid is rider->crank_direction_ok: the pure forward-pedaling
+		 * direction fact (cadence/timeout half only, NO step count). The gate
+		 * REPLACES the old fwd_run >= start_steps authorization. hard_cut and
+		 * assist_off are handled by !session_out.latched in stop_or_reverse.
+		 */
+		{
+			pedal_assist_gate_input_t gate_in;
+			pedal_assist_gate_output_t gate_out;
+			gate_in.forward_valid = rider->crank_direction_ok;
+			gate_in.load_met = (engage_threshold_centikg == 0) ||
+				(torque_centikg >= engage_threshold_centikg);
+			gate_in.stop_or_reverse = rider->real_stop ||
+				rider->direction_inhibit_active ||
+				!session_out.latched;
+			pedal_assist_gate_update(&gate_in, &gate_out);
+		}
+		bool gate_open = pedal_assist_gate_is_open();
+
+		/*
+		 * FW-112 PATCH B0a.1: rider snapshot for mode calculation. The recovery
+		 * automaton may override torque_run_filtered with the fresh signal so the
+		 * mode calculation sees current pressure instead of the stale pre-rearm window.
+		 * No permission fake: prepare_assist_input() now runs on valid sensor data.
 		 */
 		rider_input_t rider_for_modes = *rider;
-		if (rearm_permission_active) {
-			rider_for_modes.pedaling_active = true;
-			rider_for_modes.pas_forward = true;
-		}
 		if (torque_input_recovery_active()) {
 			rider_for_modes.torque_run_filtered =
 				torque_input_recovery_run_native();
@@ -533,20 +517,28 @@ void ride_control_update(const ride_control_input_t *input)
 		if (!supported) debug_flags |= RIDE_DBG_MODE_UNSUPPORTED;   //FW-096
 
 		/*
-		 * FW-112 v2 (audit S13): the recovery automaton is in WAIT_FRESH_LOAD - the fresh
-		 * signal fell back below the assist deadband BEFORE its 140 ms stable window finished,
-		 * so the recovery dropped out of TRACK_FAST. While this is true and the current tick
-		 * produces NO positive mode demand, the WAIT+zero-demand contract is absolute: pedal
-		 * target, final target and MS.i_q_setpoint must be 0 in the SAME tick. This flag (a
-		 * LEVEL, not an edge) is used twice below: to suppress a hold grace that an earlier
-		 * positive TRACK_FAST demand legitimately armed, and to force the dynamics reference
-		 * to zero. It is a pure direction-state observation; it never forces anything when a
-		 * real positive demand exists.
+		 * FW-112 v2 (audit S13), UNCHANGED by PATCH A: the recovery automaton is in
+		 * WAIT_FRESH_LOAD. Under PATCH A this LEVEL check is still exactly correct - and needs
+		 * no change - because PATCH A only altered how WAIT_FRESH_LOAD is REACHED, not what it
+		 * MEANS: torque_input_begin_rolling_rearm() now opens directly in TRACK_FAST, and
+		 * TRACK_FAST only ever falls back to WAIT_FRESH_LOAD after a GENUINE collapse (the fresh
+		 * signal was confirmed at/above the deadband at least once, then lost - see
+		 * recovery_confirmed_once in torque_input.c). A rearm that never gets confirmed at all
+		 * (rider not yet pressing) now simply stays in TRACK_FAST, quietly waiting - it no longer
+		 * passes through WAIT_FRESH_LOAD on the way in. So unlike before PATCH A, being in
+		 * WAIT_FRESH_LOAD at all is now BY CONSTRUCTION always a real collapse, never bookkeeping
+		 * for an unconfirmed start - the LEVEL check below is exactly the signal this needs. While
+		 * this is true and the current tick produces NO positive mode demand, the WAIT+zero-demand
+		 * contract is absolute: pedal target, final target and MS.i_q_setpoint must be 0 in the
+		 * SAME tick. This flag is used twice below: to suppress a hold grace that an earlier
+		 * positive TRACK_FAST demand legitimately armed, and to force the dynamics reference to
+		 * zero. It is a pure direction-state observation; it never forces anything when a real
+		 * positive demand exists.
 		 */
 		bool recovery_wait =
 			torque_input_recovery_state() == TORQUE_RECOVERY_WAIT_FRESH_LOAD;
 
-		bool latched = session_out.latched;
+		bool latched = gate_open;
 
 		profile_pedaling_active =
 			rider->pedaling_active || mode_output.assist_without_rotation_active;
@@ -939,13 +931,46 @@ void ride_control_update(const ride_control_input_t *input)
 			if (rider->direction_inhibit_active) why |= FW112_REASON_DIRECTION;
 			if (hard_cut || input->safety_cut_non_direction) why |= FW112_REASON_SAFETY;
 			if (!latched) {
-				if (rearm_permission_active) why |= FW112_REASON_REARM_GRANT;
-				else if (rider->crank_forward_steps < required_steps) why |= FW112_REASON_START_STEPS;
+				if (rider->crank_forward_steps < required_steps) why |= FW112_REASON_START_STEPS;
 				else if (torque_centikg < engage_threshold_centikg) why |= FW112_REASON_LOAD_BELOW;
 			}
 			if (mode_output.iq_request <= 0) why |= FW112_REASON_MODE_ZERO;
 			if (recovery_wait) why |= FW112_REASON_RECOVERY_WAIT;
 			ride_diag_reason = why;
+		}
+		/*
+		 * C0-PROOF: permission_bits — diagnostic mirror of the gate chain. NOT a new gate;
+		 * this is a measurement-only observation of what ride_control.c already decided.
+		 * Computed alongside ride_diag_reason so it has access to the same locals.
+		 */
+		{
+			uint8_t perm = 0U;
+			if (latched) perm |= FW112_PERM_GATE_OPEN;
+			if (supported) perm |= FW112_PERM_MODE_SUPPORTED;
+			if (mode_output.iq_request > 0) perm |= FW112_PERM_IQ_REQUEST_POS;
+			if (hard_cut || input->safety_cut_non_direction) perm |= FW112_PERM_HARD_CUT;
+			if (input->start_phase) perm |= FW112_PERM_START_PHASE;
+			if (input->speed_x100 < input->speed_limit_x100) perm |= FW112_PERM_SPEED_LIMIT_OK;
+			if (input->throttle_iq > 0) perm |= FW112_PERM_THROTTLE_PRESENT;
+			/* ASSIST_PERMISSION aggregate: all conditions that must be true for assist to flow */
+			if (!hard_cut && !input->safety_cut_non_direction &&
+				latched && supported && mode_output.iq_request > 0) {
+				perm |= FW112_PERM_ASSIST_PERMISSION;
+			}
+			ride_diag_permission_bits = perm;
+		}
+		/*
+		 * C0-PROOF: flags2 — per-tick diagnostic observations. Base flags computed here
+		 * (FORCE_ZERO, HARD_CUT_SET, RECOVERY_WAIT). FINAL_ZERO and PU_CLAMPED are computed
+		 * in main.c because they require iq_setpoint and iq_before_pu which ride_control
+		 * does not carry. ELAPSED_SAT and HOLD_SAT are computed in append_record().
+		 */
+		{
+			uint8_t f2 = 0U;
+			if (force_zero_reference) f2 |= FW112_FLAG2_FORCE_ZERO;
+			if (hard_cut || input->safety_cut_non_direction) f2 |= FW112_FLAG2_HARD_CUT_SET;
+			if (recovery_wait) f2 |= FW112_FLAG2_RECOVERY_WAIT;
+			ride_diag_flags2 = f2;
 		}
 #endif
 	}

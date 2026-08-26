@@ -131,7 +131,7 @@ static int run_until_idle(uint32_t start_tick, int limit)
 {
 	int i;
 	for (i = 0; i < limit; i++) {
-		can_multiframe_step();
+		can_multiframe_step(start_tick + (uint32_t)i);
 		can_tx_queue_service(start_tick + (uint32_t)i);
 		if (!can_multiframe_busy() && can_tx_queue_depth() == 0U) break;
 	}
@@ -234,14 +234,14 @@ int main(void)
 		uint32_t tick = 0U;
 		int i;
 		for (i = 0; i < 400 && !txlog_has(end_efid) && can_multiframe_busy(); i++) {
-			can_multiframe_step();
+			can_multiframe_step(tick);
 			can_tx_queue_service(tick++);
 		}
 		CHECK(txlog_has(end_efid), "E3: END transmitted (held PENDING)");
 		CHECK(can_reply_effects_poll() == CANFX_EFFECT_NONE,
 			"E3: NONE while the last fragment is PENDING - completion is not assumed from the arm");
 		for (int j = 0; j < 20; j++) {
-			can_multiframe_step();
+			can_multiframe_step(tick);
 			can_tx_queue_service(tick++);
 		}
 		CHECK(can_reply_effects_poll() == CANFX_EFFECT_NONE,

@@ -46,12 +46,19 @@
  * themselves.
  *
  * QUEUE. Ring of FW112_DIAG_RECORDS per session, keyed by session id like every other dump
- * source (queue_count_session/peek_session/release_session). When full, a new record is refused
- * (rejected_total++, surfaced as DIAG_ERR_CAPTURES_FULL + DIAG_TRAILER_F_FW112_REJECTED by the
- * dump layer) rather than overwriting an older record - a dump must never lose a session's
- * history, exactly like rearm_delay_diag. event_id is a monotonic per-record id (wraps at 65536;
- * a key, never a count), so a reader detects each event and can join it to a FW-111 rearm record
- * via the (session_id, event_id) pair.
+ * source (queue_count_session/peek_session/release_session). event_id is a monotonic per-record
+ * id (wraps at 65536; a key, never a count), so a reader detects each event and can join it to
+ * a FW-111 rearm record via the (session_id, event_id) pair.
+ *
+ * RETENTION (FW-112-STABILITY). A recovery saga runs from a PERMISSION_REVOKED (its start) to
+ * RECOVERY_EXIT (its terminal), or is closed by the next PERMISSION_REVOKED arriving before it
+ * terminated. When the ring is full, the OLDEST COMPLETED saga is evicted and the new event is
+ * appended - the in-flight saga is never evicted - so late-ride recovery evidence survives the
+ * 24-record ceiling. An event is refused (rejected_total++, surfaced as DIAG_ERR_CAPTURES_FULL
+ * + DIAG_TRAILER_F_FW112_REJECTED by the dump layer) only when no completed saga exists to
+ * evict (a single open saga fills the whole ring and the incoming event is not the REVOKED that
+ * closes it) - a refusal is honest saturation, never silent loss. The evictions are counted by
+ * fw112_diag_queue_evicted_sagas()/evicted_records() (internal only, never on the wire).
  *
  * The module is driven entirely through fw112_diag_input_t - the session/recovery/direction
  * states arrive as plain bytes, the torque/Iq chain as plain scalars, and nothing is linked
@@ -61,8 +68,23 @@
 /* One byte on the wire of every record header frame.
  * FW-112.2: 1 -> 2 - the flags byte gained FW112_FLAG_WHEEL_VALID / FW112_FLAG_ROLLING_COAST
  * (the reason a PERMISSION_REVOKED record suspended the session: a direction hold vs a
- * rolling coast), and the record already distinguishes FAST_REARM after either. */
-#define FW112_DIAG_SCHEMA_VERSION 2U
+ * rolling coast), and the record already distinguishes FAST_REARM after either.
+ * FW-112-STABILITY: 2 -> 3 - the two spare header bytes (data[6..7]) and the two spare bytes at
+ * frag4 data[4..5] (both always zero before) now carry the recovery-stability evidence:
+ *   RECOVERY_COLLAPSE  header[6..7] = the stability streak immediately before the collapse
+ *                       (recovery_stable_ticks_at_edge); frag4[4..5] = assist_delta_filtered_native
+ *                       on the collapse tick (the filtered assist signal that drives the streak).
+ *   RECOVERY_EXIT      header[6..7] = the streak as it stood at close (== the required dwell of
+ *                       TORQUE_ROLLING_REARM_STABLE_TICKS for a COMPLETED recovery, less for a
+ *                       cancel/reset); frag4[4..5] = the episode's TRACK_FAST->WAIT_FRESH_LOAD
+ *                       collapse count.
+ *   every other event  both fields stay zero.
+ * Schema 1-2 logs leave both fields zero and decode exactly as before.
+ * C0-PROOF (schema 4): crank_forward_steps/required_steps/start_steps dropped (available from
+ * fw112_ab per-episode records). New fields: packed_state, permission_bits, flags2,
+ * hold_ticks_sat, motor_voltage_utilization, iq_before_pu. elapsed_ticks u32 -> u16 saturated.
+ * Recovery evidence stays in header spare bytes (schema 3 wire semantics unchanged). */
+#define FW112_DIAG_SCHEMA_VERSION 4U
 
 /* Ring depth - see the RAM budget note in inc/diag_budget.h.
  * FW-112-DIAG.1: 8 -> 24. The first hardware capture filled all 8 slots exactly at
@@ -118,29 +140,63 @@ typedef enum {
  *   rolling coast:     FW112_FLAG_ROLLING_COAST set (no direction reason - the direction
  *                      automaton stayed FORWARD_SAFE through the coast) */
 
-/* One queued event record - exactly 32 B, see the sizeof assert in fw112_diag.c. */
+/* C0-PROOF (schema 4): permission_bits — diagnostic mirror of the permission gate chain.
+ * NOT a new gate; this is a measurement-only observation of what ride_control.c already
+ * decided. Bit 7 is the aggregate ASSIST_PERMISSION: all conditions met for assist to flow. */
+#define FW112_PERM_GATE_OPEN        0x01U  /* ride latch armed (session ACTIVE + direction + steps + load) */
+#define FW112_PERM_MODE_SUPPORTED   0x02U  /* assist_modes_calculate() returned true */
+#define FW112_PERM_IQ_REQUEST_POS   0x04U  /* mode_output.iq_request > 0 (before any limiter) */
+#define FW112_PERM_HARD_CUT         0x08U  /* safety_cut_non_direction || direction_inhibit */
+#define FW112_PERM_START_PHASE      0x10U  /* cranks starting from standstill */
+#define FW112_PERM_SPEED_LIMIT_OK   0x20U  /* speed_x100 < speed_limit_x100 */
+#define FW112_PERM_THROTTLE_PRESENT 0x40U  /* input->throttle_iq > 0 */
+#define FW112_PERM_ASSIST_PERMISSION 0x80U /* aggregate: !hard_cut && gate_open && mode_supported
+                                              && iq_request_pos — all conditions met for assist */
+
+/* C0-PROOF (schema 4): flags2 — additional diagnostic observations per tick. */
+#define FW112_FLAG2_ELAPSED_SAT    0x01U  /* elapsed_ticks saturated at 0xFFFF */
+#define FW112_FLAG2_HOLD_SAT       0x02U  /* assist_hold_ticks saturated at 255 */
+#define FW112_FLAG2_FORCE_ZERO     0x04U  /* force_zero_reference active (ride_control.c) */
+#define FW112_FLAG2_HARD_CUT_SET   0x08U  /* hard_cut was true this tick */
+#define FW112_FLAG2_RECOVERY_WAIT  0x10U  /* recovery_wait was true this tick */
+#define FW112_FLAG2_FINAL_ZERO     0x20U  /* ASSIST_PERMISSION && (cadence>0 || start_phase)
+                                             && iq_setpoint==0 — assist should flow but doesn't */
+#define FW112_FLAG2_PU_CLAMPED     0x40U  /* iq_before_pu > iq_request — P/U ceiling clamped */
+#define FW112_FLAG2_SPARE          0x80U
+
+/* C0-PROOF (schema 4): one queued event record — exactly 32 B (see sizeof assert in fw112_diag.c).
+ * 4 x 8 B CAN data frames. Dropped from schema 3: crank_forward_steps, required_steps,
+ * start_steps (available from fw112_ab per-episode records). Added: packed_state,
+ * permission_bits, flags2, hold_ticks_sat, motor_voltage_utilization, iq_before_pu.
+ * elapsed_ticks narrowed u32 -> u16 with saturation. Recovery evidence stays in header spare
+ * bytes (schema 3 wire semantics unchanged). */
 typedef struct {
+	/* ---- Frag 0: header (wire offset 0..7) ---- */
 	uint16_t event_id;            /* monotonic, wraps at 65536 - a key, never a count */
 	uint8_t  session_id;          /* the diag session this event belongs to */
 	uint8_t  event_type;          /* fw112_diag_event_t */
 	uint8_t  reason_bits;         /* FW112_REASON_* */
 	uint8_t  flags;               /* FW112_FLAG_* */
-	uint8_t  session_state;       /* ride_session_state_t as a byte (0..3) */
-	uint8_t  dir_state;           /* pas_direction_state_t as a byte (0..2) */
-	uint8_t  recovery_state;      /* torque_recovery_state_t as a byte (0..2) */
-	uint8_t  fwd_run;             /* consecutive-forward-step counter */
-	uint8_t  crank_forward_steps; /* rider_input.c crank_forward_steps */
-	uint8_t  required_steps;      /* the start gate's required_steps as it stood this tick */
-	uint8_t  start_steps;         /* tuning_config_start_steps() this tick */
+	uint8_t  recovery_ev_lo;      /* schema 3 recovery evidence (spare header bytes) */
+	uint8_t  recovery_ev_hi;
+	/* ---- Frag 1: state (wire offset 8..15) ---- */
+	uint8_t  packed_state;        /* [recovery:2][dir:2][session:2][spare:2] */
+	uint8_t  permission_bits;     /* FW112_PERM_* — diagnostic mirror of gate chain */
 	uint8_t  cadence_rpm;
-	uint16_t assist_hold_ticks;   /* the ride-latch hold grace counter */
+	uint8_t  fwd_run;             /* consecutive-forward-step counter */
+	uint8_t  hold_ticks_sat;      /* assist_hold_ticks saturated to u8 (min(val, 255)) */
+	uint8_t  flags2;              /* FW112_FLAG2_* — additional per-tick observations */
+	uint16_t elapsed_ticks;       /* control ticks since prev event, saturated at 0xFFFF */
+	/* ---- Frag 2: torque + PU chain (wire offset 16..23) ---- */
 	uint16_t load_centikg;        /* raw pedal load, same scale as the start gate */
 	uint16_t load_threshold_centikg; /* the start gate's engage threshold this tick */
-	int16_t  iq_request;          /* what assist_modes asked for, before limits */
+	uint16_t motor_voltage_utilization; /* C0-PROOF: u_abs clamped [0, 2048] */
+	int16_t  iq_before_pu;        /* C0-PROOF: phase_iq_request BEFORE P/U ceiling */
+	/* ---- Frag 3: Iq chain (wire offset 24..31) ---- */
+	int16_t  iq_request;          /* what assist_modes asked for, AFTER P/U ceiling */
 	int16_t  iq_pre_ramp;         /* the final pre-ramp target (after limits, before ramp) */
 	int16_t  iq_setpoint;         /* what reached the motor command */
 	int16_t  iq_actual;           /* measured motor current */
-	uint32_t elapsed_ticks;       /* control ticks since the previous recorded event */
 } fw112_diag_record_t;
 
 typedef struct {
@@ -148,9 +204,6 @@ typedef struct {
 	uint8_t  recovery_state;
 	uint8_t  dir_state;
 	uint8_t  fwd_run;
-	uint8_t  crank_forward_steps;
-	uint8_t  required_steps;
-	uint8_t  start_steps;
 	uint8_t  cadence_rpm;
 	bool     latched;
 	bool     pwm_on;
@@ -164,11 +217,27 @@ typedef struct {
 	uint16_t assist_hold_ticks;
 	uint16_t load_centikg;
 	uint16_t load_threshold_centikg;
+	/* FW-112-STABILITY: the recovery stability streak and the filtered assist signal that drives
+	 * it - added to the input (and per-slot edge metadata) so a RECOVERY_COLLAPSE/EXIT record can
+	 * carry the pre-transition evidence (see the schema note). Measurement only; the recorder
+	 * never feeds a decision. */
+	uint16_t recovery_stable_ticks;          /* live streak this tick (torque_input) */
+	uint16_t recovery_stable_ticks_at_edge;  /* streak as it stood on the automaton's exit tick */
+	uint16_t assist_delta_filtered_native;   /* the 35 ms filtered assist signal this tick */
 	int16_t  iq_request;
 	int16_t  iq_pre_ramp;
 	int16_t  iq_setpoint;
 	int16_t  iq_actual;
 	uint8_t  reason_bits;
+	/* C0-PROOF (schema 4): new diagnostic inputs. permission_bits is a diagnostic mirror of the
+	 * gate chain decision (NOT a new gate). flags2 carries per-tick observations computed by
+	 * ride_control.c. iq_before_pu is the phase_iq_request BEFORE the P/U ceiling clamp
+	 * (measurement-only, from assist_modes.c finish_power_request). motor_voltage_utilization is
+	 * the u_abs clamped [0, 2048] from the FOC loop (main.c). All measurement-only. */
+	uint8_t  permission_bits;               /* FW112_PERM_* — diagnostic mirror */
+	uint8_t  flags2;                        /* FW112_FLAG2_* — per-tick observations */
+	int16_t  iq_before_pu;                  /* phase_iq before P/U ceiling (from assist_mode_output) */
+	uint16_t motor_voltage_utilization;     /* u_abs clamped [0, 2048] */
 } fw112_diag_input_t;
 
 void fw112_diag_init(void);
@@ -183,5 +252,21 @@ bool fw112_diag_queue_peek_session(uint8_t session_id, fw112_diag_record_t *out)
 void fw112_diag_queue_release_session(uint8_t session_id);
 uint32_t fw112_diag_queue_enqueued(void);
 uint32_t fw112_diag_queue_rejected(void);
+/* Retention counters (FW-112-STABILITY, internal only - never on the wire): how many completed
+ * sagas and how many records the full-ring eviction has removed. Read by the host tests to
+ * prove the eviction engaged and never lost an in-flight saga. */
+uint32_t fw112_diag_queue_evicted_sagas(void);
+uint32_t fw112_diag_queue_evicted_records(void);
+
+/* FW-112-STABILITY: the edge metadata stored beside a queued COLLAPSE/EXIT record (schema 3) -
+ * edge_stable_ticks and event_value as documented above. Returns false if the session has no
+ * queued record. */
+bool fw112_diag_queue_peek_meta(uint8_t session_id, uint16_t *edge_stable_ticks, uint16_t *event_value);
+/* FW-112-STABILITY: the current recovery episode's tracked state, as maintained by the module
+ * (reset on RECOVERY_ENTER, closed on RECOVERY_EXIT). Read by the host tests to cross-check the
+ * wire. */
+uint16_t fw112_diag_episode_stable_current(void);
+uint16_t fw112_diag_episode_stable_max(void);
+uint16_t fw112_diag_episode_collapse_count(void);
 
 #endif /* FW112_DIAG_H_ */

@@ -44,6 +44,7 @@ typedef struct {
 	 */
 	bool safety_cut_non_direction;
 	int32_t throttle_iq;   // FW-030: throttle current (mapped from ADC in main.c); floor on ride-core output
+	bool start_phase;     // FW-087: pedalling begun but no cadence measured yet
 } ride_control_input_t;
 
 /*
@@ -72,6 +73,17 @@ uint8_t ride_control_get_debug_flags(void);
  */
 #if CAN_DIAGNOSTICS_ENABLE
 uint8_t ride_control_get_diag_reason(void);
+
+/* C0-PROOF: diagnostic mirror of the permission gate chain. NOT a new gate; this is a
+ * measurement-only observation of what ride_control.c already decided. Returns the
+ * FW112_PERM_* bitfield from inc/fw112_diag.h. Bit 7 is the aggregate ASSIST_PERMISSION:
+ * all conditions met for assist to flow. */
+uint8_t ride_control_get_permission_bits(void);
+
+/* C0-PROOF: per-tick diagnostic observations. Returns FW112_FLAG2_* from inc/fw112_diag.h.
+ * Base flags: FORCE_ZERO, HARD_CUT_SET, RECOVERY_WAIT. FINAL_ZERO and PU_CLAMPED are added
+ * by main.c because they require iq_setpoint/iq_before_pu which ride_control does not carry. */
+uint8_t ride_control_get_flags2(void);
 #endif
 
 /*

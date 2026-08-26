@@ -18,6 +18,7 @@ typedef enum {
 	CANMF_PREPARE_CURRENT,      /* build the current fragment's bytes (memory only) */
 	CANMF_WAIT_QUEUE_SPACE,     /* wait for a free can_tx_queue slot, then enqueue_tracked */
 	CANMF_WAIT_FRAGMENT_RESULT, /* poll the current fragment's token - the ONLY cursor mover */
+	CANMF_WAIT_HMI_ACK,         /* FW-114: target=3 START done, waiting for the display's op=2 ACK */
 	CANMF_COMPLETE,             /* last fragment confirmed DONE - counting, then IDLE */
 	CANMF_ABORTED               /* a fragment resolved FAILED/UNKNOWN - counting, then IDLE */
 } canmf_state_t;
@@ -47,6 +48,13 @@ static can_tx_token_t mf_frag_token;   /* token of the ONE fragment currently en
 static uint32_t mf_cur_efid;           /* current fragment, built once, offered until accepted */
 static uint8_t  mf_cur_dlen;
 static uint8_t  mf_cur[8];
+
+/* FW-114: HMI flow-control latch. mf_ack_seen is set by can_multiframe_hmi_ack() (RX path) when
+ * the display's op=2 ACK of the START arrives, and consumed exactly once - either at the
+ * START->DATA transition (early ACK: skip the wait) or when the wait releases. mf_ack_wait_tick
+ * anchors the CANMF_WAIT_HMI_ACK timeout in the caller's now_tick domain. */
+static bool     mf_ack_seen;
+static uint32_t mf_ack_wait_tick;
 
 #ifdef CANMF_REFUSAL_HOOK
 /* Test-only seam, compiled out of the firmware entirely (only tests/host defines
@@ -178,6 +186,7 @@ static bool start_common(uint16_t command, uint8_t target, uint8_t source,
 	if (trailer) mf_trailer = *trailer;
 	mf_kind = CANMF_FRAG_START;
 	mf_frag_token = CANQ_TOKEN_INVALID;
+	mf_ack_seen = false;   /* FW-114: a stale ACK can never leak into a new transfer */
 	state = CANMF_PREPARE_CURRENT;
 	active = true;
 	started_ctr++;
@@ -222,12 +231,25 @@ uint32_t can_multiframe_aborted_count(void) { return aborted_ctr; }
 uint32_t can_multiframe_rejected_busy_count(void) { return rejected_busy_ctr; }
 uint32_t can_multiframe_failed_fragment_count(void) { return failed_fragment_ctr; }
 
+void can_multiframe_hmi_ack(uint16_t command)
+{
+	/* FW-114: only latch an ACK that belongs to THIS transfer, RIGHT NOW. The transfer must be
+	 * active, destined for the display (target=3), match the ACKed command, and still be at the
+	 * START stage (either waiting in CANMF_WAIT_HMI_ACK, or START still in flight). Any other
+	 * op=2 frame - a config write's own NORMAL_ACK, an ACK for an already-completed reply, an
+	 * ACK for a different command - is ignored here. */
+	if (active && mf_target == 3U && mf_command == command && mf_kind == CANMF_FRAG_START) {
+		mf_ack_seen = true;
+	}
+}
+
 void can_multiframe_init(void)
 {
 	active = false;
 	state = CANMF_IDLE;
 	mf_trailer_armed = false;
 	mf_frag_token = CANQ_TOKEN_INVALID;
+	mf_ack_seen = false;   /* FW-114 */
 	xfer_current_id = CANMF_ID_NONE;
 	started_ctr = 0U;
 	completed_ctr = 0U;
@@ -239,7 +261,7 @@ void can_multiframe_init(void)
 	xfer_hist_filled = 0U;
 }
 
-void can_multiframe_step(void)
+void can_multiframe_step(uint32_t now_tick)
 {
 	switch (state) {
 	case CANMF_PREPARE_CURRENT:
@@ -284,6 +306,19 @@ void can_multiframe_step(void)
 		case CANQ_TOKEN_PENDING:
 			return;   /* still queued or in flight - do NOT build or enqueue the next fragment */
 		case CANQ_TOKEN_DONE:
+			/* FW-114: a target=3 (HMI) reply is flow-controlled - the display ACKs the START
+			 * (op=2, same command) before it accepts DATA. Gate the START->DATA transition on
+			 * that ACK, bounded by CANMF_ACK_WAIT_TIMEOUT_TICKS. If the ACK already arrived
+			 * while START was in flight, consume it and proceed immediately. */
+			if (mf_kind == CANMF_FRAG_START && mf_target == 3U) {
+				if (mf_ack_seen) {
+					mf_ack_seen = false;
+				} else {
+					mf_ack_wait_tick = now_tick;
+					state = CANMF_WAIT_HMI_ACK;
+					return;
+				}
+			}
 			if (!advance_cursor()) {
 				/* This was the transfer's last fragment - confirmed on the wire. */
 				record_xfer_resolution(CANMF_XFER_DONE);
@@ -301,6 +336,21 @@ void can_multiframe_step(void)
 			record_xfer_resolution(CANMF_XFER_ABORTED);
 			state = CANMF_ABORTED;
 			return;
+		}
+		return;
+
+	case CANMF_WAIT_HMI_ACK:
+		/* FW-114: nothing is in flight here - the START was already confirmed DONE and the next
+		 * fragment (DATA or END) is held until the display's ACK or the timeout. At most one
+		 * automaton transition per call, like every other state. */
+		if (mf_ack_seen || (now_tick - mf_ack_wait_tick) >= CANMF_ACK_WAIT_TIMEOUT_TICKS) {
+			mf_ack_seen = false;
+			if (!advance_cursor()) {
+				record_xfer_resolution(CANMF_XFER_DONE);
+				state = CANMF_COMPLETE;
+			} else {
+				state = CANMF_PREPARE_CURRENT;
+			}
 		}
 		return;
 

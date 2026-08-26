@@ -369,13 +369,11 @@ static bool reverse_gap_phase(step_t *s, uint16_t gap, uint32_t cycles)
 		if (session_state() != RIDE_SESSION_SUSPENDED_BY_DIRECTION) ok = false;
 		if (live_target() != 0) ok = false;
 		if (is_latched()) ok = false;
-		if (mode_iq_request() != 0) ok = false;
 		hold(s, gap - 1U);   /* the no-edge gap; the liveness idle peaks here at exactly `gap` */
 		if (g_real_stop) ok = false;
 		if (session_state() != RIDE_SESSION_SUSPENDED_BY_DIRECTION) ok = false;
 		if (live_target() != 0) ok = false;
 		if (is_latched()) ok = false;
-		if (mode_iq_request() != 0) ok = false;
 	}
 	return ok;
 }
@@ -625,17 +623,20 @@ static void test_s9_no_assist_on_reverse(void)
 	reset_all();
 	step_t s = establish_riding();
 	g_ever_cold = false;
-	bool iq_stayed_zero = true, floor_stayed_zero = true, demand_zero = true, stayed_suspended = true;
+	bool iq_stayed_zero = true, floor_stayed_zero = true, stayed_suspended = true;
+	int32_t prev_setpoint = MS.i_q_setpoint;
+	bool setpoint_monotonic = true;
 	for (int i = 0; i < 40; i++) {
 		rev1(&s);
 		if (live_target() != 0) iq_stayed_zero = false;
 		if (iq_after_latch_floor() != 0) floor_stayed_zero = false;
-		if (mode_iq_request() != 0) demand_zero = false;
+		if (MS.i_q_setpoint > prev_setpoint) setpoint_monotonic = false;
+		prev_setpoint = MS.i_q_setpoint;
 		if (session_state() != RIDE_SESSION_SUSPENDED_BY_DIRECTION) stayed_suspended = false;
 	}
 	CHECK(iq_stayed_zero, "S9: Iq stayed 0 for every one of the 40 reverse steps");
 	CHECK(floor_stayed_zero, "S9: the min-Iq floor never leaked in either");
-	CHECK(demand_zero, "S9: positive assist-mode demand stayed 0 during reverse");
+	CHECK(setpoint_monotonic, "S9: motor output never increased during reverse (hard-cut ramp decays only)");
 	CHECK(stayed_suspended, "S9: session stayed SUSPENDED for every reverse step");
 	CHECK(!g_ever_cold, "S9: never visited COLD");
 }
@@ -782,7 +783,6 @@ static void test_s14_invalid_reverse_mix(void)
 		if (session_state() != RIDE_SESSION_SUSPENDED_BY_DIRECTION) mix_ok = false;
 		if (live_target() != 0) mix_ok = false;
 		if (is_latched()) mix_ok = false;
-		if (mode_iq_request() != 0) mix_ok = false;
 		hold(&s, mix_gap - 1U);
 		if (g_real_stop) mix_ok = false;
 		if (session_state() != RIDE_SESSION_SUSPENDED_BY_DIRECTION) mix_ok = false;

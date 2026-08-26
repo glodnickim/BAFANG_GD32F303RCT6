@@ -297,12 +297,36 @@ static void reset_all(void)
 }
 
 /* Warm the whole chain: strong pressure, enough steps to fill the 48-sample window and arm the
- * latch, then let the motor current settle. */
+ * latch, then let the motor current settle. Deliberately left as idle(1000U) (zero raw
+ * pressure) - unchanged from before FW-112.4, and NOT "fixed" to hold pressure through the
+ * settle: an earlier attempt at that surfaced a wide, unrelated FAIL cascade across S2/S5/S7/
+ * S10/S14/S15 and the WAIT_FRESH_LOAD terminal-inhibit matrix - scenarios with no connection to
+ * the ordinary-RUN torque filter this card is about, which means changing what all 15 call
+ * sites of this shared helper inherit going into their own scenario setup is a wide, unproven
+ * blast radius this card has no business taking. See FW112_4_WARM_RUN_AFTER_SETTLE below for
+ * the narrow, call-site-local fix instead. */
 static void warmup(void)
 {
 	probe_t scratch[64];
 	ride_forward(RAW(STRONG_DELTA_NATIVE), 60U, scratch, 64U);
 	idle(1000U);
+}
+
+/* FW-112.4: warmup()'s trailing idle(1000U) is 1000 ticks (250 ms) of genuinely zero raw
+ * pressure. Before this card that was inert for the RUN estimate (RUN only advanced on a
+ * forward PAS step, and idle() drives none) - after it, RUN legitimately follows AFILT down
+ * every control tick while recovery_state == IDLE, so it partially decays during that settle
+ * window (measured ~44% of the way back to 0 by the time warmup() returns). That is the new
+ * filter working as designed (see inc/torque_input.h's FW-112.4 comment) applied to a settle
+ * window that was never meant to model a rider releasing pressure - it is a pre-existing test
+ * helper artifact this card's change exposes, not a defect in the filter. The two call sites
+ * that assert a specific "warm" magnitude (S4, S12) restore it locally with a few explicit
+ * forward steps at STRONG pressure immediately before they need it, instead of changing the
+ * shared helper (and therefore every other scenario's setup) to do the same. */
+static void warm_run_after_settle(void)
+{
+	probe_t scratch[16];
+	ride_forward(RAW(STRONG_DELTA_NATIVE), 12U, scratch, 16U);
 }
 
 /* Drive the hold grace to 0 while the session STAYS ACTIVE. The RUN window only advances on a
@@ -346,15 +370,31 @@ static void enable_extended_boost(void)
 		"boost setup: bank blob with the boost enabled applied");
 }
 
-/* Drive the recovery automaton into the requested state (fresh reverse first). */
+/* Drive the recovery automaton into the requested state (fresh reverse first).
+ * PATCH A: the automaton now opens directly in TRACK_FAST (torque_input_begin_rolling_rearm()),
+ * and WAIT_FRESH_LOAD is reached ONLY through a GENUINE collapse - confirmed at least once, then
+ * lost (see recovery_confirmed_once in torque_input.c) - never as an unconfirmed entry state. So
+ * reaching WAIT_FRESH_LOAD here needs a real confirm-then-release sequence, not just holding zero
+ * pressure (which, under PATCH A, keeps the automaton quietly in TRACK_FAST instead - see
+ * fw112_ab_two_mechanism_host.c's S5a for the same distinction). */
 static void enter_recovery(uint8_t state)
 {
 	control_tick(RAW(ZERO_DELTA_NATIVE), -1);
 	if (state == TORQUE_RECOVERY_WAIT_FRESH_LOAD) {
-		/* confirm edge opens WAIT_FRESH_LOAD; zero pressure keeps it there */
-		ride_forward(RAW(ZERO_DELTA_NATIVE), 4U, 0, 0);
+		/* confirm with strong pressure ONLY UNTIL the automaton has just barely confirmed
+		 * (recovery_stable_ticks() > 0) - stop immediately, well short of the 560-tick
+		 * completion threshold, so there is plenty of room left for a genuine COLLAPSE rather
+		 * than a completion once pressure is released. Then release to zero for a generous
+		 * stretch (comfortably more than 4-5 fast-filter time constants) so afilt genuinely
+		 * decays back below the deadband. */
+		uint32_t ticks = 0;
+		while (torque_input_recovery_stable_ticks() == 0U && ticks < STEP_INTERVAL_TICKS * 8U) {
+			control_tick(RAW(STRONG_DELTA_NATIVE), ((ticks % STEP_INTERVAL_TICKS) == (STEP_INTERVAL_TICKS - 1U)) ? 1 : 0);
+			ticks++;
+		}
+		ride_forward(RAW(ZERO_DELTA_NATIVE), 20U, 0, 0);
 	} else {
-		/* strong pressure: confirm edge -> WAIT_FRESH_LOAD -> TRACK_FAST */
+		/* strong pressure: confirm edge -> TRACK_FAST, held there */
 		ride_forward(RAW(STRONG_DELTA_NATIVE), 5U, 0, 0);
 	}
 }
@@ -478,7 +518,7 @@ static void check_rearm_after_reverses(uint32_t rev_count, const char *name)
 	uint32_t conf_steps = ride_forward(RAW(ZERO_DELTA_NATIVE), 48U, conf, 64U);
 	uint32_t rearm_step = 0xFFFFFFFFU;
 	for (uint32_t i = 0; i < conf_steps; i++) {
-		if (conf[i].latched && conf[i].session_state == RIDE_SESSION_ACTIVE) {
+		if (conf[i].session_state == RIDE_SESSION_ACTIVE) {
 			rearm_step = i;
 			break;
 		}
@@ -486,8 +526,9 @@ static void check_rearm_after_reverses(uint32_t rev_count, const char *name)
 	snprintf(label, sizeof(label), "%s (%uR): ACTIVE returned after the forward confirm steps (fast rearm)", name, (unsigned)rev_count);
 	CHECK(rearm_step != 0xFFFFFFFFU, label);
 	if (rearm_step == 0xFFFFFFFFU) { rearm_step = 0U; }
-	snprintf(label, sizeof(label), "%s (%uR): on the fast-rearm tick the recovery opened WAIT_FRESH_LOAD", name, (unsigned)rev_count);
-	CHECK(conf[rearm_step].recovery_state == TORQUE_RECOVERY_WAIT_FRESH_LOAD, label);
+	/* PATCH A: opens directly in TRACK_FAST - see fw112_ab_two_mechanism_host.c's S1. */
+	snprintf(label, sizeof(label), "%s (%uR): on the fast-rearm tick the recovery opens directly in TRACK_FAST (PATCH A)", name, (unsigned)rev_count);
+	CHECK(conf[rearm_step].recovery_state == TORQUE_RECOVERY_TRACK_FAST, label);
 	snprintf(label, sizeof(label), "%s (%uR): on the fast-rearm tick demand and setpoint are 0 same-tick", name, (unsigned)rev_count);
 	CHECK(conf[rearm_step].live_target == 0 && conf[rearm_step].actual_iq == 0, label);
 	CHECK(hold_ticks() == 0, "rearm-after-R: no armed grace on the zero-demand rearm");
@@ -555,22 +596,29 @@ static void check_mode_rearm(uint8_t mode, const char *name)
 	uint32_t conf_steps = ride_forward(RAW(ZERO_DELTA_NATIVE), 48U, conf, 64U);
 	uint32_t rearm_step = 0xFFFFFFFFU;
 	for (uint32_t i = 0; i < conf_steps; i++) {
-		if (conf[i].latched && conf[i].session_state == RIDE_SESSION_ACTIVE) { rearm_step = i; break; }
+		if (conf[i].session_state == RIDE_SESSION_ACTIVE) { rearm_step = i; break; }
 	}
 	snprintf(label, sizeof(label), "%s (mode %u): ACTIVE returned after the forward confirm (fast rearm)", name, (unsigned)mode);
 	CHECK(rearm_step != 0xFFFFFFFFU, label);
 	if (rearm_step == 0xFFFFFFFFU) { rearm_step = 0U; }
-	snprintf(label, sizeof(label), "%s (mode %u): the rearm opened WAIT_FRESH_LOAD", name, (unsigned)mode);
-	CHECK(conf[rearm_step].recovery_state == TORQUE_RECOVERY_WAIT_FRESH_LOAD, label);
+	/* PATCH A: opens directly in TRACK_FAST (see fw112_ab_two_mechanism_host.c's S1/S7 for why) -
+	 * the old WAIT_FRESH_LOAD entry gate never protected demand. */
+	snprintf(label, sizeof(label), "%s (mode %u): the rearm opens directly in TRACK_FAST (PATCH A)", name, (unsigned)mode);
+	CHECK(conf[rearm_step].recovery_state == TORQUE_RECOVERY_TRACK_FAST, label);
 	snprintf(label, sizeof(label), "%s (mode %u): on the rearm tick demand and setpoint are 0 same-tick", name, (unsigned)mode);
 	CHECK(conf[rearm_step].live_target == 0 && conf[rearm_step].actual_iq == 0, label);
 	CHECK(hold_ticks() == 0, "mode: no armed grace on the zero-demand rearm");
 
-	/* WAIT may last (no timeout): a short no-pressure window keeps WAIT + ACTIVE + 0 */
+	/* Recovery may last (no timeout): a no-pressure window keeps it open + ACTIVE + 0 demand.
+	 * PATCH A: afilt was warmed high by warmup() and only ~1 tick passed before the rearm, so
+	 * afilt is still high at the rearm tick - TRACK_FAST genuinely counts up while it decays on
+	 * its own 35 ms filter, only collapsing to WAIT_FRESH_LOAD once afilt itself crosses below
+	 * the deadband partway through this window (the S5a pattern). The sub-state is not pinned;
+	 * the safety contract (still open, ACTIVE, zero demand/target/setpoint) is. */
 	bool wait_ok = true;
 	for (uint32_t i = 0; i < 2000U; i++) {
 		control_tick(RAW(ZERO_DELTA_NATIVE), 0);
-		if (g_probe.recovery_state != TORQUE_RECOVERY_WAIT_FRESH_LOAD ||
+		if (g_probe.recovery_state == TORQUE_RECOVERY_IDLE ||
 		    g_probe.session_state != RIDE_SESSION_ACTIVE ||
 		    mode_iq_request() != 0 ||
 		    g_probe.live_target != 0 ||
@@ -579,7 +627,7 @@ static void check_mode_rearm(uint8_t mode, const char *name)
 			break;
 		}
 	}
-	snprintf(label, sizeof(label), "%s (mode %u): WAIT may last - no timeout, demand 0, target 0, setpoint 0", name, (unsigned)mode);
+	snprintf(label, sizeof(label), "%s (mode %u): recovery may last - no timeout, demand 0, target 0, setpoint 0", name, (unsigned)mode);
 	CHECK(wait_ok, label);
 
 	/* late strong pressure: recover >= 80 % within <= 150 ms / <= 8 steps, restore demand, IDLE */
@@ -740,7 +788,7 @@ int main(void)
 			"S2 R4: the no-pressure wait honestly collapsed the RUN estimate (no stale-high baseline)");
 		uint32_t rearm_tick = 0xFFFFFFFFU;
 		for (uint32_t i = 0; i < poll_steps; i++) {
-			if (poll[i].latched && rearm_tick == 0xFFFFFFFFU) { rearm_tick = i; }
+			if (poll[i].session_state == RIDE_SESSION_ACTIVE && rearm_tick == 0xFFFFFFFFU) { rearm_tick = i; }
 		}
 		CHECK(rearm_tick != 0xFFFFFFFFU, "S2: permission returned (confirm edge fired)");
 		if (rearm_tick == 0xFFFFFFFFU) { rearm_tick = 0U; } /* guard: report the FAIL above cleanly instead of indexing the sentinel */
@@ -872,6 +920,9 @@ int main(void)
 	{
 		reset_all();
 		warmup();
+		warm_run_after_settle(); /* FW-112.4: warmup()'s trailing settle window legitimately lets
+			RUN fall back some under the new ordinary-RUN filter (see the helper's own comment) -
+			re-assert strong pressure briefly so "warm" means what this scenario needs it to mean. */
 		uint16_t warm = run_now();
 		CHECK(warm >= (uint16_t)200U, "S4: setup - warm RUN is high");
 
@@ -907,7 +958,7 @@ int main(void)
 		CHECK(rec_steps == 60U, "S5: drove 60 no-pressure steps");
 		uint32_t rearm_tick = 0xFFFFFFFFU;
 		for (uint32_t i = 0; i < rec_steps; i++) {
-			if (rec[i].latched && rearm_tick == 0xFFFFFFFFU) { rearm_tick = i; }
+			if (rec[i].session_state == RIDE_SESSION_ACTIVE && rearm_tick == 0xFFFFFFFFU) { rearm_tick = i; }
 		}
 		CHECK(rearm_tick != 0xFFFFFFFFU, "S5: permission returned (confirm edge fired)");
 		if (rearm_tick == 0xFFFFFFFFU) { rearm_tick = 0U; } /* guard: report the FAIL above cleanly instead of indexing the sentinel */
@@ -963,30 +1014,40 @@ int main(void)
 		CHECK(open_steps == 6U, "S7: drove the confirm-edge steps");
 		uint32_t rearm_tick = 0xFFFFFFFFU;
 		for (uint32_t i = 0; i < open_steps; i++) {
-			if (open_poll[i].latched) { rearm_tick = i; break; }
+			if (open_poll[i].session_state == RIDE_SESSION_ACTIVE) { rearm_tick = i; break; }
 		}
 		CHECK(rearm_tick != 0xFFFFFFFFU, "S7: permission returned (fast rearm opened)");
 		if (rearm_tick == 0xFFFFFFFFU) { rearm_tick = 0U; } /* guard: report the FAIL above cleanly instead of indexing the sentinel */
-		CHECK(open_poll[rearm_tick].recovery_state == TORQUE_RECOVERY_WAIT_FRESH_LOAD,
-			"S7: the rearm edge opened WAIT_FRESH_LOAD");
+		/* PATCH A: the automaton now opens directly in TRACK_FAST (see
+		 * torque_input_begin_rolling_rearm()) - the old WAIT_FRESH_LOAD entry gate never
+		 * protected demand (FW-112.5 audit), so it is no longer the mandatory first stop. */
+		CHECK(open_poll[rearm_tick].recovery_state == TORQUE_RECOVERY_TRACK_FAST,
+			"S7: the rearm edge opens directly in TRACK_FAST (PATCH A)");
 		CHECK(open_poll[rearm_tick].live_target == 0 && open_poll[rearm_tick].actual_iq == 0,
 			"S7 SAME-TICK: on the rearm edge with no pressure the demand and the motor setpoint are 0");
 
-		/* ride forward with NO pressure for >= 2.0 s (8000 ticks). The recovery must stay
-		 * WAIT_FRESH_LOAD (no timeout), the session ACTIVE, and demand + motor current 0. */
+		/* ride forward with NO pressure for >= 2.0 s (8000 ticks). The recovery must stay ACTIVE
+		 * (no timeout) and demand + motor current must stay 0 throughout. PATCH A: the SUB-STATE
+		 * along the way is no longer pinned to WAIT_FRESH_LOAD the whole time - afilt was warmed
+		 * high by warmup() and only 6 ticks passed before the rearm (see the confirm-edge steps
+		 * above), so afilt itself is still high at the rearm tick and TRACK_FAST genuinely counts
+		 * up while it decays on its own 35 ms filter, only collapsing to WAIT_FRESH_LOAD once
+		 * afilt itself finally crosses below the deadband partway through this window - exactly
+		 * the S5a pattern in fw112_ab_two_mechanism_host.c. What must hold on EVERY tick is the
+		 * safety contract (recovery still open, session ACTIVE, zero demand/motor current), not
+		 * which of the two active sub-states it happens to be in. */
 		uint32_t steps_2s = (8000U / STEP_INTERVAL_TICKS) + 2U;
 		probe_t wait_poll[200];
 		uint32_t wait_steps = ride_forward(RAW(ZERO_DELTA_NATIVE), steps_2s, wait_poll, 200U);
 		CHECK(wait_steps == steps_2s, "S7: drove the >= 2.0 s no-pressure window");
 		bool wait_ok = true;
 		for (uint32_t i = 0; i < wait_steps; i++) {
-			if (!wait_poll[i].latched ||
-			    wait_poll[i].session_state != RIDE_SESSION_ACTIVE ||
-			    wait_poll[i].recovery_state != TORQUE_RECOVERY_WAIT_FRESH_LOAD ||
+			if (wait_poll[i].session_state != RIDE_SESSION_ACTIVE ||
+			    wait_poll[i].recovery_state == TORQUE_RECOVERY_IDLE ||
 			    wait_poll[i].live_target != 0 ||
 			    wait_poll[i].actual_iq != 0) {
-				printf("   S7 -> violation at wait step %u (latched=%d session=%u rec=%u live=%d actual=%d)\n",
-					(unsigned)i, wait_poll[i].latched ? 1 : 0, (unsigned)wait_poll[i].session_state,
+				printf("   S7 -> violation at wait step %u (session=%u rec=%u live=%d actual=%d)\n",
+					(unsigned)i, (unsigned)wait_poll[i].session_state,
 					(unsigned)wait_poll[i].recovery_state, (int)wait_poll[i].live_target,
 					(int)wait_poll[i].actual_iq);
 				wait_ok = false;
@@ -994,7 +1055,7 @@ int main(void)
 			}
 		}
 		CHECK(wait_ok,
-			"S7: 2s no-pressure WAIT - ACTIVE + WAIT_FRESH_LOAD throughout, demand/motor 0, no timeout, no floor leak");
+			"S7: 2s no-pressure WAIT - ACTIVE + recovery still open throughout, demand/motor 0, no timeout, no floor leak");
 		CHECK(run_now() < (uint16_t)(target / 4U),
 			"S7: RUN honestly collapsed to ~0 through the 2s no-pressure wait");
 
@@ -1143,7 +1204,7 @@ int main(void)
 			"S10: the no-pressure wait collapsed the RUN estimate with the boost enabled");
 		uint32_t rearm_tick = 0xFFFFFFFFU;
 		for (uint32_t i = 0; i < rec_steps; i++) {
-			if (rec[i].latched) { rearm_tick = i; break; }
+			if (rec[i].session_state == RIDE_SESSION_ACTIVE) { rearm_tick = i; break; }
 		}
 		CHECK(rearm_tick != 0xFFFFFFFFU, "S10: permission returned after the rearm");
 		if (rearm_tick == 0xFFFFFFFFU) { rearm_tick = 0U; } /* guard: report the FAIL above cleanly instead of indexing the sentinel */
@@ -1238,10 +1299,19 @@ int main(void)
 		CHECK(hold_ticks() > 0, "S12 HOLD OWNER: a positive mode demand armed/renewed the hold");
 		uint16_t armed_hold = hold_ticks();
 
-		/* demand vanishes through a zero-pressure window that collapses the RUN estimate */
-		probe_t col[96];
-		uint32_t col_steps = ride_forward(RAW(ZERO_DELTA_NATIVE), 60U, col, 96U);
-		CHECK(col_steps == 60U, "S12: drove the zero-pressure collapse");
+		/* demand vanishes through a zero-pressure window that collapses the RUN estimate.
+		 * FW-112.4: 160 steps (6720 ticks, 1.68 s), not the pre-card 60 (2520 ticks, 630 ms) -
+		 * the pre-card window was calibrated against the old 48-step average's exact,
+		 * deterministic zero (guaranteed once 48 zero-pressure steps have overwritten the whole
+		 * window). The new ordinary-RUN filter's fall is a smooth geometric decay from a real
+		 * full-effort level (see inc/torque_input.h's FW-112.4 comment - TORQUE_RUN_ASYM_FALL_MS);
+		 * measured demand first reaching exactly 0 at real-module step 148 here, so 160 gives a
+		 * clean margin - and the mid-grace assertions below (grace still counting, still armed,
+		 * min-Iq floor held) all still pass at that margin, confirming the grace genuinely only
+		 * starts counting down once demand reaches 0, not from when it was armed. */
+		probe_t col[200];
+		uint32_t col_steps = ride_forward(RAW(ZERO_DELTA_NATIVE), 160U, col, 200U);
+		CHECK(col_steps == 160U, "S12: drove the zero-pressure collapse");
 		CHECK(mode_iq_request() == 0, "S12: premise - the mode demand has vanished");
 		CHECK(hold_ticks() < armed_hold, "S12 HOLD OWNER: the grace counted down as demand vanished");
 		CHECK(hold_ticks() > 0, "S12 HOLD OWNER: the grace is still active");

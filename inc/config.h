@@ -283,10 +283,139 @@
 #define SOFT_CUTOFF_ENABLE  1
 // liczba cykli petli sterowania (~4 kHz) na wygaszenie do neutral; 40 ~= 10 ms
 #define SOFT_CUTOFF_TICKS   40
-// Test diagnostyczny kliku: bazowo 4000 ~= 1 s, 12000 ~= 3 s.
-// Jesli klik przesunie sie o 2 s, jego zrodlem jest koncowe wylaczenie mostka.
-#define POWER_STAGE_STOP_TICKS 12000
+// --- Opoznienie koncowego wylaczenia mostka po zatrzymaniu roweru ---
+// uint16_half_rotation_counter tyka w petli sterowania (~4 kHz), wiec 4000 ~= 1 s. 4000 to
+// WARTOSC PRODUKCYJNA i jedyna, ktora wolno wozic na rowerze.
+//
+// FW117_BRIDGE_TIMING_TEST (domyslnie 0) wydluza to opoznienie do 12000 ~= 3 s. To WYLACZNIE
+// test przesuniecia momentu kliku: jesli klik przesunie sie o te same ~2 s, jego zrodlem jest
+// koncowe wylaczenie mostka, a nie zanik wspomagania. Ustawienie testowe NIE jest przeznaczone
+// do normalnej jazdy - trzyma stopien mocy zalaczony 3 s po zatrzymaniu, wiec zostawia mostek
+// pod napieciem duzo dluzej niz potrzeba i zmienia zachowanie na postoju. Wlacza sie je
+// swiadomie, przez -DFW117_BRIDGE_TIMING_TEST=1 na linii kompilacji - nigdy domyslnie.
+#ifndef FW117_BRIDGE_TIMING_TEST
+#define FW117_BRIDGE_TIMING_TEST 0
+#endif
+#if (FW117_BRIDGE_TIMING_TEST != 0) && (FW117_BRIDGE_TIMING_TEST != 1)
+#error "FW117_BRIDGE_TIMING_TEST must be 0 or 1"
+#endif
+#if FW117_BRIDGE_TIMING_TEST
+#define POWER_STAGE_STOP_TICKS 12000  // FW-117 bench test only - NOT for riding
+#else
+#define POWER_STAGE_STOP_TICKS 4000   // production: ~1 s
+#endif
+// FW-117.1: zakaz laczenia dwoch oddzielnych eksperymentow FW-117 w jednym obrazie. Obraz
+// diagnostyczny (CAN_DIAGNOSTICS_ENABLE=1) zbiera lifecycle trace mostka wokol jednej,
+// wybranej krawedzi (FW117_TRACE_TRIGGER_EVENT w inc/fw117_trace.h); FW117_BRIDGE_TIMING_TEST
+// przesuwa moment koncowego wylaczenia mostka o ~2 s. Polaczone w jednym flashu daja log, w
+// ktorym nie da sie odroznic, czy przesuniecie kliku pochodzi z timeoutu, czy trace po prostu
+// zlapal inny moment na dluzszej osi czasu - dokladnie ten sam problem mieszania eksperymentow,
+// ktory karta FW-117.1 ma usunac. Kazdy eksperyment jeździ osobno.
+#if (CAN_DIAGNOSTICS_ENABLE != 0) && (FW117_BRIDGE_TIMING_TEST != 0)
+#error "FW-117.1: CAN_DIAGNOSTICS_ENABLE=1 and FW117_BRIDGE_TIMING_TEST=1 together are forbidden - the bridge trace image and the 12000-tick timing test must not be combined in one build."
+#endif
+// FW-117: bridge start is gated solely by positive Iq + current calibration safety.
+// The old BRIDGE_START_IQ_DEADZONE (=10) created a deadzone where preload (PRELOAD_IQ_CAP=10)
+// could never start the bridge. Removed: ride_control owns the Iq decision, the power stage
+// responds to any positive demand.
 
+// FW-126 FOC START TRACE reuses the small FW-117 recorder infrastructure, but has its own
+// deliberately bounded 250 Hz / 280 ms capture and is compiled only in a diagnostic image.
+// NORMAL stays at 0 with no trace RAM or CAN traffic.
+#ifndef FW117_TRACE_ENABLE
+#define FW117_TRACE_ENABLE CAN_DIAGNOSTICS_ENABLE
+#endif
+#if (FW117_TRACE_ENABLE != 0) && (FW117_TRACE_ENABLE != 1)
+#error "FW117_TRACE_ENABLE must be 0 or 1"
+#endif
+
+// Rolling no-assist diagnostic: enabled when diagnostics is on.
+#ifndef ROLLING_NO_ASSIST_DIAG_ENABLE
+#if CAN_DIAGNOSTICS_ENABLE
+#define ROLLING_NO_ASSIST_DIAG_ENABLE 1
+#else
+#define ROLLING_NO_ASSIST_DIAG_ENABLE 0
+#endif
+#endif
+
+// --- STEP 2A: START NEUTRAL DWELL lifecycle ---
+// After MOE ON, hold neutral PWM for this many real PWM/ISR cycles before releasing FOC.
+// 4 cycles @16kHz PWM = 250 us. Conservative first value; adjust after bench measurement.
+#define START_NEUTRAL_DWELL_CYCLES  4
+// Failsafe: if dwell does not complete within this many ISR cycles, force bridge off.
+#define START_DWELL_TIMEOUT_CYCLES  100
+
+// --- FW-118: Independent Phase Current Zero Calibration ---
+// Runtime calibration of per-phase ADC offsets (PA2=A, PA3=B, PA5=C).
+// Replaces hardcoded HW offsets with calibrated SW offsets so Clarke/Park see ~0 at zero current.
+// PA0 battery current is on a separate path (bat_current_offset) — NOT affected.
+//
+// ADC mapping (confirmed):
+//   Phase A (PA2) → ADC2 ins ch0, HW offset 2020
+//   Phase B (PA3) → ADC1 ins ch0, HW offset 2028
+//   Phase C (PA5) → ADC0 ins ch0, HW offset 2012
+//   Battery (PA0) → ADC0 regular ch0, separate calibration (bat_current_offset)
+//
+// FW-125: the calibration source is adc_inserted_data_read() on each phase's OWN ADC instance —
+// the exact same call the FOC ISR makes at runtime (see i16_ph1/2/3_current in
+// ADC0_1_IRQHandler). Earlier (FW-118/119) it read the ADC0 REGULAR scan instead
+// (adc_value[7]/[8]/[4]), which is a different silicon ADC for phases A and B (ADC2/ADC1 vs
+// ADC0) with its own independent zero-current offset — measuring one and applying the result to
+// the other is a domain mismatch, confirmed as the root cause of FW-122 CASE C (sector-dependent
+// Iq error at low Iq). See documentation/FW-125_PHASE_CURRENT_SAME_PATH_CALIBRATION_PL.md.
+//
+// Because adc_inserted_data_read() already returns (raw - IOFFx) courtesy of
+// adc_inserted_channel_offset_config() below, the calibration domain is now a small SIGNED
+// residual centred on 0, not a ~2048 raw ADC12 code. CURRENT_HW_OFFSET_A/B/C remain in use only
+// to program those IOFFx registers in adc_config() — current_cal.c no longer subtracts them a
+// second time.
+#define CURRENT_HW_OFFSET_A           2020
+#define CURRENT_HW_OFFSET_B           2028
+#define CURRENT_HW_OFFSET_C           2012
+
+// Validation range: PROVISIONAL — the IOFFx registers above are a first-pass trim, so a residual
+// of a few tens of LSB at zero current is expected; ±300 LSB is a conservative first bound on top
+// of that, not a measured limit. Needs hardware validation (see FW-125 doc, section 9/29).
+#define CURRENT_CAL_RESIDUAL_MAX_DEVIATION   300    // PROVISIONAL, signed residual domain
+#define CURRENT_CAL_RESIDUAL_MIN             (-CURRENT_CAL_RESIDUAL_MAX_DEVIATION)
+#define CURRENT_CAL_RESIDUAL_MAX             (CURRENT_CAL_RESIDUAL_MAX_DEVIATION)
+// P2P noise limit: PROVISIONAL — same guessed magnitude FW-118 used; record-only in spirit,
+// needs hardware measurement. Domain is now residual LSB, same units as before.
+#define CURRENT_ZERO_MAX_P2P_ADC      200    // PROVISIONAL / NEEDS HARDWARE VALIDATION
+// Calibration sample count. FW-125 samples inside the injected-ADC ISR (PWM rate, 16 kHz per
+// START_NEUTRAL_DWELL_CYCLES' comment above), so 128 samples costs ~8 ms of startup time versus
+// the old 64 — negligible, and doubles the statistical confidence of the mean/P2P.
+#define CURRENT_CAL_SAMPLES           128
+// Calibration loop timeout: main() spins on a plain guard counter waiting for the ISR
+// accumulator to reach CURRENT_CAL_SAMPLES (busy-wait iteration count, not a time unit — same
+// style as the original CURRENT_CAL_TIMEOUT). Sized generously above the worst case so a dead
+// TIMER0/ADC chain cannot hang the start.
+#define CURRENT_CAL_ISR_TIMEOUT       2000000
+
+// --- FW-119: calibration safety policy (retry -> last-known-good -> fallback) ---
+// How many times the startup calibration may be re-run after OUT_OF_RANGE / TOO_NOISY /
+// TIMEOUT. Bounded on purpose: each attempt costs CURRENT_CAL_SAMPLES ADC ticks plus, in the
+// worst case, one CURRENT_CAL_TIMEOUT spin, and the whole sequence runs before the main loop
+// starts. 3 attempts stays well inside the existing startup budget and cannot hang the start
+// even if TIMER1/DMA never runs.
+#define CURRENT_CAL_MAX_ATTEMPTS      3
+
+// Start policy when calibration produced nothing usable AND there is no last-known-good set:
+//   0 = LEGACY_FALLBACK - run the pre-FW-118 hardware-offset-only path, flagged degraded
+//   1 = STRICT          - inhibit FOC start until calibration succeeds
+//
+// DEFAULT IS 0, AND MUST STAY 0 UNTIL THE FW-118 LIMITS ARE MEASURED. CURRENT_ZERO_MAX_DEVIATION
+// and CURRENT_ZERO_MAX_P2P_ADC above are both marked PROVISIONAL; STRICT on top of an unverified
+// threshold means a guessed number can refuse to let the bike move. Switch to 1 only after the
+// bench measurement in FW-118's HW_PENDING list is done and those limits are real.
+#define CURRENT_CAL_START_POLICY      0
+
+#if (CURRENT_CAL_MAX_ATTEMPTS < 1) || (CURRENT_CAL_MAX_ATTEMPTS > 10)
+#error "CURRENT_CAL_MAX_ATTEMPTS must be between 1 and 10 - the whole sequence runs before the main loop."
+#endif
+#if (CURRENT_CAL_START_POLICY != 0) && (CURRENT_CAL_START_POLICY != 1)
+#error "CURRENT_CAL_START_POLICY must be 0 (LEGACY_FALLBACK) or 1 (STRICT)."
+#endif
 
 // --- Stored torque-threshold sanity range (parser.c). ---
 // Upper end of the pedal-pressure span a stored TQO_threshold may sit in. It no longer shapes
@@ -473,7 +602,7 @@
 #define ERR_OVERTEMP 10    // Bafang error code 10 = motor/overtemperature
 #define ERR_PULSE_ON_S 2   // stage 1: seconds the error code is reported (HMI shows it)
 #define ERR_PULSE_OFF_S 6  // stage 1: seconds the error code is cleared (so HMI blinks, not too often)
-#define TEMP_OFFSET_C 11   // global calibration offset added to int_Temperature at source (affects CAN, thermal, HMI). ~+11 to match original FW (26C) from raw ~15C; exact only near this temp (NTC nonlinear) - for range accuracy fix T_NTC params instead
+#define TEMP_OFFSET_C 0    // global calibration offset added to int_Temperature at source (affects CAN, thermal, HMI). Was +11 as a hack for the estimated Beta curve; zeroed when T_NTC switched to the exact stock M820 LUT (FW-115) - keep 0 unless hardware calibration proves otherwise
 
 //---------------------------------------------------------------------
 //torquesensor settings

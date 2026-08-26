@@ -37,6 +37,11 @@
  *            and GIVEUP trailer.
  *   9/10.    a second start() while one is active is refused (first reply unharmed); busy() is
  *            true exactly while a reply is in progress.
+ *   G (1-5). FW-114 HMI START-ACK flow control: a target=3 reply holds its DATA phase until the
+ *            display's op=2 ACK of the START (can_multiframe_hmi_ack) - and only that ACK; a
+ *            wrong-command ACK is ignored, a display that never ACKs is released by the
+ *            CANMF_ACK_WAIT_TIMEOUT_TICKS timeout, an ACK arriving while START is still in
+ *            flight is latched and skips the wait, and a target=5 (CANable) reply never waits.
  */
 
 #include "../common/check.h"
@@ -164,7 +169,7 @@ static int run_until_idle(uint32_t start_tick, int limit, int *max_depth)
 	int i;
 	int md = 0;
 	for (i = 0; i < limit; i++) {
-		can_multiframe_step();
+		can_multiframe_step(start_tick + (uint32_t)i);
 		can_tx_queue_service(start_tick + (uint32_t)i);
 		int d = (int)can_tx_queue_depth();
 		if (d > md) md = d;
@@ -327,7 +332,7 @@ int main(void)
 		uint32_t tick = 0U;
 		int i = 0;
 		for (i = 0; i < 400 && !txlog_has(end_efid) && can_multiframe_busy(); i++) {
-			can_multiframe_step();
+			can_multiframe_step(tick);
 			can_tx_queue_service(tick++);
 		}
 		CHECK(txlog_has(end_efid), "A8: the last (END) fragment was transmitted");
@@ -336,7 +341,7 @@ int main(void)
 			"A8: NOT completed - the last fragment has not reached CAN_TRANSMIT_OK yet");
 
 		for (int j = 0; j < 60; j++) {
-			can_multiframe_step();
+			can_multiframe_step(tick);
 			can_tx_queue_service(tick++);
 		}
 		CHECK(can_multiframe_busy(), "A8: still busy after many PENDING polls of the last fragment");
@@ -469,7 +474,7 @@ int main(void)
 		uint32_t tick = 0U;
 		int i;
 		for (i = 0; i < 50 && !txlog_has(frag_efid(0x6011U, OP_LONG_START, 5U, 0x02U)); i++) {
-			can_multiframe_step();
+			can_multiframe_step(tick);
 			can_tx_queue_service(tick++);
 		}
 		CHECK(txlog_has(frag_efid(0x6011U, OP_LONG_START, 5U, 0x02U)),
@@ -487,7 +492,7 @@ int main(void)
 		CHECK(can_tx_queue_depth() == 0U, "B5: all 9 fillers transmitted and resolved");
 
 		/* Now step the producer: the START token is no longer in history nor in the queue. */
-		can_multiframe_step();
+		can_multiframe_step(tick);
 		/* The abort is recorded and the producer returns to idle on the next step. */
 		int md = 0;
 		run_until_idle(tick, 50, &md);
@@ -515,7 +520,7 @@ int main(void)
 		uint32_t tick = 0U;
 		int i;
 		for (i = 0; i < 3000 && (can_multiframe_busy() || can_tx_queue_depth() > 0U); i++) {
-			can_multiframe_step();
+			can_multiframe_step(tick);
 			if ((i % 16) == 4) {
 				/* 3-frame heartbeat + 0x3202 + 0x3201 poll - the display's periodic traffic.
 				 * Insertion stays comfortably below the queue's drain rate (each service()
@@ -612,12 +617,12 @@ int main(void)
 			uint32_t tick = 0U;
 			int i;
 			for (i = 0; i < 400 && !txlog_has(end_efid) && can_multiframe_busy(); i++) {
-				can_multiframe_step();
+				can_multiframe_step(tick);
 				can_tx_queue_service(tick++);
 			}
 			CHECK(txlog_has(end_efid), "D3: END was transmitted");
 			for (int j = 0; j < 40; j++) {
-				can_multiframe_step();
+				can_multiframe_step(tick);
 				can_tx_queue_service(tick++);
 			}
 			CHECK(can_multiframe_busy(), "D3: still busy - END not confirmed");
@@ -704,6 +709,285 @@ int main(void)
 		int used = run_until_idle(0U, 50, 0);
 		CHECK(used < 50, "10: completes");
 		CHECK(!can_multiframe_busy(), "10: idle again once the transfer is confirmed complete");
+	}
+
+	/* --- FW-114 G: HMI START-ACK flow control (target=3 replies only) ------------------------ */
+	{
+		/* G1: target=3 reply waits for the display's op=2 ACK after START, then flows. */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+			uint32_t start_efid = frag_efid(0x6000U, OP_LONG_START, 3U, 0x02U);
+			CHECK(can_multiframe_start(0x6000U, 3U, 0x02U, payload, 20U, 0),
+				"G1: HMI info reply armed");
+
+			uint32_t tick = 0U;
+			int i;
+			for (i = 0; i < 100 && !txlog_has(start_efid) && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_has(start_efid), "G1: START reached the wire");
+			/* No ACK yet -> the transfer must sit at the gate: busy, no DATA, no END. */
+			for (int j = 0; j < 50; j++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(can_multiframe_busy(), "G1: still busy while waiting for the HMI ACK");
+			CHECK(can_multiframe_completed_count() == 0U, "G1: NOT completed before the ACK");
+			int g1_frames = 0;
+			for (int c = 0; c < cap_n; c++) {
+				if (efid_target(cap_efid[c]) == 3U && efid_source(cap_efid[c]) == 0x02U) g1_frames++;
+			}
+			CHECK(g1_frames == 1, "G1: exactly START on the wire - no DATA/END before the HMI ACK");
+			CHECK(efid_op(cap_efid[g1_frames - 1]) == OP_LONG_START,
+				"G1: the only captured frame is START");
+
+			/* The display ACKs the START (83126000) -> the DATA phase is released. */
+			can_multiframe_hmi_ack(0x6000U);
+			int used = run_until_idle(tick, 300, 0);
+			CHECK(used < 300, "G1: released by the HMI ACK in bounded time");
+			CHECK(can_multiframe_completed_count() == 1U, "G1: completed after the HMI ACK");
+			uint8_t out[256] = { 0 };
+			int out_len = reconstruct(0, 0x6000U, 3U, 0x02U, out);
+			CHECK(out_len == 20 && memcmp(out, payload, 20) == 0, "G1: payload intact end to end");
+		}
+
+		/* G2: target=3 reply WITHOUT any ACK degrades to immediate DATA after the timeout. */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+			uint32_t start_efid = frag_efid(0x6000U, OP_LONG_START, 3U, 0x02U);
+			CHECK(can_multiframe_start(0x6000U, 3U, 0x02U, payload, 20U, 0), "G2: armed");
+
+			uint32_t tick = 0U;
+			int i;
+			for (i = 0; i < 100 && !txlog_has(start_efid) && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_has(start_efid), "G2: START reached the wire");
+			/* Never send the ACK. The reply must still complete after the timeout. */
+			int used = run_until_idle(tick, 900, 0);
+			CHECK(used < 900, "G2: the timeout releases the gate in bounded time");
+			CHECK(can_multiframe_completed_count() == 1U,
+				"G2: a display that never ACKs still gets its reply (timeout fallback)");
+			uint8_t out[256] = { 0 };
+			int out_len = reconstruct(0, 0x6000U, 3U, 0x02U, out);
+			CHECK(out_len == 20 && memcmp(out, payload, 20) == 0, "G2: payload intact");
+		}
+
+		/* G3: an ACK for the WRONG command must NOT release the gate. */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+			uint32_t start_efid = frag_efid(0x6000U, OP_LONG_START, 3U, 0x02U);
+			CHECK(can_multiframe_start(0x6000U, 3U, 0x02U, payload, 20U, 0), "G3: armed");
+
+			uint32_t tick = 0U;
+			int i;
+			for (i = 0; i < 100 && !txlog_has(start_efid) && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_has(start_efid), "G3: START reached the wire");
+			can_multiframe_hmi_ack(0x6001U);   /* wrong command - must be ignored */
+			for (int j = 0; j < 10; j++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(can_multiframe_busy(), "G3: still gated - a wrong-command ACK is ignored");
+			CHECK(can_multiframe_completed_count() == 0U,
+				"G3: NOT completed after a wrong-command ACK");
+			can_multiframe_hmi_ack(0x6000U);   /* matching command - releases */
+			int used = run_until_idle(tick, 300, 0);
+			CHECK(used < 300, "G3: released by the matching ACK");
+			CHECK(can_multiframe_completed_count() == 1U, "G3: completed after the matching ACK");
+		}
+
+		/* G4: an ACK arriving while START is still in flight is latched and skips the wait. */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+			uint32_t start_efid = frag_efid(0x6001U, OP_LONG_START, 3U, 0x02U);
+			pending_efid = start_efid;
+			release_pending = false;
+			state_override = pending_until_release_override;
+
+			CHECK(can_multiframe_start(0x6001U, 3U, 0x02U, payload, 20U, 0), "G4: armed");
+			uint32_t tick = 0U;
+			int i;
+			for (i = 0; i < 50 && !txlog_has(start_efid) && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_has(start_efid), "G4: START was transmitted");
+			/* The ACK arrives while START is still PENDING (in flight). */
+			can_multiframe_hmi_ack(0x6001U);
+			release_pending = true;
+			int used = run_until_idle(tick, 300, 0);
+			CHECK(used < 300, "G4: completes promptly with the early-latched ACK");
+			CHECK(used < (int)CANMF_ACK_WAIT_TIMEOUT_TICKS,
+				"G4: the wait was skipped entirely (completed well before the ACK timeout)");
+			CHECK(can_multiframe_completed_count() == 1U, "G4: completed exactly once");
+			uint8_t out[256] = { 0 };
+			int out_len = reconstruct(0, 0x6001U, 3U, 0x02U, out);
+			CHECK(out_len == 20 && memcmp(out, payload, 20) == 0, "G4: payload intact");
+		}
+
+		/* G5: target=5 (CANable) replies are NOT flow-controlled - no ACK ever needed. */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+			CHECK(can_multiframe_start(0x6000U, 5U, 0x02U, payload, 20U, 0),
+				"G5: CANable reply armed");
+			int used = run_until_idle(0U, 200, 0);
+			CHECK(used < 200, "G5: completes immediately");
+			CHECK(can_multiframe_completed_count() == 1U,
+				"G5: target=5 never waits for an HMI ACK");
+		}
+
+		/* G6: a stale ACK from a PREVIOUS, already-finished transfer must not release a new
+		 * same-command transfer. Sequence: T1 (0x6000, target=3) times out without ACK and
+		 * completes; the delayed 83126000 arrives while NOTHING is active (it is NOT latched);
+		 * T2 (0x6000) then starts and must STILL wait for its OWN ACK (or timeout). */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+
+			/* T1: no ACK at all -> released by the fail-safe timeout, transfer completes. */
+			CHECK(can_multiframe_start(0x6000U, 3U, 0x02U, payload, 20U, 0), "G6: T1 armed");
+			uint32_t tick = 0U;
+			int i;
+			for (i = 0; i < 100 && txlog_n == 0 && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_n > 0, "G6: T1 START reached the wire");
+			int used = run_until_idle(tick, 900, 0);
+			CHECK(used < 900, "G6: T1 completed by the fail-safe timeout");
+			CHECK(can_multiframe_completed_count() == 1U, "G6: T1 completed exactly once");
+			CHECK(!can_multiframe_busy(), "G6: no transfer active after T1");
+
+			/* The delayed ACK for T1's START arrives while NO transfer is active: it must be
+			 * ignored entirely (case B), so it can never be re-used by a later transfer. */
+			can_multiframe_hmi_ack(0x6000U);
+
+			/* T2: the SAME command, armed only after the stale ACK. It must STILL gate. */
+			CHECK(can_multiframe_start(0x6000U, 3U, 0x02U, payload, 20U, 0), "G6: T2 armed");
+			int txlog_t1 = txlog_n;
+			for (i = 0; i < 100 && txlog_n == txlog_t1 && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_n > txlog_t1, "G6: T2 START reached the wire");
+			/* Let START resolve into the ACK gate before snapshotting the frame count. */
+			for (int r = 0; r < 5; r++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			int cap_at_gate = cap_n;
+			for (int j = 0; j < 60; j++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(can_multiframe_busy(), "G6: T2 still gated - the stale ACK did NOT release it");
+			CHECK(cap_n == cap_at_gate, "G6: no DATA/END on the wire for T2 before its own ACK");
+			CHECK(can_multiframe_completed_count() == 1U, "G6: T2 not completed by the stale ACK");
+
+			/* Only the ACK that belongs to T2's OWN START releases it. */
+			can_multiframe_hmi_ack(0x6000U);
+			used = run_until_idle(tick, 300, 0);
+			CHECK(used < 300, "G6: T2 released by its own ACK");
+			CHECK(can_multiframe_completed_count() == 2U, "G6: T2 completed exactly once");
+		}
+
+		/* G7: the fail-safe ACK timeout must survive the uint32_t tick wrap. The transfer is
+		 * started just before 0xFFFFFFFF, so its 100 ms (400 tick) wait crosses the wrap; the
+		 * unsigned-difference test must still fire the timeout after exactly 400 ticks. */
+		{
+			reset_all();
+			uint8_t payload[20];
+			fill_pattern(payload, 20U);
+			uint32_t start_efid = frag_efid(0x6000U, OP_LONG_START, 3U, 0x02U);
+			CHECK(can_multiframe_start(0x6000U, 3U, 0x02U, payload, 20U, 0), "G7: armed");
+
+			uint32_t tick = 0xFFFFFF00U;   /* the START goes out just before the wrap */
+			int i;
+			for (i = 0; i < 100 && !txlog_has(start_efid) && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_has(start_efid), "G7: START reached the wire just before the wrap");
+
+			/* No ACK: the gate waits across 0xFFFFFFFF -> 0x00000000 and must STILL time out. */
+			int used = run_until_idle(tick, 900, 0);
+			CHECK(used < 900, "G7: released in bounded time across the tick wrap");
+			CHECK(can_multiframe_completed_count() == 1U, "G7: completed after crossing the wrap");
+			CHECK(!can_multiframe_busy(), "G7: transfer fully drained after the wrap");
+		}
+
+		/* G8: 0x6012 target=3 with the ACK gate must produce, in EXACT order on the wire:
+		 * START, then DATA..., then END, then the trailer - the trailer is a phase of the SAME
+		 * transfer and must never jump ahead of the async automaton (no early 821B6012). */
+		{
+			reset_all();
+			uint8_t payload[64];
+			fill_pattern(payload, 64U);
+			uint32_t trailer_efid = 0x6012U + (3U << 16) + (3U << 19) + (0x02U << 24);
+			uint8_t trailer_data[8] = { 0x01, 0x00, 0x02, 0x06, 0, 0, 0, 0 };
+			can_multiframe_trailer_t tr;
+			tr.efid = trailer_efid;
+			tr.dlen = 4U;
+			memcpy(tr.data, trailer_data, 8);
+
+			CHECK(can_multiframe_start_with_trailer(0x6012U, 3U, 0x02U, payload, 64U, &tr, 0),
+				"G8: 0x6012 armed with trailer");
+			uint32_t start_efid = frag_efid(0x6012U, OP_LONG_START, 3U, 0x02U);
+			uint32_t tick = 0U;
+			int i;
+			for (i = 0; i < 100 && !txlog_has(start_efid) && can_multiframe_busy(); i++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(txlog_has(start_efid), "G8: START reached the wire");
+
+			/* Let START resolve into the ACK gate before snapshotting the frame count. */
+			for (int r = 0; r < 5; r++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			/* No ACK yet: the whole transfer (DATA/END AND trailer) must stay gated. */
+			int cap_at_gate = cap_n;
+			for (int j = 0; j < 30; j++) {
+				can_multiframe_step(tick);
+				can_tx_queue_service(tick++);
+			}
+			CHECK(can_multiframe_busy(), "G8: still gated - nothing was sent before the ACK");
+			CHECK(cap_n == cap_at_gate, "G8: no DATA/END/trailer ahead of the ACK");
+
+			/* The display ACKs -> the automaton emits START .. DATA.. END .. trailer in order. */
+			can_multiframe_hmi_ack(0x6012U);
+			int used = run_until_idle(tick, 400, 0);
+			CHECK(used < 400, "G8: completes after the ACK");
+			CHECK(can_multiframe_completed_count() == 1U, "G8: completed exactly once");
+			/* 64 B -> 7 DATA frags: START(1) + DATA(7) + END(1) + trailer(1) = 10 frames. */
+			CHECK(cap_n == 10, "G8: exactly 10 frames reached the wire");
+			CHECK(efid_op(cap_efid[0]) == OP_LONG_START, "G8: frame 1 is START");
+			for (int d = 1; d <= 7; d++) {
+				CHECK(efid_op(cap_efid[d]) == OP_LONG_TRANG, "G8: frames 2..8 are DATA");
+			}
+			CHECK(efid_op(cap_efid[8]) == OP_LONG_END, "G8: frame 9 is END");
+			CHECK(cap_efid[9] == trailer_efid, "G8: frame 10 is exactly the trailer - after END");
+			CHECK(cap_dlen[9] == 4U && memcmp(cap_data[9], trailer_data, 4U) == 0,
+				"G8: trailer payload is 01 00 02 06");
+		}
 	}
 
 	if (host_test_failures == 0) {

@@ -77,6 +77,53 @@
  * average cannot satisfy the ratio test (average 3 vs sample 7 would otherwise pass). */
 #define TORQUE_RUN_ATTACK_MIN_DELTA      TORQUE_ASSIST_DEADBAND_NATIVE
 
+/*
+ * FW-112.4: ordinary-RUN fast-rise / slow-fall asymmetric filter.
+ *
+ * WHY. The flat 48-step (180 deg default) moving average above is symmetric: a genuine rise
+ * in pedal effort is smoothed exactly as heavily as the per-leg ripple it exists to kill. A
+ * sharp step reaches ordinary RUN quickly regardless (the average of N recent-and-high samples
+ * converges fast), but a SLOW, gradual rise from near-zero can spend most of a window's worth
+ * of crank steps still averaging in the low samples from before the rise began - at 20 rpm
+ * (48 steps/rev) that is up to 1.5 s. Rolling rearm never pays this cost (WAIT_FRESH_LOAD/
+ * TRACK_FAST live-substitute the fast signal - see torque_input_recovery_run_native()); a cold
+ * start never pays it either (torque_input_seed_run() fills the window instantly at the arm).
+ * Only ORDINARY RUN - already ACTIVE, recovery IDLE, no rearm in progress - pays the full
+ * window lag, and only on the way UP.
+ *
+ * WHAT. update_run_asym_filter() (src/torque_input.c) replaces the PUBLISHED ordinary-RUN
+ * value with a rate-limited filter, same Q8 fixed-point technique as update_assist_filter()
+ * above, but with a DIFFERENT time constant depending on the direction of travel:
+ *   afilt > current arun  ->  RISE, TORQUE_RUN_ASYM_RISE_MS   (fast: real pressure shows up
+ *                                                                promptly)
+ *   afilt <= current arun ->  FALL, TORQUE_RUN_ASYM_FALL_MS   (slower: keeps per-leg ripple
+ *                                                                bounded on the way down)
+ * It runs every 4 kHz control tick (not per crank step), driven directly by afilt
+ * (assist_delta_filtered_native), which is itself already tick-clocked and noise-filtered.
+ *
+ * WHAT IT DOES NOT TOUCH. The 48-step moving average itself (run_window_steps and the ring in
+ * src/torque_input.c) is UNCHANGED and keeps running every crank step exactly as before -
+ * torque_input_run_filter_step() is not modified. This filter only changes which value gets
+ * PUBLISHED as assist_delta_run_native, and only while recovery_state == TORQUE_RECOVERY_IDLE;
+ * WAIT_FRESH_LOAD (per-step reseed) and TRACK_FAST (live substitution) are read, never written,
+ * by this card - see the unconditional branches in torque_input_update(). torque_input_seed_run()
+ * seeds this filter's internal state to the seeded value too (cold arm, and the TRACK_FAST ->
+ * IDLE hand-back), so ordinary tracking always resumes with zero discontinuity, never a jump.
+ *
+ * These were chosen from host comparison (tests/host/torque/torque_run_asym_host.c, S1-S8 at
+ * 20/40/60/80 rpm), not tuned on a bike yet. The card's own suggested starting point (rise
+ * 20-40 ms) measured a "first positive demand" time flat at ~54 ms regardless of cadence - a
+ * clean win over the old window's 218-781 ms cadence-dependent lag - but let S5 (sinusoidal
+ * per-leg ripple) through almost unattenuated at 20 rpm (94 of AFILT's own 148 native units,
+ * only 36% attenuation beyond the existing 35 ms fast filter). 120/350 ms trades some of that
+ * speed for real ripple rejection (62 of 148, 58% attenuation) while keeping the flat,
+ * cadence-independent first-positive-demand time (~193 ms) and a still-large win over the old
+ * window on a genuine slow ramp (S4 @ 20 rpm: 2228 ms vs the old window's 2781 ms to 50%, and
+ * unlike the old window this does NOT keep growing as cadence drops further).
+ */
+#define TORQUE_RUN_ASYM_RISE_MS          120U  /* fast: flat ~193 ms first-positive-demand, any cadence */
+#define TORQUE_RUN_ASYM_FALL_MS          350U  /* slow: 58% ripple attenuation beyond AFILT @ 20 rpm, see host S5 */
+
 typedef enum {
 	TORQUE_CAL_SOURCE_DEFAULT = 0,
 	TORQUE_CAL_SOURCE_USER = 1
@@ -216,6 +263,21 @@ void torque_input_cancel_rolling_rearm(void);
 bool torque_input_recovery_active(void);
 uint16_t torque_input_recovery_run_native(void);
 torque_recovery_state_t torque_input_recovery_state(void);
+/*
+ * FW-112-STABILITY: READ-ONLY diagnostic side of the recovery automaton (measurement only, never
+ * feeds a decision):
+ *   recovery_stable_ticks()      the LIVE stability streak (the variable the automaton itself
+ *                                counts up toward TORQUE_ROLLING_REARM_STABLE_TICKS);
+ *   recovery_stable_ticks_at_edge()  the streak AS IT STOOD on the tick the automaton left
+ *                                TRACK_FAST - completed (== 560), collapsed back to WAIT_FRESH_LOAD,
+ *                                or cancelled/reset. The production counter is cleared on those
+ *                                same transition ticks (see torque_input.c), so this is the only
+ *                                place the pre-transition value still exists for a recorder to
+ *                                read. Never written by production logic; 0 until the first
+ *                                transition.
+ */
+uint16_t torque_input_recovery_stable_ticks(void);
+uint16_t torque_input_recovery_stable_ticks_at_edge(void);
 
 uint16_t torque_input_load_centikg(void);
 uint16_t torque_input_zero_native(void);

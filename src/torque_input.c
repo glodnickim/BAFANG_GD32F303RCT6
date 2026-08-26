@@ -16,15 +16,38 @@ static uint16_t run_filled;
 static uint32_t run_sum;
 static uint16_t run_value_native;
 static uint16_t run_attack_steps; /* FW-090: consecutive steps holding a sustained rise */
-/* FW-112 v2: rolling-rearm recovery AUTOMATON - see torque_input_begin_rolling_rearm() in the
- * header for the full lifecycle. IDLE is the normal FW-085 averaging state; WAIT_FRESH_LOAD is
- * entered exactly on the fast-rearm edge (RUN re-seeded to the current fast signal on every
- * forward step); TRACK_FAST is entered once the fresh signal holds at/above the assist deadband
- * (RUN follows the fast signal every control tick). The automaton is closed ONLY by
- * cancel_rolling_rearm() (!latched) or, from TRACK_FAST, by a completed recovery - never by a
- * timeout and never by the forward step count. */
+static int32_t run_asym_q; /* FW-112.4: Q8 state, ordinary-RUN fast-rise/slow-fall filter */
+/* PATCH A: rolling-rearm recovery AUTOMATON - still three states (IDLE / WAIT_FRESH_LOAD /
+ * TRACK_FAST) and the transition logic between them is UNCHANGED - see
+ * torque_input_begin_rolling_rearm() in the header for the full lifecycle. The PATCH A change is
+ * narrow: the automaton now OPENS directly in TRACK_FAST (skipping the redundant "confirm the
+ * signal is above the deadband a second time" WAIT_FRESH_LOAD entry gate the FW-112.5 audit
+ * proved never gated demand), but WAIT_FRESH_LOAD itself is still very much alive as TRACK_FAST's
+ * fallback on a genuine mid-recovery collapse - see the automaton-advance comment in
+ * torque_input_update() for why that distinction still matters. */
 static torque_recovery_state_t recovery_state;
 static uint16_t recovery_stable_ticks;
+/* PATCH A: has the CURRENT recovery attempt ever seen the fresh signal at/above the assist
+ * deadband since torque_input_begin_rolling_rearm() opened it? Reset false there; set true the
+ * first time TRACK_FAST observes it. Distinguishes a GENUINE collapse (real progress was made,
+ * then lost - transitions to WAIT_FRESH_LOAD exactly like the pre-PATCH-A automaton did) from the
+ * ordinary case where the rearm confirms direction before the rider's pressure has caught up at
+ * all (TRACK_FAST just quietly keeps waiting - no state transition, no diagnostic COLLAPSE event,
+ * since nothing was ever actually confirmed to lose). Without this, entering TRACK_FAST directly
+ * (see begin_rolling_rearm()) bounced straight back to WAIT_FRESH_LOAD on the very next tick
+ * whenever the rider had not started pressing yet - technically harmless for demand
+ * (WAIT_FRESH_LOAD tracks just as honestly), but it inflated the fw112_diag collapse count for
+ * what is, functionally, nothing more than "still waiting" - caught by FW-112-STABILITY's S1
+ * (sharp step) expecting zero collapses. This is also why ride_control.c's WAIT_FRESH_LOAD level
+ * check needs no change under PATCH A: WAIT_FRESH_LOAD is now reached ONLY through this genuine-
+ * collapse path, never as an unconfirmed entry state, so "in WAIT_FRESH_LOAD" still means exactly
+ * what it always meant there. */
+static bool recovery_confirmed_once;
+/* FW-112-STABILITY: diagnostic-only - the stability streak as it stood the tick the automaton
+ * left TRACK_FAST (completed, collapsed, cancelled or reset). The production counter is cleared
+ * on the same transition tick, so this field is the ONLY place the pre-transition value still
+ * exists for the fw112_diag recorder to read. It never feeds a decision. */
+static uint16_t recovery_stable_ticks_at_edge;
 
 static int32_t offset_correction;
 static bool cal_fault;
@@ -147,6 +170,59 @@ static uint16_t update_assist_filter(uint16_t target_native)
 }
 
 /*
+ * FW-112.4: ordinary-RUN fast-rise / slow-fall filter — same Q8 rate-limiter technique as
+ * update_assist_filter() above, but the time constant depends on the DIRECTION of travel: a
+ * rise towards target uses TORQUE_RUN_ASYM_RISE_MS, a fall away from it uses the slower
+ * TORQUE_RUN_ASYM_FALL_MS. See the header for why (ordinary RUN is the only path that pays the
+ * old 48-step window's full lag on a slow rise; rearm and cold start already bypass it).
+ * Only ever called from the recovery_state == TORQUE_RECOVERY_IDLE branch in
+ * torque_input_update() — WAIT_FRESH_LOAD and TRACK_FAST publish their own values and never
+ * reach this function.
+ */
+static uint16_t update_run_asym_filter(uint16_t target_native)
+{
+	int32_t target_q = (int32_t)target_native << TORQUE_ASSIST_FILTER_Q_SHIFT;
+	int32_t error_q = target_q - run_asym_q;
+	if (error_q != 0) {
+		int32_t filter_ticks = (error_q > 0) ?
+			((int32_t)TORQUE_RUN_ASYM_RISE_MS * TORQUE_INPUT_TICKS_PER_MS) :
+			((int32_t)TORQUE_RUN_ASYM_FALL_MS * TORQUE_INPUT_TICKS_PER_MS);
+		int32_t step_q = error_q / filter_ticks;
+		if (step_q == 0) {
+			if (target_native == 0U) {
+				/* FW-112.4: the target is genuinely, exactly ZERO - the rider has stopped
+				 * pushing. Snap the remaining crumb straight to 0 instead of crawling at
+				 * the same +-1 Q8-unit/tick floor update_assist_filter() uses: that floor
+				 * is harmless for AFILT (its target is essentially never held dead flat
+				 * for long), but a zero target here genuinely IS held for extended
+				 * periods, and the geometric tail never reaches it in bounded time -
+				 * measured ~2 s from a steady 300 down to an exact published 0
+				 * (tests/host/torque/torque_run_asym_host.c's zero-release check), long
+				 * after the signal is already physically negligible (snap fires within
+				 * ~5.5 native units of zero, under 2% of a typical steady value,
+				 * imperceptible). Existing regressions (fw112_run_rearm_recovery_host.c
+				 * S4/S12) depend on demand reaching EXACTLY 0 within a bounded step
+				 * count, exactly as it always did under the old window average (which
+				 * reaches an exact, deterministic zero the instant the whole window has
+				 * been overwritten). Deliberately NOT extended to a nonzero target: a
+				 * moving/oscillating target (S5's per-leg ripple) regularly passes within
+				 * one geometric step of the filter's current value at each swing's
+				 * extremum without ever being HELD there, and snapping on every such
+				 * transient crossing would defeat the fall smoothing this filter exists
+				 * for - see the host S5 regression this restriction is pinned against. */
+				run_asym_q = 0;
+				return 0U;
+			}
+			step_q = (error_q > 0) ? 1 : -1;
+		}
+		run_asym_q += step_q;
+	}
+	return (uint16_t)((run_asym_q +
+		(1L << (TORQUE_ASSIST_FILTER_Q_SHIFT - 1U))) >>
+		TORQUE_ASSIST_FILTER_Q_SHIFT);
+}
+
+/*
  * FW-033/085: the RUN effort estimator — a plain moving average of the fast signal
  * over a window of crank steps, so the power calc no longer follows every single
  * leg peak.
@@ -168,6 +244,7 @@ static void run_window_reset(void)
 	/* FW-112 v2: a rebuilt window must not inherit a live recovery automaton - the stability
 	 * bookkeeping has no meaning against a freshly reset average. */
 	recovery_state = TORQUE_RECOVERY_IDLE;
+	recovery_stable_ticks_at_edge = recovery_stable_ticks; /* FW-112-STABILITY (diagnostic) */
 	recovery_stable_ticks = 0U;
 }
 
@@ -195,6 +272,10 @@ void torque_input_set_run_window_deg(uint16_t window_deg)
 void torque_input_seed_run(uint16_t value_native)
 {
 	run_value_native = value_native;
+	/* FW-112.4: keep the asymmetric filter's own state in lockstep with every seed point
+	 * (cold arm, TRACK_FAST -> IDLE hand-back, WAIT_FRESH_LOAD per-step reseed) so ordinary
+	 * tracking always resumes from the seeded level with zero discontinuity. */
+	run_asym_q = (int32_t)value_native << TORQUE_ASSIST_FILTER_Q_SHIFT;
 	if (run_window_steps == 0U) {
 		run_window_reset();
 		return;
@@ -223,9 +304,17 @@ void torque_input_seed_run(uint16_t value_native)
  */
 void torque_input_begin_rolling_rearm(void)
 {
+	/* PATCH A: enter TRACK_FAST directly - WAIT_FRESH_LOAD's only job (per-step reseed while
+	 * "confirming" a fresh signal already above the assist deadband a second time) never
+	 * gated demand (ride_control.c substitutes the live fast signal throughout ANY active
+	 * recovery, WAIT_FRESH_LOAD included - see recovery_run_native() below) and TRACK_FAST's
+	 * own seed here is identical to what WAIT_FRESH_LOAD's first re-seed would have done on
+	 * the very next forward step anyway. Skipping straight to TRACK_FAST removes a redundant
+	 * intermediate state without changing the seeded value or the safety contract. */
 	torque_input_seed_run(snapshot.assist_delta_filtered_native);
-	recovery_state = TORQUE_RECOVERY_WAIT_FRESH_LOAD;
+	recovery_state = TORQUE_RECOVERY_TRACK_FAST;
 	recovery_stable_ticks = 0U;
+	recovery_confirmed_once = false;
 }
 
 /* cancel: the rearm saga was abandoned - close the automaton immediately so a later NORMAL cold
@@ -233,6 +322,7 @@ void torque_input_begin_rolling_rearm(void)
  * lifecycle fact, not a filter reset. */
 void torque_input_cancel_rolling_rearm(void)
 {
+	recovery_stable_ticks_at_edge = recovery_stable_ticks; /* FW-112-STABILITY (diagnostic) */
 	recovery_state = TORQUE_RECOVERY_IDLE;
 	recovery_stable_ticks = 0U;
 }
@@ -257,6 +347,17 @@ uint16_t torque_input_recovery_run_native(void)
 torque_recovery_state_t torque_input_recovery_state(void)
 {
 	return recovery_state;
+}
+
+/* FW-112-STABILITY: diagnostic reads of the stability streak - see the header. */
+uint16_t torque_input_recovery_stable_ticks(void)
+{
+	return recovery_stable_ticks;
+}
+
+uint16_t torque_input_recovery_stable_ticks_at_edge(void)
+{
+	return recovery_stable_ticks_at_edge;
 }
 
 void torque_input_run_filter_step(void)
@@ -545,6 +646,7 @@ void torque_input_init(void)
 	snapshot = (torque_snapshot_t){0};
 	assist_filter_q = 0;
 	run_value_native = 0U;
+	run_asym_q = 0; /* FW-112.4 */
 	run_window_reset(); /* FW-085 */
 	snapshot.zero_effective_native = TORQUE_ZERO_TARGET_NATIVE;
 	snapshot.span_native = span_native;
@@ -578,21 +680,32 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 		sensor_valid ? assist_delta : 0U);
 
 	/*
-	 * FW-112 v2: advance the rolling-rearm recovery AUTOMATON (see torque_input_begin_rolling_
-	 * rearm() in the header). Once per tick while it is not IDLE:
-	 *   - WAIT_FRESH_LOAD -> TRACK_FAST  when the fresh signal holds at/above the assist deadband
-	 *                                       (pressure confirmed; run then follows the fast signal
-	 *                                       every tick, see the publish block below);
-	 *   - TRACK_FAST -> IDLE              when the fresh signal has held at/above the deadband for
-	 *                                       TORQUE_ROLLING_REARM_STABLE_TICKS (recovery complete -
-	 *                                       re-seed once to that level so ordinary FW-085
-	 *                                       averaging resumes from a known-good average);
-	 *   - TRACK_FAST -> WAIT_FRESH_LOAD   when the fresh signal drops back below the deadband
-	 *                                       (pressure lost mid-recovery - honest collapse);
-	 * and from WAIT_FRESH_LOAD there is NO further exit here: no timeout (a resumed-but-
-	 * unpressured ride simply keeps re-seeding RUN to the ~0 fast signal on each forward step,
-	 * which is already honest) and no dependence on forward steps arriving - the only edges that
-	 * close the automaton are cancel_rolling_rearm() (!latched) and the completed recovery above.
+	 * PATCH A: advance the rolling-rearm recovery AUTOMATON (see torque_input_begin_rolling_
+	 * rearm() in the header). Still both WAIT_FRESH_LOAD and TRACK_FAST exist and the
+	 * transition logic between them is UNCHANGED from before PATCH A - only the ENTRY POINT
+	 * changed (begin_rolling_rearm() now opens directly in TRACK_FAST, see there). The two
+	 * states are NOT interchangeable: TRACK_FAST re-seeding straight to IDLE the moment the
+	 * fresh signal dips below the deadband would abandon the recovery attempt permanently on
+	 * the very first tick after a rearm whenever the rider had not yet started pressing again -
+	 * WAIT_FRESH_LOAD is what keeps fast-tracking (per forward step) while genuinely waiting
+	 * for that first confirmation, cheaply oscillating with TRACK_FAST for as long as needed,
+	 * never falling back to IDLE's slower/smoothed tracking prematurely. (An earlier version of
+	 * this patch collapsed straight to IDLE here and failed FW-112-STABILITY's S1/S3/S4 host
+	 * checks immediately - a real bug, not a style choice - kept as a documented mutation, see
+	 * the PATCH A report's M-series.)
+	 *   - WAIT_FRESH_LOAD -> TRACK_FAST  when the fresh signal holds at/above the assist deadband;
+	 *   - TRACK_FAST -> IDLE              after TORQUE_ROLLING_REARM_STABLE_TICKS held at/above
+	 *                                       the deadband (recovery genuinely complete);
+	 *   - TRACK_FAST -> WAIT_FRESH_LOAD   the moment the fresh signal drops back below the
+	 *                                       deadband (honest collapse - only reachable once
+	 *                                       recovery_confirmed_once is true, i.e. a GENUINE
+	 *                                       collapse, never the unconfirmed-entry case above).
+	 *                                       ride_control.c's WAIT_FRESH_LOAD LEVEL check (hold-
+	 *                                       grace suppression, same-tick-zero force) needs no
+	 *                                       change under PATCH A for exactly this reason - see
+	 *                                       recovery_confirmed_once's own comment above.
+	 * No timeout, no dependence on forward steps arriving - the only edges that close the
+	 * automaton are cancel_rolling_rearm() (!latched) and the completed recovery above.
 	 */
 	if (recovery_state == TORQUE_RECOVERY_WAIT_FRESH_LOAD) {
 		if (snapshot.assist_delta_filtered_native >= TORQUE_ASSIST_DEADBAND_NATIVE) {
@@ -601,18 +714,26 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 		}
 	} else if (recovery_state == TORQUE_RECOVERY_TRACK_FAST) {
 		if (snapshot.assist_delta_filtered_native >= TORQUE_ASSIST_DEADBAND_NATIVE) {
+			recovery_confirmed_once = true; /* PATCH A */
 			if (recovery_stable_ticks < TORQUE_ROLLING_REARM_STABLE_TICKS) {
 				recovery_stable_ticks++;
 			}
 			if (recovery_stable_ticks >= TORQUE_ROLLING_REARM_STABLE_TICKS) {
 				torque_input_seed_run(snapshot.assist_delta_filtered_native);
+				recovery_stable_ticks_at_edge = recovery_stable_ticks; /* FW-112-STABILITY */
 				recovery_state = TORQUE_RECOVERY_IDLE;
 				recovery_stable_ticks = 0U;
 			}
-		} else {
+		} else if (recovery_confirmed_once) {
+			/* PATCH A: a GENUINE collapse - the fresh signal WAS confirmed at least once
+			 * since the rearm, and has now been lost. Exactly the pre-PATCH-A transition. */
+			recovery_stable_ticks_at_edge = recovery_stable_ticks; /* FW-112-STABILITY */
 			recovery_state = TORQUE_RECOVERY_WAIT_FRESH_LOAD;
 			recovery_stable_ticks = 0U;
 		}
+		/* PATCH A: else - never confirmed yet since the rearm (the rider has not started
+		 * pressing). Stay in TRACK_FAST quietly: no state transition, no diagnostic COLLAPSE
+		 * event, nothing was ever confirmed to lose - see recovery_confirmed_once. */
 	}
 	/*
 	 * FW-033/085: RUN estimator averages the FAST signal (cascade fast->run).
@@ -627,11 +748,20 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 	 * every control tick instead — the re-seed on forward steps alone would lag the fresh
 	 * pressure by up to a full step interval at low cadence, and the whole point of the
 	 * recovery is fast-filter time (35 ms), not step time.
+	 *
+	 * FW-112.4: while IDLE — ordinary RUN, no rearm in progress — publish the asymmetric
+	 * fast-rise/slow-fall filter instead of the raw window average computed in
+	 * torque_input_run_filter_step(). Safe to simply override here: run_filter_step() always
+	 * executes earlier in the same control tick (see main.c), so whatever it just wrote to
+	 * run_value_native is fully superseded below, every tick, without racing it. WAIT_FRESH_LOAD
+	 * is untouched (no branch here for it — its per-step reseed value stands as published).
 	 */
 	if (recovery_state == TORQUE_RECOVERY_TRACK_FAST) {
 		run_value_native = snapshot.assist_delta_filtered_native;
 	} else if (run_window_steps == 0U) {
 		run_value_native = snapshot.assist_delta_filtered_native;
+	} else if (recovery_state == TORQUE_RECOVERY_IDLE) {
+		run_value_native = update_run_asym_filter(snapshot.assist_delta_filtered_native);
 	}
 	snapshot.assist_delta_run_native = run_value_native;
 	snapshot.load_centikg = native_delta_to_centikg((uint16_t)delta);

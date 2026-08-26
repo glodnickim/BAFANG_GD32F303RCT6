@@ -57,7 +57,13 @@ typedef enum {
 	DIAG_SRC_REARM   = 3,
 	/* FW-112-DIAG: the whole-chain event recorder (fw112_diag.c) is the fifth dump source. */
 	DIAG_SRC_FW112   = 4,
-	DIAG_SRC_COUNT   = 5
+	/* FW-112 A/B: the rearm-episode logger (fw112_ab.c) is the sixth dump source. */
+	DIAG_SRC_AB      = 5,
+	/* FW-117 (TEMPORARY): the bridge lifecycle trace (fw117_trace.c) is the seventh dump source. */
+	DIAG_SRC_FW117   = 6,
+	/* Rolling no-assist diagnostic: the pre/post-trigger recorder (rolling_no_assist_diag.c). */
+	DIAG_SRC_ROLLING_NO_ASSIST = 7,
+	DIAG_SRC_COUNT   = 8
 } diag_source_t;
 
 typedef struct {
@@ -101,7 +107,10 @@ typedef enum {
 	DIAG_REC_TRACE,
 	DIAG_REC_RAW,
 	DIAG_REC_REARM,      /* FW-111: delayed-rearm recorder - see rearm_delay_diag.h */
-	DIAG_REC_FW112       /* FW-112-DIAG: whole-chain event recorder - see fw112_diag.h */
+	DIAG_REC_FW112,      /* FW-112-DIAG: whole-chain event recorder - see fw112_diag.h */
+	DIAG_REC_AB,        /* FW-112 A/B: rearm-episode logger - see fw112_ab.h */
+	DIAG_REC_FW117,     /* FW-117 (TEMPORARY): bridge lifecycle trace - see fw117_trace.h */
+	DIAG_REC_ROLLING_NO_ASSIST  /* rolling no-assist diagnostic - see rolling_no_assist_diag.h */
 } diag_record_kind_t;
 
 /* --- error bits, per session, reported in the trailer's tx_error_summary ------------------- */
@@ -129,11 +138,16 @@ typedef enum {
  * Trailer byte 7 flags. Bit 0 is "complete" (see diag_session.c); bit 1 is FW-111: set when the
  * delayed-rearm recorder refused a capture this session, so a reader can tell a FW-111 refusal
  * apart from the shared DIAG_ERR_CAPTURES_FULL (which also covers TRACE/RAW). Bit 2 is
- * FW-112-DIAG: same distinction for the whole-chain event recorder (fw112_diag.c).
+ * FW-112-DIAG: same distinction for the whole-chain event recorder (fw112_diag.c). Bit 3 is
+ * FW-112 A/B: same distinction for the rearm-episode logger (fw112_ab.c). Bit 4 is FW-117
+ * (TEMPORARY): same distinction for the bridge lifecycle trace (fw117_trace.c).
  */
 #define DIAG_TRAILER_F_COMPLETE       0x01U
 #define DIAG_TRAILER_F_REARM_REJECTED 0x02U
 #define DIAG_TRAILER_F_FW112_REJECTED 0x04U
+#define DIAG_TRAILER_F_FW112_AB_REJECTED 0x08U
+#define DIAG_TRAILER_F_FW117_REJECTED 0x10U
+#define DIAG_TRAILER_F_ROLLING_NO_ASSIST_REJECTED 0x20U
 
 /* Retries before a frame - and with it its whole record - is given up on. */
 #define DIAG_TX_MAX_RETRY 8U
@@ -145,6 +159,20 @@ typedef enum {
 /* Completed sessions that can wait to be dumped. More than one because a dump interrupted by
  * the rider setting off must not be overwritten by the session that ends at the NEXT stop. */
 #define DIAG_SESSION_SUMMARIES 4U
+
+/*
+ * FW-106: how many aggregate frames (main.c's diag_build_aggregate() block) can be frozen into
+ * one summary. It lives in the HEADER, not in diag_session.c, only because of FW-121.0: seven
+ * new frames were added to that block while this cap still said 14, and the snapshot loop
+ * silently stopped at 14 - the frames were built, then dropped, with no error and no counter.
+ * main.c now asserts its own frame count against this number at compile time, which is only
+ * possible if both translation units can see it.
+ *
+ * Raising it costs 12 B x DIAG_SESSION_SUMMARIES per frame and must be re-measured into
+ * DIAG_BUDGET_SESSION_BYTES - see inc/diag_budget.h for the method.
+ */
+#define DIAG_AGGREGATE_SNAPSHOT_MAX 21U
+
 
 /*
  * FW-106: caps how often a NEW frame may be handed to the CAN peripheral during a dump.

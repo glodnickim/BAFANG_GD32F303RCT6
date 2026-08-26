@@ -22,6 +22,8 @@
 #include "CAN_Display.h"
 #include "parser.h"
 #include "FOC.h"
+#include "current_cal.h"
+#include "fw1264_probe.h"   //FW-126.4 A/B probe (shared layout)
 #include "assist_extended_boost.h"
 #include "assist_modes.h"
 #include "tuning_config.h"
@@ -33,6 +35,9 @@
 #include "can_tx_queue.h"
 #include "can_multiframe.h"
 #include "can_reply_effects.h"
+#if CAN_DIAGNOSTICS_ENABLE
+#include "rolling_no_assist_dump.h"
+#endif
 
 /* Build version string for the HMI info field (0x6001). The tracked build script
    generates build_version.h inside .build and adds that directory before inc/.
@@ -102,6 +107,16 @@ extern volatile uint16_t diag_peak_precomp_motor_w, diag_peak_cadence_comp, diag
 extern int32_t i32_hall_order;
 extern int32_t Hall_13, Hall_32, Hall_26, Hall_64, Hall_45, Hall_51;
 extern uint8_t param_record_state; //FW-023: 0 = valid record, 1 = defaults, 2 = halls rejected
+extern current_cal_t current_cal;
+extern uint32_t fw126_cal_conversion_count;
+extern uint32_t fw126_cal_fresh_conversion_count;
+extern uint8_t fw126_cal_trigger_mode;
+extern uint8_t fw126_cal_moe_off_verified;
+extern uint8_t fw125_zero_current_selftest_valid;
+extern uint16_t fw125_zero_current_selftest_samples;
+extern uint8_t fw125_zero_current_selftest_moe_on;
+extern int16_t fw125_zero_current_selftest_mean[CURRENT_CAL_PHASES];
+extern uint16_t fw125_zero_current_selftest_p2p[CURRENT_CAL_PHASES];
 #endif
 uint8_t tx_data_length;
 uint8_t rx_data_length;
@@ -117,6 +132,7 @@ uint8_t level_counter;
 extern volatile uint16_t comm_lost_ticks; //comms watchdog counter (defined in main.c) - reset on each HMI frame
 extern volatile uint8_t comm_seen;        //comms watchdog arm flag (defined in main.c) - set on first HMI frame
 extern uint8_t auto_off_minutes;          //runtime auto-off timeout [min] (defined in main.c) - set from HMI 0x6303
+extern volatile uint32_t control_time_ticks; //FW-114: 4 kHz free-running clock (main.c) - drives the 0x3000 session counter
 uint8_t walk_can_counter;
 uint8_t walk_can_release_counter;
 
@@ -131,6 +147,124 @@ static void put_i32_le(uint8_t *dst, int32_t value)
 	dst[1] = (raw >> 8) & 0xFF;
 	dst[2] = (raw >> 16) & 0xFF;
 	dst[3] = (raw >> 24) & 0xFF;
+}
+
+static void put_u16_le(uint8_t *dst, uint16_t value)
+{
+	dst[0] = (uint8_t)(value & 0xFFU);
+	dst[1] = (uint8_t)((value >> 8) & 0xFFU);
+}
+
+static uint16_t crc16_ccitt(const uint8_t *data, uint8_t len)
+{
+	uint16_t crc = 0xFFFFU;
+	uint8_t i, bit;
+	for (i = 0U; i < len; i++) {
+		crc ^= (uint16_t)data[i] << 8;
+		for (bit = 0U; bit < 8U; bit++)
+			crc = (crc & 0x8000U) ? (uint16_t)((crc << 1) ^ 0x1021U) : (uint16_t)(crc << 1);
+	}
+	return crc;
+}
+
+/* 0x602D, DIAG only, read-only. A self-contained snapshot avoids another write command or
+ * mutable diagnostic namespace. The 55-byte payload ends in CRC16-CCITT over bytes 0..52:
+ *   0..2 magic "CC\1"; 3 flags(valid/fallback/verify/MOE-off); 4..7 status/reason/source/tries;
+ *   8..13 latest/verify sample evidence; 14..21 trigger/fresh counts; 22..51 offset, residual,
+ *   P2P and independent verify statistics; 52 self-test status; 53..54 CRC little-endian. */
+static void current_cal_serialize_dump(uint8_t out[55])
+{
+	uint8_t i;
+	uint8_t flags = (uint8_t)((current_cal.valid ? 0x01U : 0U)
+		| ((current_cal.source != CURRENT_CAL_SRC_RUNTIME) ? 0x02U : 0U)
+		| (fw125_zero_current_selftest_valid ? 0x04U : 0U)
+		| (fw126_cal_moe_off_verified ? 0x08U : 0U));
+
+	for (i = 0U; i < 55U; i++) out[i] = 0U;
+	out[0] = 'C'; out[1] = 'C'; out[2] = 1U; out[3] = flags;
+	out[4] = (uint8_t)current_cal.status;
+	out[5] = (uint8_t)current_cal.failure_reason;
+	out[6] = (uint8_t)current_cal.source;
+	out[7] = current_cal.attempts;
+	put_u16_le(&out[8], current_cal.last_sample_count);
+	put_u16_le(&out[10], fw125_zero_current_selftest_samples);
+	out[12] = fw125_zero_current_selftest_moe_on;
+	out[13] = fw126_cal_trigger_mode;
+	put_i32_le(&out[14], (int32_t)fw126_cal_conversion_count);
+	put_i32_le(&out[18], (int32_t)fw126_cal_fresh_conversion_count);
+	for (i = 0U; i < CURRENT_CAL_PHASES; i++) {
+		put_u16_le(&out[22U + 2U * i], (uint16_t)current_cal.offset[i]);
+		put_u16_le(&out[28U + 2U * i], (uint16_t)current_cal.residual_mean[i]);
+		put_u16_le(&out[34U + 2U * i], current_cal.p2p[i]);
+		put_u16_le(&out[40U + 2U * i], (uint16_t)fw125_zero_current_selftest_mean[i]);
+		put_u16_le(&out[46U + 2U * i], fw125_zero_current_selftest_p2p[i]);
+	}
+	out[52] = fw125_zero_current_selftest_valid;
+	put_u16_le(&out[53], crc16_ccitt(out, 53U));
+}
+
+/*
+ * FW-126.4 A/B probe report, 0x602E schema 3. Same 55-byte framing and CRC as 0x602D.
+ *
+ * THE LAYOUT IS DEFINED ONCE, in protocol/fw1264_probe_schema.json, and BOTH decoders read
+ * their offsets from that file. FW-126.3 had the layout written out twice and they drifted:
+ * the PowerShell decoder kept schema 1 offsets after the JS side moved to schema 2, printed
+ * BAD MAGIC, and then printed a verdict anyway - the opposite of the truth. Any change here
+ * must change that file, and the golden-payload test compares both decoders field by field.
+ *
+ *   0..2   'C','P',3
+ *   3      flags: bit0 MOE off, bit1 POEN off (same fact, kept separate on the wire so a
+ *          decoder never has to infer one from the other), bit2 TIMER0 running,
+ *          bit3 restore verified, bit4 done
+ *   4..5   TIMER0 CH3CV
+ *   6/7    ADC0 / ADC2 inserted trigger selector BEFORE (ADC_CTL1.ETSIC)
+ *   8/9    ...and after the restore, read back
+ *   10/11/12  TIMER0 CTL1.MMC before / during / restored
+ *   13..15 SW samples per phase A/B/C     16..21 SW median A/B/C
+ *   22..27 SW min A/B/C                   28..33 SW max A/B/C
+ *   34..39 TRGO EOIC events per ADC0/ADC1/ADC2
+ *   40..42 TRGO samples per phase         43..48 TRGO median A/B/C
+ *   49..51 TRGO span (max-min, clamped 255) per phase
+ *   52     schema echo   53..54 CRC16-CCITT over 0..52
+ */
+void fw1264_serialize_probe(uint8_t out[55])
+{
+	const fw1264_probe_t *p = fw1264_probe_state();
+	uint8_t i;
+
+	for (i = 0U; i < 55U; i++) out[i] = 0U;
+	out[0] = 'C'; out[1] = 'P'; out[2] = 3U;
+	out[3] = (uint8_t)((p->moe_off ? 0x01U : 0U)
+		| (p->moe_off ? 0x02U : 0U)
+		| (p->timer_running ? 0x04U : 0U)
+		| (p->restore_ok ? 0x08U : 0U)
+		| (p->done ? 0x10U : 0U));
+	put_u16_le(&out[4], p->ch3);
+	out[6] = p->adc0_src_before;
+	out[7] = p->adc2_src_before;
+	out[8] = p->adc0_src_restored;
+	out[9] = p->adc2_src_restored;
+	out[10] = p->trgo_before;
+	out[11] = p->trgo_during;
+	out[12] = p->trgo_restored;
+	for (i = 0U; i < FW1264_PHASES; i++) {
+		out[13U + i] = p->sw.n[i];
+		put_u16_le(&out[16U + 2U * i], (uint16_t)p->sw.median[i]);
+		put_u16_le(&out[22U + 2U * i], (uint16_t)p->sw.smin[i]);
+		put_u16_le(&out[28U + 2U * i], (uint16_t)p->sw.smax[i]);
+	}
+	for (i = 0U; i < FW1264_ADCS; i++) {
+		put_u16_le(&out[34U + 2U * i], p->trgo.events[i]);
+	}
+	for (i = 0U; i < FW1264_PHASES; i++) {
+		int32_t span = (int32_t)p->trgo.smax[i] - (int32_t)p->trgo.smin[i];
+		if (span < 0) span = 0;
+		out[40U + i] = p->trgo.n[i];
+		put_u16_le(&out[43U + 2U * i], (uint16_t)p->trgo.median[i]);
+		out[49U + i] = (uint8_t)((span > 255) ? 255 : span);
+	}
+	out[52] = 3U;
+	put_u16_le(&out[53], crc16_ccitt(out, 53U));
 }
 #endif
 
@@ -179,6 +313,21 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 						}
 					}
 				}
+#if CAN_DIAGNOSTICS_ENABLE
+				else if(Ext_ID_Rx.command==0x602C){
+					/* FW-123: explicit FROZEN rolling_no_assist replay. This is deliberately
+					 * a zero-byte WRITE rather than a READ: a READ must stay side-effect free
+					 * while this request arms a paced transport. The response is NORMAL_ACK
+					 * only when a frozen capture exists and no replay is already pending.
+					 *
+					 * CANable/BESST source=5, target=2, operation=WRITE, command=0x602C:
+					 *   EFID 0x0510602C, DLC 0
+					 */
+					uint8_t accepted = (Ext_ID_Rx.source == 5U && receive_message.rx_dlen == 0U &&
+					                    rolling_no_assist_dump_request()) ? 1U : 0U;
+					sendWriteResult(0x602C, accepted);
+				}
+#endif
 				else if(Ext_ID_Rx.command==0x3203){ //FW-076: speed limit + wheel diameter code + circumference
 					/*
 					 * Validate the WHOLE frame first, then apply. The old code applied
@@ -237,10 +386,25 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 				//FW-110 v4: 0x6200 is the same case, now handled above (one ERROR_ACK only) - the
 				//generic ACK must not fire for it either.
 				if(!(Ext_ID_Rx.command>=0x6300 && Ext_ID_Rx.command<=0x6304)
-				   && Ext_ID_Rx.command!=0x3203 && Ext_ID_Rx.command!=0x6200) sendAcknoledge();
+				   && Ext_ID_Rx.command!=0x3203 && Ext_ID_Rx.command!=0x6200
+#if CAN_DIAGNOSTICS_ENABLE
+				   && Ext_ID_Rx.command!=0x602C
+#endif
+				  ) sendAcknoledge();
 				break;
 			case READ_CMD:
 				sendCAN_Tx(MP,MS);
+				break;
+			case NORMAL_ACK:
+				//FW-114: the display confirms a multiframe reply's START with op=2 (e.g. 83126000
+				//after 821C6000) before the controller may send DATA - the factory's flow control.
+				//Forward the command to the multiframe producer, which gates the DATA phase on it
+				//for target=3 replies (with CANMF_ACK_WAIT_TIMEOUT_TICKS as the fallback for
+				//displays that never ACK). Only the HMI's ACK (source=3) is relevant - a write-ACK
+				//from the tool (source=5) must not release the gate.
+				if(Ext_ID_Rx.source==3) can_multiframe_hmi_ack(Ext_ID_Rx.command);
+				break;
+			case ERROR_ACK:
 				break;
 			case LONG_START_CMD:
 				switch (Rx_MF_active){
@@ -594,8 +758,17 @@ void sendCAN_Poll(MotorParams_t* MP, MotorState_t* MS, uint16_t command){
 		case 0x3205: //to do
 			{
 			uint8_t d[8] = {0};
-			d[0] = MS->calories&0xFF; //calories
-			d[1] = (MS->calories>>8)&0xFF;
+#if CAN_DIAGNOSTICS_ENABLE
+			/* DIAG-only: live final Iq setpoint replaces calories in 0x3205 bytes 0-1.
+			 * MS.calories and int_Temperature are NOT modified — this only changes
+			 * what is serialized into this CAN frame. See rolling_no_assist_diag audit.
+			 * Range 0..700 (PH_CURRENT_MAX) fits uint16 LE directly. */
+			uint16_t cal_val = (uint16_t)(MS->i_q_setpoint);
+#else
+			uint16_t cal_val = MS->calories;
+#endif
+			d[0] = cal_val & 0xFF;
+			d[1] = (cal_val >> 8) & 0xFF;
 			can_tx_queue_enqueue(0x02F83205U, 2U, d); //FW-110: was a blocking can_message_transmit/can_transmit_states wait
 			}
 			break;
@@ -614,7 +787,9 @@ void sendCAN_status_broadcast(MotorState_t* MS){
 		uint8_t d[8] = {0};
 		if(i==0) d[0] = (MS->brake_active_flag==SET) ? 0x01 : 0x00; //bit0=brake
 		else if(i==1) d[0] = 0x01;
-		else { d[3] = 0x0B; } //0x3000: byte3=0x0B matches orig firmware
+		else { //0x3000: byte0 = session counter, +1 every 10 s since boot (matches the m510
+		       //logs 01,02,03...; bytes1-3 stay 0). Was a frozen 0x00 00 00 0B every 480 ms.
+		       d[0] = (uint8_t)(control_time_ticks / (CONTROL_TIMEBASE_HZ * 10U)); }
 		can_tx_queue_enqueue(hb_efid[i], hb_dlen[i], d); //FW-110: was a blocking can_message_transmit/can_transmit_states wait
 	}
 }
@@ -825,6 +1000,20 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 						can_reply_effects_6029_armed(xfer_id);
 					}
 				}
+			}
+			break;
+		case 0x602D: //FW-126: read-only phase-current calibration proof (Canable diagnostics only)
+			if(Ext_ID_Rx.operation==1 && Ext_ID_Rx.source==5){
+				uint8_t cal_dump[55];
+				current_cal_serialize_dump(cal_dump);
+				send_multiframe(Ext_ID_Rx.command, (char*)&cal_dump[0], sizeof(cal_dump));
+			}
+			break;
+		case 0x602E: //FW-126.4: read-only TRGO parity A/B probe, taken with MOE OFF
+			if(Ext_ID_Rx.operation==1 && Ext_ID_Rx.source==5){
+				uint8_t probe_dump[55];
+				fw1264_serialize_probe(probe_dump);
+				send_multiframe(Ext_ID_Rx.command, (char*)&probe_dump[0], sizeof(probe_dump));
 			}
 			break;
 #endif

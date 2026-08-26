@@ -95,6 +95,11 @@ typedef struct {
 	uint16_t applied_support_ratio_pct;
 	uint32_t requested_battery_current_ma;
 	int32_t iq_request;
+	/* C0-PROOF: phase_iq_request BEFORE the P/U ceiling clamp in finish_power_request().
+	 * Measurement-only — nothing reads this to make a decision. Captured at the exact clamp
+	 * point (assist_modes.c finish_power_request, line ~818) so the diagnostic snapshot can
+	 * distinguish "eMTB formula returned ~0" from "P/U ceiling zeroed a positive request". */
+	int32_t iq_before_pu;
 	uint8_t cadence_for_assist_rpm;
 	bool assist_without_rotation_active;
 	uint16_t torque_for_assist_mv;

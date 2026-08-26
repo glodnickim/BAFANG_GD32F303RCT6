@@ -49,6 +49,17 @@ OF SUCH DAMAGE.
 #include "diag_session.h"
 #include "rearm_delay_diag.h"   /* FW-111 */
 #include "fw112_diag.h"         /* FW-112-DIAG */
+#include "fw112_ab.h"           /* FW-112 A/B */
+#include "fw117_trace.h"        /* FW-117 TEMP: bridge lifecycle trace */
+#include "rolling_no_assist_diag.h" /* rolling no-assist diagnostic */
+#include "current_cal.h"         /* FW-119: calibration retry / LKG / fallback policy */
+#include "dyn_adc_state.h"      /* FW-120.1: 2-of-3 pair selection for the sample in hand */
+#include "adc_trigger_diag.h"    /* FW-121.0: injected-ADC trigger timing measurement (DIAG only) */
+#include "fw1264_probe.h"       /* FW-126.4: TRGO parity A/B probe (DIAG only) */
+#if CAN_DIAGNOSTICS_ENABLE
+#include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
+#include "rolling_no_assist_dump.h" /* FW-123: explicit/repeatable FROZEN capture replay */
+#endif
 #include "can_tx_queue.h"
 #include "can_multiframe.h"
 #include "can_reply_effects.h"
@@ -140,7 +151,8 @@ void rcu_config(void);
 void dma_config(void);
 void adc_config(void);
 void timer0_config(void); //PWM for Mosfet driver
-void timer1_config(void); //PWM for triggering regular ADC
+void timer1_config(void)
+; //PWM for triggering regular ADC
 void timer2_config(void); // Hall sensor input (encoder in UVW-mode=
 ErrStatus can_networking(void);
 void can_networking_init(void);
@@ -149,7 +161,7 @@ void runPIcontrol(void);
 void autodetect(void);
 int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max);
 void get_standstill_position(void);
-void dyn_adc_state(q31_t angle);
+void dyn_adc_trigger_update(void);
 void fmc_program_hall_angles(void);
 void fmc_erase_pages(void);
 void reg_ADC_processing(void);
@@ -551,6 +563,18 @@ uint8_t shutoffcounter=0;
 //FW-050: offroadcode / offroadcounter removed — the gesture no longer builds a decimal number.
 uint16_t pulse_counter=0;
 uint8_t ui_8_PWM_ON_Flag=0;
+// STEP 2A: bridge lifecycle states for explicit neutral dwell
+#define BRIDGE_LIFECYCLE_IDLE            0U
+#define BRIDGE_LIFECYCLE_NEUTRAL_COMMIT  1U
+#define BRIDGE_LIFECYCLE_MOE_ON          2U
+#define BRIDGE_LIFECYCLE_NEUTRAL_DWELL   3U
+#define BRIDGE_LIFECYCLE_FOC_RELEASE     4U
+#define BRIDGE_LIFECYCLE_RUN             5U
+uint8_t  bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
+uint8_t  neutral_dwell_counter = 0;
+uint8_t  neutral_dwell_active = 0;  // 1 = ISR must write neutral CCR, not FOC
+uint8_t  foc_release_pending = 0;   // 1 = dwell complete, first ISR after this transitions to RUN
+uint8_t  first_active_foc_sampled = 0; // DIAG: first FOC sample after release
 uint8_t  pwm_cutoff_active=0;    // trwa miekkie zwolnienie stopnia mocy przed DISABLE
 uint16_t pwm_cutoff_tick=0;      // licznik cykli okna zwolnienia
 uint16_t pwm_cutoff_st[3]={0,0,0}; // snapshot switchtime na starcie okna
@@ -592,6 +616,354 @@ int32_t soc_slot_index=-1;        //index of latest written slot (-1 = none)
 float cycle_start_soc=-1.0f;      //SOC at start of a discharge cycle (-1 = none)
 float cycle_discharge_mah=0;      //accumulated discharge during the cycle
 uint8_t shutdown_saved=0;         //guard: save state only once on shutdown
+//--- FW-118 measurement + FW-119 safety policy + FW-125 same-path fix: phase current zero
+//--- calibration ---
+// One struct is the whole state: the offsets the ISR applies, the last attempt's numbers, the
+// last-known-good set and the policy outcome. FW-118 kept these as eight loose globals, which
+// made "which of these agree with each other right now" impossible to answer.
+//
+// Field map for anything that used to read the FW-118 names:
+//   current_offset_a/b/c        -> current_cal.offset[0..2]
+//   current_calibration_valid   -> current_cal.valid
+//   current_calibration_status  -> current_cal.status      (0..3 keep their FW-118 meaning)
+//   current_zero_a/b/c_adc      -> current_cal.residual_mean[0..2]  (FW-125: renamed, new domain)
+//   current_zero_p2p_a/b/c      -> current_cal.p2p[0..2]
+current_cal_t current_cal;
+
+/*
+ * FW-126: same-path calibration sampling, SOFTWARE-triggered.
+ *
+ * FW-125 collected calibration samples via an accumulator hooked inside ADC0_1_IRQHandler,
+ * armed while the bridge was off. That relied on TIMER0 CH3's HARDWARE trigger still firing
+ * injected conversions with MOE off. Real-bike evidence proved it does not: FW-121.0B's own
+ * sweep, armed under the identical "standstill + dark bridge" condition, recorded an injected
+ * ISR count of exactly 0 for ~3.15 s until the moment POEN (MOE) actually turned on (see
+ * inc/adc_trigger_diag.h's header comment on the ARM/ABORT/POEN chronology). So FW-125's startup
+ * calibration silently timed out on every real boot and fell back to CURRENT_CAL_LEGACY_FALLBACK
+ * - it never actually calibrated anything on the bike.
+ *
+ * The fix: trigger each inserted conversion by SOFTWARE (adc_software_trigger_enable(), which
+ * only ever touches ADC_CTL1 - never CCHP/POEN/any PWM register, so MOE stays off throughout),
+ * synchronously in main(), and poll each ADC's own EOIC flag for proof the sample just read is a
+ * NEW conversion rather than a stale re-read of the previous one (see phase_cal_collect_samples()
+ * below). This SAME function collects both the calibration samples and the DIAG-only verify pass
+ * (see the two call sites in main()) - one sampling primitive, not two.
+ */
+uint32_t fw126_cal_conversion_count = 0; /* diagnostic: total software-triggered conversions issued */
+uint32_t fw126_cal_fresh_conversion_count = 0; /* all three EOIC flags proved a NEW JDR triple */
+uint8_t  fw126_cal_trigger_mode = 1;     /* 1 = software-triggered (FW-126); kept for CAL DUMP */
+
+#if CAN_DIAGNOSTICS_ENABLE
+/*
+ * FW-126.4 A/B probe. See inc/fw1264_probe.h for what it measures and why it replaced the
+ * FW-126.3 survey. Runs ONCE, immediately before current_cal_init().
+ */
+static fw1264_probe_t fw1264;
+
+const fw1264_probe_t *fw1264_probe_state(void) { return &fw1264; }
+
+/* Poll budget per capture. Many PWM periods (62.5 us each), so "no events" means silent
+ * hardware rather than a short look. */
+#define FW1264_POLL_BUDGET 500000UL
+
+/* ADC_CTL1.ETSIC and TIMER0 CTL1.MMC, read as raw field values for the report. */
+#define FW1264_ETSIC_OF(adc)   ((uint8_t)((ADC_CTL1(adc) & ADC_CTL1_ETSIC) >> 12))
+#define FW1264_MMC_OF_TIMER0() ((uint8_t)((TIMER_CTL1(TIMER0) & TIMER_CTL1_MMC) >> 4))
+
+static int16_t fw1264_median_of(int16_t *s, uint8_t n)
+{
+	uint8_t i, j;
+	if (n == 0U) return 0;
+	for (i = 1U; i < n; i++) {           /* insertion sort in place - n <= 16 */
+		int16_t key = s[i];
+		j = i;
+		while (j > 0U && s[j - 1U] > key) { s[j] = s[j - 1U]; j--; }
+		s[j] = key;
+	}
+	return s[n / 2U];
+}
+
+/*
+ * One capture. The three ADCs are observed INDEPENDENTLY - never as a conjunction, which is
+ * the mistake FW-126.3 started from. ADC0 is the reference for the ADC0+ADC1 dual pair; ADC2
+ * freshness is proven by its own EOIC and nothing else.
+ *
+ * `software` selects the producer: true issues a software trigger each iteration, false issues
+ * nothing at all and simply watches whatever the configured hardware trigger delivers.
+ */
+static void fw1264_capture(fw1264_capture_t *cap, uint8_t software)
+{
+	int16_t raw[FW1264_PHASES][FW1264_SAMPLES];   /* stack - not worth permanent RAM */
+	uint32_t budget = FW1264_POLL_BUDGET;
+	uint8_t ph;
+
+	memset(cap, 0, sizeof(*cap));
+	adc_flag_clear(ADC0, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC1, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC2, ADC_FLAG_EOIC);
+
+	while (budget--) {
+		if ((budget & 0xFFFFU) == 0U) fwdgt_counter_reload();
+
+		if (software) {
+			/* ADC0's software start also starts ADC1 (dual inserted parallel); ADC2 is
+			 * independent and needs its own. Same two calls the calibration loop makes. */
+			adc_software_trigger_enable(ADC0, ADC_INSERTED_CHANNEL);
+			adc_software_trigger_enable(ADC2, ADC_INSERTED_CHANNEL);
+		}
+
+		/* Phase C = ADC0, the dual master and the reference event. */
+		if (adc_flag_get(ADC0, ADC_FLAG_EOIC) == SET) {
+			if (cap->events[0] < 0xFFFFU) cap->events[0]++;
+			if (cap->n[2] < FW1264_SAMPLES) raw[2][cap->n[2]++] = (int16_t)adc_inserted_data_read(ADC0, ADC_INSERTED_CHANNEL_0);
+			adc_flag_clear(ADC0, ADC_FLAG_EOIC);
+		}
+		/* Phase B = ADC1, the dual partner - its own flag, never inferred from ADC0's. */
+		if (adc_flag_get(ADC1, ADC_FLAG_EOIC) == SET) {
+			if (cap->events[1] < 0xFFFFU) cap->events[1]++;
+			if (cap->n[1] < FW1264_SAMPLES) raw[1][cap->n[1]++] = (int16_t)adc_inserted_data_read(ADC1, ADC_INSERTED_CHANNEL_0);
+			adc_flag_clear(ADC1, ADC_FLAG_EOIC);
+		}
+		/* Phase A = ADC2, independent. */
+		if (adc_flag_get(ADC2, ADC_FLAG_EOIC) == SET) {
+			if (cap->events[2] < 0xFFFFU) cap->events[2]++;
+			if (cap->n[0] < FW1264_SAMPLES) raw[0][cap->n[0]++] = (int16_t)adc_inserted_data_read(ADC2, ADC_INSERTED_CHANNEL_0);
+			adc_flag_clear(ADC2, ADC_FLAG_EOIC);
+		}
+
+		if (cap->n[0] >= FW1264_SAMPLES && cap->n[1] >= FW1264_SAMPLES &&
+		    cap->n[2] >= FW1264_SAMPLES) break;
+	}
+
+	for (ph = 0U; ph < FW1264_PHASES; ph++) {
+		uint8_t k;
+		if (cap->n[ph] == 0U) continue;
+		cap->smin[ph] = cap->smax[ph] = raw[ph][0];
+		for (k = 1U; k < cap->n[ph]; k++) {
+			if (raw[ph][k] < cap->smin[ph]) cap->smin[ph] = raw[ph][k];
+			if (raw[ph][k] > cap->smax[ph]) cap->smax[ph] = raw[ph][k];
+		}
+		cap->median[ph] = fw1264_median_of(raw[ph], cap->n[ph]);   /* sorts the local copy */
+	}
+}
+
+static void fw1264_probe_run(void)
+{
+	uint8_t adc0_src, adc2_src, mmc;
+
+	memset(&fw1264, 0, sizeof(fw1264));
+	fw1264.timer_running = ((TIMER_CTL0(TIMER0) & TIMER_CTL0_CEN) != 0U) ? 1U : 0U;
+	fw1264.ch3 = (uint16_t)(TIMER_CH3CV(TIMER0) & 0xFFFFU);
+	fw1264.moe_off = ((TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) == 0U) ? 1U : 0U;
+	if (!fw1264.moe_off) return;    /* never measure with the bridge live */
+
+	/* SNAPSHOT BEFORE - the values every restore below is checked against. Reset is not a
+	 * restore mechanism: this probe puts back exactly what it found. */
+	adc0_src = FW1264_ETSIC_OF(ADC0);
+	adc2_src = FW1264_ETSIC_OF(ADC2);
+	mmc      = FW1264_MMC_OF_TIMER0();
+	fw1264.adc0_src_before = adc0_src;
+	fw1264.adc2_src_before = adc2_src;
+	fw1264.trgo_before = mmc;
+
+	/* The production ADC1 EOIC handler clears the flags this probe reads. PWM_ON is 0 for the
+	 * whole startup window, so masking it costs nothing. */
+	nvic_irq_disable(ADC0_1_IRQn);
+
+	/* ---- TEST A: software trigger, the calibration producer ---- */
+	adc_external_trigger_source_config(ADC0, ADC_INSERTED_CHANNEL, ADC0_1_2_EXTTRIG_INSERTED_NONE);
+	adc_external_trigger_source_config(ADC2, ADC_INSERTED_CHANNEL, ADC0_1_2_EXTTRIG_INSERTED_NONE);
+	fw1264_capture(&fw1264.sw, 1U);
+
+	/* ---- TEST B: TIMER0 TRGO from O3CPRE, the stock producer ----
+	 * MMC selects only WHAT TRGO carries; it enables no output and touches no phase compare. */
+	timer_master_output_trigger_source_select(TIMER0, TIMER_TRI_OUT_SRC_O3CPRE);
+	adc_external_trigger_source_config(ADC0, ADC_INSERTED_CHANNEL, ADC0_1_EXTTRIG_INSERTED_T0_TRGO);
+	adc_external_trigger_source_config(ADC2, ADC_INSERTED_CHANNEL, ADC2_EXTTRIG_INSERTED_T0_TRGO);
+	fw1264.trgo_during = FW1264_MMC_OF_TIMER0();
+	fw1264_capture(&fw1264.trgo, 0U);      /* issues NOTHING - the hardware is the producer */
+
+	/* ---- EXPLICIT RESTORE, then read back ---- */
+	adc_external_trigger_source_config(ADC0, ADC_INSERTED_CHANNEL, CTL1_ETSIC(adc0_src));
+	adc_external_trigger_source_config(ADC2, ADC_INSERTED_CHANNEL, CTL1_ETSIC(adc2_src));
+	timer_master_output_trigger_source_select(TIMER0, CTL1_MMC(mmc));
+	adc_flag_clear(ADC0, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC1, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC2, ADC_FLAG_EOIC);
+	nvic_irq_enable(ADC0_1_IRQn, 0, 0);
+
+	fw1264.adc0_src_restored = FW1264_ETSIC_OF(ADC0);
+	fw1264.adc2_src_restored = FW1264_ETSIC_OF(ADC2);
+	fw1264.trgo_restored = FW1264_MMC_OF_TIMER0();
+	fw1264.restore_ok = (uint8_t)((fw1264.adc0_src_restored == adc0_src) &&
+	                              (fw1264.adc2_src_restored == adc2_src) &&
+	                              (fw1264.trgo_restored == mmc));
+
+	/* POEN re-checked AFTER: a probe that started dark and ended live proves nothing. */
+	if ((TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U) fw1264.moe_off = 0U;
+	fw1264.done = 1U;
+}
+#endif /* CAN_DIAGNOSTICS_ENABLE */
+uint8_t  fw126_cal_moe_off_verified = 1; /* cleared permanently if startup sampling ever sees POEN */
+
+/*
+ * Collect `target` same-path samples by software-triggering the inserted group directly. Fills
+ * `out` in exactly the shape current_cal_submit() expects (see inc/current_cal.h). Returns 1 on
+ * a complete collection, 0 on timeout (out->timed_out is also set either way).
+ *
+ * Topology (inc/config.h, gd32f30x_adc.h ADC_DAUL_INSERTED_PARALLEL_REGULAL_FOLLOWUP_FAST,
+ * SYNCM=3): ADC0 is the dual-mode MASTER, ADC1 the inserted-parallel SLAVE with its trigger
+ * source permanently ADC0_1_2_EXTTRIG_INSERTED_NONE (see adc_config()) - triggering ADC0's
+ * inserted group starts ADC1's too, synchronously, in the same call. ADC2 is fully independent
+ * and needs its own separate software trigger. Neither adc_software_trigger_enable() nor the
+ * trigger-source reconfiguration below touches CCHP/POEN or any PWM/output register - MOE stays
+ * off for the whole call, unconditionally.
+ */
+static uint8_t phase_cal_collect_samples(uint16_t target, current_cal_attempt_t *out)
+{
+	uint16_t taken = 0;
+	uint8_t timed_out = 0;
+	uint8_t moe_on = 0;
+	int32_t sum[CURRENT_CAL_PHASES] = {0, 0, 0};
+	int16_t smin[CURRENT_CAL_PHASES] = {0, 0, 0};
+	int16_t smax[CURRENT_CAL_PHASES] = {0, 0, 0};
+
+	/* An early POEN rejection has no JDR data. Make that explicit rather than leaving an
+	 * uninitialized diagnostic attempt for the self-test/dump path to accidentally inspect. */
+	memset(out, 0, sizeof(*out));
+
+	if ((TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U) {
+		/* A calibration may never repair this by touching MOE. Record the fact and reject the
+		 * attempt; bridge lifecycle owns all PWM transitions. */
+		moe_on = 1U;
+		fw126_cal_moe_off_verified = 0U;
+		out->timed_out = 0U;
+		out->moe_on = 1U;
+		out->samples = 0U;
+		return 0U;
+	}
+
+	/* Inserted trigger source -> software, for the duration of this call only. */
+	adc_external_trigger_source_config(ADC0, ADC_INSERTED_CHANNEL, ADC0_1_2_EXTTRIG_INSERTED_NONE);
+	adc_external_trigger_source_config(ADC2, ADC_INSERTED_CHANNEL, ADC0_1_2_EXTTRIG_INSERTED_NONE);
+
+	/* The production ADC1 EOIC interrupt (ADC0_1_IRQHandler) must not run here: it clears ADC1's
+	 * EOIC flag itself, which would race this function's own poll/clear of that same flag and
+	 * could starve every wait below. Nothing needs that interrupt during this call - the bridge
+	 * is off throughout (FOC_calculation() cannot run regardless: ui_8_PWM_ON_Flag is 0 for the
+	 * whole calibration window), so nothing is lost by masking it briefly. */
+	nvic_irq_disable(ADC0_1_IRQn);
+	adc_flag_clear(ADC0, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC1, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC2, ADC_FLAG_EOIC);
+
+	for(taken = 0; taken < target; ){
+		uint32_t guard = CURRENT_CAL_ISR_TIMEOUT;
+		int16_t a, b, c;
+
+		fwdgt_counter_reload();
+		if ((TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U) {
+			moe_on = 1U;
+			fw126_cal_moe_off_verified = 0U;
+			break;
+		}
+		adc_software_trigger_enable(ADC0, ADC_INSERTED_CHANNEL); /* also starts ADC1 (dual mode) */
+		adc_software_trigger_enable(ADC2, ADC_INSERTED_CHANNEL);
+		fw126_cal_conversion_count++;
+
+		while(!(adc_flag_get(ADC0, ADC_FLAG_EOIC) == SET && adc_flag_get(ADC1, ADC_FLAG_EOIC) == SET
+		        && adc_flag_get(ADC2, ADC_FLAG_EOIC) == SET) && --guard);
+		if(!guard){ timed_out = 1; break; }
+		if ((TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U) {
+			moe_on = 1U;
+			fw126_cal_moe_off_verified = 0U;
+			break;
+		}
+
+		a = (int16_t)adc_inserted_data_read(ADC2, ADC_INSERTED_CHANNEL_0); /* Phase A */
+		b = (int16_t)adc_inserted_data_read(ADC1, ADC_INSERTED_CHANNEL_0); /* Phase B */
+		c = (int16_t)adc_inserted_data_read(ADC0, ADC_INSERTED_CHANNEL_0); /* Phase C */
+
+		/* Clear now, before the next trigger: proof sample N+1 cannot be a re-read of N's still-
+		 * set EOIC/JDR - the next wait loop can only pass once a NEW conversion sets it again. */
+		adc_flag_clear(ADC0, ADC_FLAG_EOIC);
+		adc_flag_clear(ADC1, ADC_FLAG_EOIC);
+		adc_flag_clear(ADC2, ADC_FLAG_EOIC);
+		fw126_cal_fresh_conversion_count++;
+
+		sum[CURRENT_CAL_PHASE_A] += a; sum[CURRENT_CAL_PHASE_B] += b; sum[CURRENT_CAL_PHASE_C] += c;
+		if(taken == 0){
+			smin[CURRENT_CAL_PHASE_A] = smax[CURRENT_CAL_PHASE_A] = a;
+			smin[CURRENT_CAL_PHASE_B] = smax[CURRENT_CAL_PHASE_B] = b;
+			smin[CURRENT_CAL_PHASE_C] = smax[CURRENT_CAL_PHASE_C] = c;
+		} else {
+			if(a < smin[CURRENT_CAL_PHASE_A]) smin[CURRENT_CAL_PHASE_A] = a;
+			if(a > smax[CURRENT_CAL_PHASE_A]) smax[CURRENT_CAL_PHASE_A] = a;
+			if(b < smin[CURRENT_CAL_PHASE_B]) smin[CURRENT_CAL_PHASE_B] = b;
+			if(b > smax[CURRENT_CAL_PHASE_B]) smax[CURRENT_CAL_PHASE_B] = b;
+			if(c < smin[CURRENT_CAL_PHASE_C]) smin[CURRENT_CAL_PHASE_C] = c;
+			if(c > smax[CURRENT_CAL_PHASE_C]) smax[CURRENT_CAL_PHASE_C] = c;
+		}
+		taken++;
+	}
+
+	/* Restore the production hardware trigger sources before anything else runs - normal FOC
+	 * operation must see exactly the configuration adc_config() established. */
+	adc_external_trigger_source_config(ADC0, ADC_INSERTED_CHANNEL, ADC0_1_EXTTRIG_INSERTED_T0_CH3);
+	adc_external_trigger_source_config(ADC2, ADC_INSERTED_CHANNEL, ADC2_EXTTRIG_INSERTED_T0_CH3);
+	adc_flag_clear(ADC0, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC1, ADC_FLAG_EOIC);
+	adc_flag_clear(ADC2, ADC_FLAG_EOIC);
+	nvic_irq_enable(ADC0_1_IRQn, 0, 0);
+
+	out->timed_out = timed_out;
+	out->moe_on = moe_on;
+	out->samples = taken;
+	out->sum[CURRENT_CAL_PHASE_A] = sum[CURRENT_CAL_PHASE_A];
+	out->sum[CURRENT_CAL_PHASE_B] = sum[CURRENT_CAL_PHASE_B];
+	out->sum[CURRENT_CAL_PHASE_C] = sum[CURRENT_CAL_PHASE_C];
+	out->min[CURRENT_CAL_PHASE_A] = smin[CURRENT_CAL_PHASE_A];
+	out->min[CURRENT_CAL_PHASE_B] = smin[CURRENT_CAL_PHASE_B];
+	out->min[CURRENT_CAL_PHASE_C] = smin[CURRENT_CAL_PHASE_C];
+	out->max[CURRENT_CAL_PHASE_A] = smax[CURRENT_CAL_PHASE_A];
+	out->max[CURRENT_CAL_PHASE_B] = smax[CURRENT_CAL_PHASE_B];
+	out->max[CURRENT_CAL_PHASE_C] = smax[CURRENT_CAL_PHASE_C];
+	return (uint8_t)!timed_out;
+}
+
+#if CAN_DIAGNOSTICS_ENABLE
+/* FW-125/FW-126 zero-current self-test result (DIAG only) - see the call site in main() for how
+ * these are filled and documentation/FW-125_PHASE_CURRENT_SAME_PATH_CALIBRATION_PL.md section 16. */
+uint8_t  fw125_zero_current_selftest_valid = 0;
+uint16_t fw125_zero_current_selftest_samples = 0;
+uint8_t  fw125_zero_current_selftest_moe_on = 0;
+int16_t  fw125_zero_current_selftest_mean[CURRENT_CAL_PHASES] = {0};
+uint16_t fw125_zero_current_selftest_p2p[CURRENT_CAL_PHASES] = {0};
+#endif
+
+/*
+ * FW-126: current feedback freshness. MS.i_q/i_d are written ONLY inside FOC_calculation()
+ * (FOC.c), which itself runs ONLY while ui_8_PWM_ON_Flag && !neutral_dwell_active (see
+ * ADC0_1_IRQHandler below) - so while the bridge is off, or during neutral dwell, MS.i_q/i_d
+ * silently hold whatever a PREVIOUS run left them at. MS.i_q_setpoint, by contrast, is updated
+ * every control tick by ride_control_update() regardless of bridge state. A recorder that reads
+ * both without checking foc_current_valid can therefore pair a brand new setpoint with a stale
+ * measured Iq and misread it as live tracking - the confirmed defect this card fixes.
+ *
+ * foc_current_sample_seq increments ONLY immediately after a real FOC_calculation() call (i.e.
+ * after a fresh injected ADC sample has gone through phase correction, reconstruction, Clarke and
+ * Park - exactly what that call computes). foc_current_sample_tick is control_time_ticks at that
+ * same instant, so a consumer can compute sample age as control_time_ticks - foc_current_sample_tick.
+ * foc_current_valid is 1 only from that first fresh post-restart sample until the bridge goes off
+ * again (or a new restart begins) - see the PWM_ON==0 branch in ADC0_1_IRQHandler and the reset at
+ * the bridge-start gate above for where it is forced back to 0. Production state - not
+ * diagnostic-only, because current_cal_foc_allowed-style state is what future control logic (and
+ * FW-126's own FOC START TRACE) is meant to read.
+ */
+/* State is defined in FOC.c beside q31_i_q_fil/q31_i_d_fil and declared by FOC.h. Keeping it
+ * there lets foc_current_feedback_reset() invalidate the filters and feedback semantics as one
+ * atomic lifecycle operation. */
+
 //--- FW-018: boot-time full-charge detection (pack-voltage threshold -> 100% anchor) ---
 uint8_t soc_full_anchor=0;        //1 = SOC display pinned at 100% after a detected full charge
 uint8_t soc_boot_full_done=0;     //boot full-charge check finished (runs once)
@@ -693,6 +1065,47 @@ void led_spark(void)
     \param[out] none
     \retval     none
 */
+
+#if CAN_DIAGNOSTICS_ENABLE
+/*
+ * FW-121.0B: one place that builds the environment snapshot the trigger diagnostic freezes, so
+ * the ARM, ABORT and POEN-ENABLE records are guaranteed to describe the same set of facts. The
+ * module itself stays hardware-free - it never reads a register, it is handed this struct.
+ *
+ * The caller supplies cchp/ctl0/cnt because the ISR must use the values it captured at ISR ENTRY,
+ * not values re-read several microseconds later; re-reading would smear exactly the timing this
+ * card exists to measure.
+ */
+static void fw121_env_from(adc_trigger_diag_env_t *e, uint32_t cchp, uint32_t ctl0, uint16_t cnt,
+							uint32_t tick, uint8_t lifecycle, uint8_t pwm_on,
+							uint8_t cutoff, uint8_t dwell, uint8_t standstill,
+							int32_t iq_setpoint)
+{
+	int32_t iq = iq_setpoint;
+	if(iq < 0) iq = -iq;
+	e->tick = tick;
+	e->cnt = cnt;
+	e->iq_setpoint_abs = (uint16_t)((iq > 0xFFFF) ? 0xFFFF : iq);
+	e->lifecycle = lifecycle;
+	e->flags = (uint8_t)(((cchp & TIMER_CCHP_POEN) ? ADC_TRIGGER_DIAG_ENV_POEN : 0U)
+	                   | ((ctl0 & TIMER_CTL0_DIR) ? ADC_TRIGGER_DIAG_ENV_DIR_DOWN : 0U)
+	                   | (pwm_on ? ADC_TRIGGER_DIAG_ENV_PWM_ON : 0U)
+	                   | (cutoff ? ADC_TRIGGER_DIAG_ENV_CUTOFF : 0U)
+	                   | (standstill ? ADC_TRIGGER_DIAG_ENV_STANDSTILL : 0U)
+	                   | (adc_trigger_diag_owns_ch3() ? ADC_TRIGGER_DIAG_ENV_RUNNING : 0U)
+	                   | (iq_setpoint != 0 ? ADC_TRIGGER_DIAG_ENV_IQ_NONZERO : 0U)
+	                   | (dwell ? ADC_TRIGGER_DIAG_ENV_DWELL : 0U));
+}
+
+/* Same capture, reading the registers live - for the two main-loop sites. */
+static void fw121_env_now(adc_trigger_diag_env_t *e)
+{
+	fw121_env_from(e, TIMER_CCHP(TIMER0), TIMER_CTL0(TIMER0), (uint16_t)(TIMER_CNT(TIMER0) & 0xFFFFU),
+					 control_time_ticks, bridge_lifecycle, ui_8_PWM_ON_Flag,
+					 pwm_cutoff_active, neutral_dwell_active,
+					 hall_calibration_standstill_confirmed(), MS.i_q_setpoint);
+}
+#endif
 
 int main(void)
 {
@@ -894,6 +1307,82 @@ int main(void)
         acc>>=6;
         if(acc>CAL_BAT_I_OFFSET-200 && acc<CAL_BAT_I_OFFSET+200) bat_current_offset=acc;
     }
+
+    // FW-118 measurement, FW-119 policy, FW-125 same-path fix, FW-126 software-trigger fix:
+    // phase current zero calibration. Runs AFTER adc_config() and timer0_config(), BEFORE the
+    // main loop and BEFORE anything can enable the bridge, so the phase currents really are at
+    // zero. MOE/PWM stays off throughout - phase_cal_collect_samples() never touches CCHP/POEN.
+    //
+    // FW-126: each sample is SOFTWARE-triggered (see phase_cal_collect_samples() above). FW-125's
+    // ISR-accumulator method assumed TIMER0 CH3's hardware trigger still fired injected
+    // conversions with MOE off; real-bike evidence (FW-121.0B, see the function's own header
+    // comment) proved it does not, so that method silently collected zero samples on every real
+    // boot. The samples are still the exact same adc_inserted_data_read() calls the FOC ISR
+    // consumes at runtime (A=ADC2, B=ADC1, C=ADC0 injected) - only HOW they are triggered changed.
+    // See documentation/FW-126_CURRENT_FEEDBACK_FRESHNESS_AND_START_TRACE_PL.md.
+    //
+    // FW-119 adds the surrounding policy: up to CURRENT_CAL_MAX_ATTEMPTS tries, and a defined
+    // outcome for "still no usable set". That policy is unchanged by FW-125/FW-126.
+#if CAN_DIAGNOSTICS_ENABLE
+    /* FW-126.4 A/B probe. Runs HERE and only here: after adc_config() installed the production
+     * trigger and before phase_cal_collect_samples() switches it. Snapshots every register it
+     * touches, restores them explicitly and reads them back. MOE stays OFF throughout. */
+    fw1264_probe_run();
+#endif
+    current_cal_init(&current_cal, (current_cal_policy_t)CURRENT_CAL_START_POLICY);
+    current_cal_begin(&current_cal);
+    while(current_cal_attempt_allowed(&current_cal)){
+        current_cal_attempt_t attempt;
+        (void)phase_cal_collect_samples(CURRENT_CAL_SAMPLES, &attempt);
+        // A short run that did not time out is still a failed attempt, not a mean over whatever
+        // happened to arrive: current_cal_submit treats samples == 0 as TIMEOUT, and a truncated
+        // run cannot occur without timed_out being set (phase_cal_collect_samples only stops
+        // early on a genuine conversion timeout).
+        (void)current_cal_submit(&current_cal, &attempt);
+    }
+    // Resolve retry -> LKG -> legacy/strict exactly once, before anything can start the bridge.
+    current_cal_finalize(&current_cal);
+
+#if CAN_DIAGNOSTICS_ENABLE
+    /* FW-125/FW-126 self-test (section 16/29 of the FW-125 card): once offsets are applied, the
+     * next CORRECTED same-path samples should read ~0 on all three phases while the bridge is
+     * still OFF - the zero-current check that proves the fix rather than assuming it. DIAG-only,
+     * one-shot. Collects the same RAW samples phase_cal_collect_samples() always collects, then
+     * applies the exact runtime correction (current_cal.offset[]) by hand - genuinely independent
+     * of the calibration measurement itself, not a re-read of the same accumulator. */
+    {
+        current_cal_attempt_t verify;
+        (void)phase_cal_collect_samples(CURRENT_CAL_SAMPLES, &verify);
+		fw125_zero_current_selftest_samples = verify.samples;
+		fw125_zero_current_selftest_moe_on = verify.moe_on;
+		fw125_zero_current_selftest_valid = (uint8_t)(!verify.timed_out && !verify.moe_on &&
+			verify.samples == CURRENT_CAL_SAMPLES);
+        for(uint8_t vi = 0; vi < CURRENT_CAL_PHASES; vi++){
+            int16_t corrected_min, corrected_max;
+            int32_t corrected_sum = verify.sum[vi];
+            if(current_cal.valid){
+                corrected_sum -= (int32_t)current_cal.offset[vi] * (int32_t)verify.samples;
+                corrected_min = (int16_t)(verify.min[vi] - current_cal.offset[vi]);
+                corrected_max = (int16_t)(verify.max[vi] - current_cal.offset[vi]);
+            } else {
+                corrected_min = verify.min[vi];
+                corrected_max = verify.max[vi];
+            }
+            fw125_zero_current_selftest_mean[vi] = verify.samples ?
+                (int16_t)(corrected_sum / (int32_t)verify.samples) : 0;
+            fw125_zero_current_selftest_p2p[vi] = (corrected_max >= corrected_min) ?
+                (uint16_t)(corrected_max - corrected_min) : 0;
+        }
+    }
+#endif
+
+#if CAN_DIAGNOSTICS_ENABLE
+    /* FW-121.0: the sweep's restore value is the production trigger, captured here so the module
+     * can never invent one. It does not start anything - arming happens in reg_ADC_processing()
+     * once a confirmed standstill and a dark bridge have been established. */
+    adc_trigger_diag_init((uint16_t)(TRIGGER_DEFAULT));
+#endif
+
     // settle voltage/current filters, then seed SOC from flash or open-circuit voltage
     for (int i = 0; i < 256; i++){
         while(!reg_ADC_flag);
@@ -954,7 +1443,7 @@ int main(void)
     	 * first since it only ever feeds can_tx_queue_enqueue() - servicing the queue afterward
     	 * lets a fragment it just offered go out the same tick it was produced.
     	 */
-    	can_multiframe_step();
+    	can_multiframe_step(control_time_ticks);
     	can_tx_queue_service(control_time_ticks);
     	/*
     	 * FW-110 v4: apply side effects whose precondition is "this exact multiframe reply was
@@ -1071,7 +1560,7 @@ int main(void)
             	if(temp_adc_cumulated == 0) temp_adc_cumulated = (uint32_t)adc_value[6] << 4; //init, brak zimnego startu od 0
             	temp_adc_cumulated -= temp_adc_cumulated >> 4;
             	temp_adc_cumulated += adc_value[6];
-            	MS.int_Temperature = T_NTC(temp_adc_cumulated >> 4) + TEMP_OFFSET_C; //offset at source -> affects CAN/thermal/HMI
+            	MS.int_Temperature = (int16_t)(T_NTC(temp_adc_cumulated >> 4) / 10) + TEMP_OFFSET_C; //T_NTC returns 0.1 C (stock M820 LUT); /10 -> degC; offset at source -> affects CAN/thermal/HMI
             	if(soc_one_second_flag){
             		soc_one_second_flag=0;
             		soc_update(); //1 Hz: coulomb -> SOC_real, OCV correction, SOC_display, range, periodic save
@@ -1156,10 +1645,19 @@ int main(void)
 
             }//end slow loop
 
-            if(MS.i_q_setpoint){
+            // C0-PROOF / bridge-deadzone: positive Iq from ride_control is the sole demand gate.
+            // current_cal_foc_allowed() is the safety gate (calibration validity).
+            // No deadzone: ride_control already decided the demand is legitimate.
+            if(MS.i_q_setpoint > 0 && current_cal_foc_allowed(&current_cal)){
             	if(!ui_8_PWM_ON_Flag){
             		pwm_cutoff_active=0;        //przerwij ewentualne miekkie zwolnienie - wracamy do FOC
 			get_standstill_position();
+			// FW-126: a fresh run must not blend its first real sample into the PREVIOUS
+			// run's stale filtered Iq/Id - see the doc comment on foc_current_feedback_reset()
+			// in FOC.h. foc_current_valid is also forced 0 every ISR tick the bridge is off
+			// (see ADC0_1_IRQHandler's PWM_ON==0 branch), so this is belt-and-suspenders
+			// against the exact moment a new run starts, not the only place it happens.
+			foc_current_feedback_reset(&MS);
             		//FW-035: bumpless enable. PI_control slews PI.out by max_step, so a stale
             		//.out from before the bridge was disabled would kick the gearbox on the first
             		//FOC cycle after re-enable. Start every bridge-on from a clean neutral state:
@@ -1172,15 +1670,103 @@ int main(void)
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
+					// STEP 2A: init neutral dwell BEFORE MOE ON and ui_8_PWM_ON_Flag
+					bridge_lifecycle = BRIDGE_LIFECYCLE_NEUTRAL_COMMIT;
+					neutral_dwell_counter = START_NEUTRAL_DWELL_CYCLES;
+					neutral_dwell_active = 1;
+					foc_release_pending = 0;
+					first_active_foc_sampled = 0;
+#if CAN_DIAGNOSTICS_ENABLE
+					/* FW-126.0: arm the three-point CH3 measurement only after neutral CCR0/1/2
+					 * and the existing FOC-blocking dwell are committed, but before POEN. It changes
+					 * no phase compare and needs no extra bridge-start path. */
+					{
+						adc_trigger_diag_env_t fw126_env;
+						uint16_t fw126_ccr3;
+						fw121_env_now(&fw126_env);
+						if(adc_trigger_diag_arm_neutral_dwell(&fw126_env,
+								ADC_TRIGGER_DIAG_SAFE_NEUTRAL_CCR | ADC_TRIGGER_DIAG_SAFE_FOC_HELD,
+								&fw126_ccr3)) {
+							/* A completion bit at point 0's ISR entry now proves a new conversion,
+							 * rather than a stale EOIC left by an earlier injected conversion. */
+							adc_interrupt_flag_clear(ADC0, ADC_INT_FLAG_EOIC);
+							adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOIC);
+							adc_interrupt_flag_clear(ADC2, ADC_INT_FLAG_EOIC);
+							timer_channel_output_pulse_value_config(TIMER0, TIMER_CH_3, fw126_ccr3);
+							/* FW-126.2: 3 CH3 values x 7 accepted conversions, plus the discarded
+							 * MOE-ON interrupt, do not fit in START_NEUTRAL_DWELL_CYCLES. Extend
+							 * the dwell for THIS start only, and only in the DIAG image - the
+							 * sweep arms once per power cycle, so every other start (and the whole
+							 * NORMAL image) keeps the production length untouched. The ISR hands
+							 * the unused cycles back as soon as the measurement finishes. */
+							neutral_dwell_counter = ADC_TRIGGER_DIAG_DWELL_CYCLES;
+						}
+					}
+#endif
 					timer_primary_output_config(TIMER0,ENABLE);
+#if CAN_DIAGNOSTICS_ENABLE
+					/* FW-121.0B: record the ONE runtime POEN enable, immediately after it, so POEN
+					 * reads back as 1 and proves the write landed. Measurement only - it does not
+					 * gate, delay or cancel anything. ui_8_PWM_ON_Flag is still 0 at this instant
+					 * (it is set two lines below), which is itself part of the record. */
+					{
+						adc_trigger_diag_env_t fw121_poen_env;
+						fw121_env_now(&fw121_poen_env);
+						adc_trigger_diag_note_poen_enable(&fw121_poen_env);
+					}
+#endif
 					uint16_half_rotation_counter=0;
+					bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;
 					ui_8_PWM_ON_Flag=1;
+            	}
+            }
+            // STEP 2A: lifecycle progression — MOE_ON -> neutral dwell -> FOC release -> RUN
+            if(bridge_lifecycle == BRIDGE_LIFECYCLE_MOE_ON){
+            	// ISR is writing neutral CCR; once dwell counter reaches 0, advance
+            	if(neutral_dwell_counter == 0){
+            		bridge_lifecycle = BRIDGE_LIFECYCLE_NEUTRAL_DWELL;
+            	}
+            }
+            if(bridge_lifecycle == BRIDGE_LIFECYCLE_NEUTRAL_DWELL && foc_release_pending){
+            	bridge_lifecycle = BRIDGE_LIFECYCLE_FOC_RELEASE;
+            	neutral_dwell_active = 0;
+            	foc_release_pending = 0;
+            }
+            if(bridge_lifecycle == BRIDGE_LIFECYCLE_FOC_RELEASE){
+            	// First main-loop iteration after dwell: ISR has already run one FOC cycle
+            	// with PI outputs still at 0 from PREPARE. Safe to enter RUN.
+            	bridge_lifecycle = BRIDGE_LIFECYCLE_RUN;
+            }
+            // STEP 2A: failsafe — dwell timeout forces bridge off
+            // Count main-loop iterations while in MOE_ON; if dwell counter stuck, kill bridge.
+            {
+            	static uint8_t dwell_timeout_counter = 0;
+            	if(bridge_lifecycle == BRIDGE_LIFECYCLE_MOE_ON || bridge_lifecycle == BRIDGE_LIFECYCLE_NEUTRAL_DWELL){
+            		dwell_timeout_counter++;
+            		if(dwell_timeout_counter >= START_DWELL_TIMEOUT_CYCLES){
+            			timer_primary_output_config(TIMER0,DISABLE);
+            			ui_8_PWM_ON_Flag=0;
+					foc_current_feedback_invalidate();
+            			i8_recent_rotor_direction=0;
+            			PI_iq.integral_part=0;
+            			PI_id.integral_part=0;
+            			bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
+            			neutral_dwell_active = 0;
+            			dwell_timeout_counter=0;
+            		}
+            	} else {
+            		dwell_timeout_counter=0;
             	}
             }
 #if SOFT_CUTOFF_ENABLE
             //miekkie zwolnienie: zjedz napiecia faz do neutral (_T/2) przez SOFT_CUTOFF_TICKS cykli, dopiero potem DISABLE
             if(uint16_half_rotation_counter>POWER_STAGE_STOP_TICKS && ui_8_PWM_ON_Flag && !pwm_cutoff_active){
-            	ui_8_PWM_ON_Flag=0;            //stop nadpisywania switchtime przez FOC; mostek zostaje ENABLE
+            		ui_8_PWM_ON_Flag=0;            //stop nadpisywania switchtime przez FOC; mostek zostaje ENABLE
+				foc_current_feedback_invalidate();
+            	// STEP 2A: reset lifecycle on soft cutoff
+            	bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
+            	neutral_dwell_active = 0;
+            	foc_release_pending = 0;
             	pwm_cutoff_st[0]=(uint16_t)switchtime[0];
             	pwm_cutoff_st[1]=(uint16_t)switchtime[1];
             	pwm_cutoff_st[2]=(uint16_t)switchtime[2];
@@ -1213,10 +1799,14 @@ int main(void)
 					timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
 					timer_primary_output_config(TIMER0,DISABLE); //Disable PWM if motor is not turning
 					ui_8_PWM_ON_Flag=0;
+					foc_current_feedback_invalidate();
 					i8_recent_rotor_direction=0;
 					PI_iq.integral_part=0;
 					PI_id.integral_part=0;
-
+					// STEP 2A: reset lifecycle on hard cutoff
+					bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
+					neutral_dwell_active = 0;
+					foc_release_pending = 0;
             	}
             }//end half rotation counter
 #endif
@@ -1554,12 +2144,34 @@ void timer0_config(void)
 	    timer_channel_output_shadow_config(TIMER0,TIMER_CH_3,TIMER_OC_SHADOW_DISABLE);
 	    timer_automatic_output_disable(TIMER0);
 	    /* automatic output enable, break, dead time and lock configuration*/
-	    timer_breakpara.runoffstate      = TIMER_ROS_STATE_DISABLE;
-	    timer_breakpara.ideloffstate     = TIMER_IOS_STATE_DISABLE ;
+	    /*
+	     * FW-117 - THE ONE bridge change this card makes: OSSR/OSSI ENABLE.
+	     *
+	     * OSSI/OSSR force DEFINED output states instead of high impedance when the outputs are
+	     * off: OSSI covers the idle case (MOE=0, the whole bridge disabled) and OSSR covers the
+	     * run case (MOE=1, a channel's inactive half-cycle). With both DISABLE the channel pins
+	     * went high-Z on the MOE edges, so the winding current collapsed through the body diodes
+	     * -> audible click + shaft kick at bridge-off and a smaller one at bridge-on. Stock M820
+	     * drives the pins to their configured idle levels (main LOW / comp HIGH) instead, which
+	     * is what ocidlestate/ocnidlestate above already declare.
+	     *
+	     * DEAD TIME stays at the 32 this firmware has always run. Stock M820 uses 25 and a
+	     * shorter dead time may well be part of the click, but 25 also REMOVES MOSFET
+	     * shoot-through margin - that is a hardware-safety change, not a timing experiment, and
+	     * it needs its own validation (gate-drive rise/fall measured on the bench) before it goes
+	     * anywhere near a bike. 32 is the baseline until that validation exists; do not fold it
+	     * into a click test.
+	     */
+	    timer_breakpara.runoffstate      = TIMER_ROS_STATE_ENABLE;
+	    timer_breakpara.ideloffstate     = TIMER_IOS_STATE_ENABLE;
 	    timer_breakpara.deadtime         = 32;
 	    timer_breakpara.breakpolarity    = TIMER_BREAK_POLARITY_HIGH;
 	    timer_breakpara.outputautostate  = TIMER_OUTAUTO_DISABLE;
 	    timer_breakpara.protectmode      = TIMER_CCHP_PROT_0;
+	    /* Hardware BREAK stays OFF. Enabling it would hand the bridge's emergency shutdown to the
+	     * BKIN pin, and neither that pin's wiring on this board nor its polarity has been
+	     * confirmed - an unconfirmed BREAK either never fires or latches the bridge off at boot.
+	     * Turning it on is a separate card with its own hardware check. */
 	    timer_breakpara.breakstate       = TIMER_BREAK_DISABLE;
 	    timer_break_config(TIMER0,&timer_breakpara);
 		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,(_T>>1)-0);
@@ -2607,7 +3219,8 @@ void reg_ADC_processing(void)
             //FW-030: throttle ported to the ride core. map() returns 0 while ADC < throttle_offset,
             //so a disconnected/unused throttle contributes nothing (offset is the natural gate).
             //Scaled to full phase_current_max (throttle is level-independent, like a real throttle).
-            .throttle_iq = (int32_t)map(adc_value[1], MP.throttle_offset, MP.throttle_max, 0, MP.phase_current_max)
+            .throttle_iq = (int32_t)map(adc_value[1], MP.throttle_offset, MP.throttle_max, 0, MP.phase_current_max),
+            .start_phase = start_phase != 0
         };
         ride_control_update(&ride_input);
         /*
@@ -2805,11 +3418,11 @@ void reg_ADC_processing(void)
             fw112_diag_input_t fd_in = {
                 .session_state = ride_control_get_session_state(),
                 .recovery_state = (uint8_t)torque_input_recovery_state(),
+                .recovery_stable_ticks = torque_input_recovery_stable_ticks(),
+                .recovery_stable_ticks_at_edge = torque_input_recovery_stable_ticks_at_edge(),
+                .assist_delta_filtered_native = fd_tq ? fd_tq->assist_delta_filtered_native : 0U,
                 .dir_state = (uint8_t)pas_direction_get_state(),
                 .fwd_run = pas_direction_fwd_run(),
-                .crank_forward_steps = rider_input_get()->crank_forward_steps,
-                .required_steps = fd_gate.required_steps,
-                .start_steps = tuning_config_start_steps(),
                 .cadence_rpm = MS.cadence,
                 .latched = (ride_control_get_debug_flags() & RIDE_DBG_NOT_LATCHED) == 0,
                 .pwm_on = ui_8_PWM_ON_Flag != 0,
@@ -2825,9 +3438,233 @@ void reg_ADC_processing(void)
                 .iq_pre_ramp = diag_clamp16(fd_snap.iq_pre_ramp),
                 .iq_setpoint = diag_clamp16(MS.i_q_setpoint),
                 .iq_actual = diag_clamp16(MS.i_q),
-                .reason_bits = ride_control_get_diag_reason()
+                .reason_bits = ride_control_get_diag_reason(),
+                /* C0-PROOF: new diagnostic fields */
+                .permission_bits = ride_control_get_permission_bits(),
+                .iq_before_pu = diag_clamp16(fd_mode ? fd_mode->iq_before_pu : 0),
+                .motor_voltage_utilization = (MS.u_abs > 2048) ? 2048U :
+                    (uint16_t)MS.u_abs,
+                /* flags2: base from ride_control + FINAL_ZERO + PU_CLAMPED computed here */
+                .flags2 = 0  /* computed below */
             };
+            /* C0-PROOF: flags2 with FINAL_ZERO and PU_CLAMPED — computed here because
+             * they require iq_setpoint (MS.i_q_setpoint) and iq_before_pu (fd_mode) which
+             * ride_control does not carry. */
+            {
+                uint8_t f2 = ride_control_get_flags2();
+                bool assist_perm = (fd_in.permission_bits & FW112_PERM_ASSIST_PERMISSION) != 0;
+                bool rider_active = (MS.cadence > 0) || rider_input_get()->start_phase;
+                if (assist_perm && rider_active && MS.i_q_setpoint == 0) {
+                    f2 |= FW112_FLAG2_FINAL_ZERO;
+                }
+                fd_in.flags2 = f2;
+            }
             fw112_diag_tick(&fd_in, control_now);
+        }
+        {
+            /* FW-112 A/B: the rearm-episode logger. Episode opens at the REVOKED edge (session
+             * leaves ACTIVE) and captures the chain until a positive setpoint; the active level
+             * configuration is read from the SAME source the mode pipeline uses
+             * (assist_modes_get_default_level), so assist_level/bank/mode are the level
+             * dependency's axis. */
+            fw112_ab_set_session_id(diag_session_current_id());
+            ride_gate_snapshot_t ab_gate;
+            ride_control_get_gate_snapshot(&ab_gate);
+            ride_arm_snapshot_t ab_snap;
+            ride_control_get_arm_snapshot(&ab_snap);
+            const assist_mode_output_t *ab_mode = assist_modes_get_last_output();
+            const torque_snapshot_t *ab_tq = torque_input_get_snapshot();
+            uint8_t ab_level = level_to_array_element[MS.assist_level];
+            const assist_level_config_t *ab_cfg = assist_modes_get_default_level(ab_level);
+            fw112_ab_input_t ab_in = {
+                .session_state = ride_control_get_session_state(),
+                .recovery_state = (uint8_t)torque_input_recovery_state(),
+                .dir_state = (uint8_t)pas_direction_get_state(),
+                .assist_level = ab_level,
+                .bank_index = assist_modes_get_active_bank(),
+                .mode_type = ab_cfg->mode_type,
+                .emtb_parameter = ab_cfg->emtb_parameter,
+                .support_ratio_pct = ab_cfg->support_ratio_pct,
+                .max_iq_pct = ab_cfg->max_iq_pct,
+                .emtb_based_on_power = ab_cfg->emtb_based_on_power,
+                .cadence_comp_enabled = assist_modes_get_cadence_comp_enabled(),
+                .assist_without_rotation = ab_cfg->assist_without_rotation,
+                .latched = (ride_control_get_debug_flags() & RIDE_DBG_NOT_LATCHED) == 0,
+                .pwm_on = ui_8_PWM_ON_Flag != 0,
+                .torque_sensor_valid = ab_tq ? ab_tq->sensor_valid : false,
+                .wheel_valid = rider_input_get()->wheel_valid,
+                .rolling_coast = rider_input_get()->real_stop &&
+                    rider_input_get()->wheel_valid,
+                .emtb_reference_voltage_mv = ab_cfg->emtb_reference_voltage_mv,
+                .max_motor_power_w = ab_cfg->max_motor_power_w,
+                .battery_voltage_mv = (MS.Voltage > 0) ?
+                    (uint16_t)((MS.Voltage > 65535) ? 65535 : MS.Voltage) : 0U,
+                .controller_temperature_c = diag_clamp16(MS.int_Temperature),
+                .load_threshold_centikg = ab_gate.load_threshold_centikg,
+                .required_steps = ab_gate.required_steps,
+                .start_steps = tuning_config_start_steps(),
+                .cadence_rpm = MS.cadence,
+                .torque_for_assist_mv = ab_mode ? ab_mode->torque_for_assist_mv : 0U,
+                .load_centikg = ab_tq ? ab_tq->load_centikg : 0U,
+                .iq_request = diag_clamp16(ab_mode ? ab_mode->iq_request : 0),
+                .iq_after_latch_floor = diag_clamp16(ab_snap.iq_after_latch_floor),
+                .iq_pre_ramp = diag_clamp16(ab_snap.iq_pre_ramp),
+                .iq_setpoint = diag_clamp16(MS.i_q_setpoint),
+                .assist_hold_ticks = ride_control_get_assist_hold_ticks(),
+                /* FW-112 TWO-MECHANISM DIAGNOSTIC (schema 2): the direct signals.
+                 * afilt_native is the raw published assist_delta_filtered_native - the ONE
+                 * value WAIT_FRESH_LOAD -> TRACK_FAST tests (src/torque_input.c), always live.
+                 * arun_native deliberately mirrors ride_control.c's OWN substitution
+                 * (src/ride_control.c:519-522), not the raw snapshot field: while a recovery is
+                 * active, snapshot.assist_delta_run_native is only reseeded on FORWARD STEPS
+                 * (src/torque_input.c's torque_input_run_filter_step(), WAIT_FRESH_LOAD branch)
+                 * and can therefore be stale by up to one step interval between steps, whereas
+                 * torque_input_recovery_run_native() is what assist_modes_calculate() actually
+                 * receives, every control tick. Recording the raw field here would show a
+                 * signal the demand calculation never actually sees. */
+                .afilt_native = ab_tq ? ab_tq->assist_delta_filtered_native : 0U,
+                .arun_native = torque_input_recovery_active() ?
+                    torque_input_recovery_run_native() :
+                    (ab_tq ? ab_tq->assist_delta_run_native : 0U)
+            };
+            fw112_ab_tick(&ab_in, control_now);
+        }
+#if FW117_TRACE_ENABLE
+        {
+            /* FW-126 compact FOC START TRACE. Observation only: the stamped current sequence
+             * identifies the ISR generation of every current/CCR fact and no trace field feeds
+             * motor control. */
+            fw117_trace_set_session_id(diag_session_current_id());
+            const assist_mode_output_t *ft_mode = assist_modes_get_last_output();
+            ride_arm_snapshot_t ft_snap;
+            ride_control_get_arm_snapshot(&ft_snap);
+            fw117_trace_input_t ft_in = {
+                .now_tick = control_now,
+                .pwm_on = ui_8_PWM_ON_Flag != 0,
+                .moe = (TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U,
+                .cen = (TIMER_CTL0(TIMER0) & TIMER_CTL0_CEN) != 0U,
+                .cutoff_active = pwm_cutoff_active,
+                .reverse = i8_reverse_flag != 0,
+                .hall = ui8_hall_state,
+                .pi_q_int = diag_clamp16((int32_t)PI_iq.integral_part),
+                .pi_d_int = diag_clamp16((int32_t)PI_id.integral_part),
+                .iq_request = diag_clamp16(ft_mode ? ft_mode->iq_request : 0),
+                .iq_pre_ramp = diag_clamp16(ft_snap.iq_pre_ramp),
+                .iq_setpoint = diag_clamp16(MS.i_q_setpoint),
+                .iq_meas = diag_clamp16(MS.i_q),
+                .id_meas = diag_clamp16(MS.i_d),
+                .vq = diag_clamp16(MS.u_q),
+                .vd = diag_clamp16(MS.u_d),
+                .angle = (uint16_t)(q31_rotorposition_absolute >> 16),
+                .ccr1 = (uint16_t)(TIMER_CH0CV(TIMER0) & 0xFFFFU),
+                .ccr2 = (uint16_t)(TIMER_CH1CV(TIMER0) & 0xFFFFU),
+                .ccr3 = (uint16_t)(TIMER_CH2CV(TIMER0) & 0xFFFFU),
+                .neutral_dwell_active = neutral_dwell_active != 0U,
+                .current_fresh = foc_current_fresh != 0U,
+                .current_valid = foc_current_valid != 0U,
+                .current_seq = foc_current_sample_seq,
+                .current_age = foc_current_sample_age,
+                .phase_a = i16_ph1_current,
+                .phase_b = i16_ph2_current,
+                .phase_c = i16_ph3_current,
+                .adc_ch3 = (uint16_t)(TIMER_CH3CV(TIMER0) & 0xFFFFU),
+                .u_abs = diag_clamp16(MS.u_abs),
+                .bridge_lifecycle = bridge_lifecycle
+            };
+            fw117_trace_tick(&ft_in, control_now);
+        }
+#endif /* FW117_TRACE_ENABLE */
+        if((control_now % ROLLING_NO_ASSIST_DIAG_DECIMATION) == 0U){
+            /* Rolling no-assist diagnostic: one observation per control tick (decimated to 250 Hz
+             * on the absolute control clock). All ISR-owned values are copied in one very short
+             * diagnostic-only critical section at the sample point; no function call and no
+             * control-state write occurs while IRQs are masked. */
+            rolling_no_assist_diag_set_session_id(diag_session_current_id());
+            ride_gate_snapshot_t rna_gate;
+            ride_control_get_gate_snapshot(&rna_gate);
+            ride_arm_snapshot_t rna_snap;
+            ride_control_get_arm_snapshot(&rna_snap);
+            const assist_mode_output_t *rna_mode = assist_modes_get_last_output();
+            const torque_snapshot_t *rna_tq = torque_input_get_snapshot();
+            uint8_t perm = ride_control_get_permission_bits();
+            uint8_t dbg = ride_control_get_debug_flags();
+            uint8_t reason = ride_control_get_diag_reason();
+            bool latched = (dbg & RIDE_DBG_NOT_LATCHED) == 0;
+
+			bool rna_pwm_on, rna_moe, rna_neutral_active, rna_current_feedback_valid;
+            uint8_t rna_bridge, rna_hall, rna_neutral_count;
+            uint16_t rna_angle_hall, rna_angle_absolute, rna_erps, rna_mvu;
+            int8_t rna_rotor_direction;
+            int16_t rna_iq_setpoint, rna_iq_actual, rna_pi_q, rna_pi_d, rna_rpm;
+            uint16_t rna_half_rotation_counter;
+            uint32_t rna_primask = __get_PRIMASK();
+            __disable_irq();
+            rna_pwm_on = ui_8_PWM_ON_Flag != 0;
+            rna_moe = (TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U;
+            rna_bridge = bridge_lifecycle;
+            rna_hall = ui8_hall_state;
+            rna_angle_hall = (uint16_t)(((uint32_t)q31_rotorposition_hall) >> 16);
+            rna_angle_absolute = (uint16_t)(((uint32_t)q31_rotorposition_absolute) >> 16);
+            rna_rotor_direction = i8_recent_rotor_direction;
+            rna_erps = ui16_erps;
+			rna_iq_setpoint = diag_clamp16(MS.i_q_setpoint);
+			rna_iq_actual = diag_clamp16(MS.i_q);
+			rna_current_feedback_valid = foc_current_valid != 0U;
+            rna_pi_q = diag_clamp16((int32_t)PI_iq.integral_part);
+            rna_pi_d = diag_clamp16((int32_t)PI_id.integral_part);
+            rna_rpm = MS.cadence;
+            rna_neutral_active = neutral_dwell_active != 0U;
+            rna_neutral_count = neutral_dwell_counter;
+            rna_mvu = (MS.u_abs > 2048) ? 2048U :
+                (MS.u_abs > 0 ? (uint16_t)MS.u_abs : 0U);
+            /* FW-122.1: half_rotation_counter has an ISR writer (TIMER2_IRQHandler resets it
+             * on Hall case 13/23 - see FW-124 section 5), so it is copied in the same
+             * IRQ-protected section as the other ISR-touched fields above. */
+            rna_half_rotation_counter = uint16_half_rotation_counter;
+            if(rna_primask == 0U) __enable_irq();
+            /* FW-122.1: pwm_cutoff_active/pwm_cutoff_tick are written only from main-loop-context
+             * code (main()'s lifecycle block and reg_ADC_processing() itself), never from a real
+             * ISR, so no IRQ protection is needed to read them here. */
+            bool rna_pwm_cutoff_active = pwm_cutoff_active != 0U;
+            uint16_t rna_pwm_cutoff_tick = pwm_cutoff_tick;
+
+            rolling_no_assist_input_t rna_in = {
+                .now_tick = control_now,
+                .iq_request_raw = diag_clamp16(rna_mode ? rna_mode->iq_request : 0),
+                .iq_before_pu = diag_clamp16(rna_mode ? rna_mode->iq_before_pu : 0),
+                .iq_after_latch_floor = diag_clamp16(rna_snap.iq_after_latch_floor),
+                .iq_pre_ramp = diag_clamp16(rna_snap.iq_pre_ramp),
+                .iq_setpoint = rna_iq_setpoint,
+                .iq_actual = rna_iq_actual,
+                .pwm_on = rna_pwm_on,
+                .moe = rna_moe,
+                .bridge_lifecycle = rna_bridge,
+                .hall = rna_hall,
+                .angle_hall = rna_angle_hall,
+                .angle_absolute = rna_angle_absolute,
+                .rotor_direction = rna_rotor_direction,
+                .pi_q_int = rna_pi_q,
+                .pi_d_int = rna_pi_d,
+                .erps = rna_erps,
+                .rpm = rna_rpm,
+                .motor_voltage_utilization = rna_mvu,
+                .neutral_dwell_active = rna_neutral_active,
+                .neutral_dwell_counter = rna_neutral_count,
+				.current_cal_foc_allowed = current_cal_foc_allowed(&current_cal) != 0U,
+				.current_feedback_valid = rna_current_feedback_valid,
+                .load_centikg = rna_tq ? rna_tq->load_centikg : 0U,
+                .load_threshold = rna_gate.load_threshold_centikg,
+                .permission_present = (perm & FW112_PERM_ASSIST_PERMISSION) != 0,
+                .permission_bits = perm,
+                .reason_bits = reason,
+                .load_met = rna_tq ? (rna_tq->load_centikg >= rna_gate.load_threshold_centikg) : false,
+                .rider_latched = latched,
+                .debug_flags = dbg,
+                .pwm_cutoff_active = rna_pwm_cutoff_active,
+                .pwm_cutoff_tick = rna_pwm_cutoff_tick,
+                .half_rotation_counter = rna_half_rotation_counter
+            };
+            rolling_no_assist_diag_tick(&rna_in, control_now);
         }
 #endif
         /*
@@ -2958,6 +3795,10 @@ void reg_ADC_processing(void)
     }
 
 	autodetect_standstill_track(); //FW-110: every field it reads is fresh as of this tick, right here
+
+	/* FW-126.0 deliberately does NOT arm the former MOE-off FW-121 sweep here. The real-bike
+	 * result is zero injected ISR data for every dark-bridge point, so repeating it cannot resolve
+	 * the edge. The only real-bike arm site is the existing neutral dwell at bridge start. */
 
 	reg_ADC_flag=0;
 }
@@ -3164,6 +4005,7 @@ void autodetect(void) {
 	// also say OFF. Phase 2 requests Iq=100 below; the normal bridge-on path will
 	// then re-enable PWM immediately instead of waiting for the rotor-stop timer.
 	ui_8_PWM_ON_Flag=0;
+	foc_current_feedback_invalidate();
 	pwm_cutoff_active=0;
 	pwm_cutoff_tick=0;
 	uint16_half_rotation_counter=0;
@@ -3201,6 +4043,53 @@ void autodetect(void) {
 
 void ADC0_1_IRQHandler(void)
 {
+	/* Read before clearing ADC1 EOIC. This is the only proof that this ISR corresponds to a newly
+	 * completed inserted group; it is deliberately separate from PWM-window validity. */
+	const uint8_t foc_adc1_eoic_at_entry = (ADC_STAT(ADC1) & ADC_STAT_EOIC) ? 1U : 0U;
+#if CAN_DIAGNOSTICS_ENABLE
+	/*
+	 * FW-121.0: the counter position at ISR ENTRY is the measurement, so it is read before
+	 * anything else in this handler can add its own delay to it. Costs one bool read when the
+	 * sweep is not running, which is every ride. See inc/adc_trigger_diag.h.
+	 */
+	const bool fw121_active = adc_trigger_diag_owns_ch3();
+	uint16_t fw121_cnt = 0;
+	uint16_t fw121_ccr0 = 0, fw121_ccr1 = 0, fw121_ccr2 = 0, fw121_ccr3 = 0;
+	uint16_t fw121_raw_a = 0, fw121_raw_b = 0, fw121_raw_c = 0;
+	uint32_t fw121_ctl0 = 0, fw121_cchp = 0, fw121_tick = 0;
+	uint8_t  fw121_flags = 0;
+	uint8_t  fw121_lifecycle = 0, fw121_pwm_on = 0, fw121_cutoff = 0;
+	uint8_t  fw121_dwell = 0, fw121_standstill = 0;
+	int32_t  fw121_iq_setpoint = 0;
+	if(fw121_active){
+		/* Freeze every field which the point frame claims is "at IRQ entry" before clearing
+		 * EOIC or reading JDR. The sweep is expressly a timing experiment: a later re-read is
+		 * evidence about a different instant. */
+		fw121_tick = control_time_ticks;
+		fw121_lifecycle = bridge_lifecycle;
+		fw121_pwm_on = ui_8_PWM_ON_Flag;
+		fw121_cutoff = pwm_cutoff_active;
+		fw121_dwell = neutral_dwell_active;
+		fw121_standstill = hall_calibration_standstill_confirmed();
+		fw121_iq_setpoint = MS.i_q_setpoint;
+		fw121_cnt  = (uint16_t)(TIMER_CNT(TIMER0) & 0xFFFFU);
+		fw121_ctl0 = TIMER_CTL0(TIMER0);
+		fw121_cchp = TIMER_CCHP(TIMER0);
+		fw121_ccr0 = (uint16_t)(TIMER_CH0CV(TIMER0) & 0xFFFFU);
+		fw121_ccr1 = (uint16_t)(TIMER_CH1CV(TIMER0) & 0xFFFFU);
+		fw121_ccr2 = (uint16_t)(TIMER_CH2CV(TIMER0) & 0xFFFFU);
+		/* FW-126.2: the compare the hardware was ACTUALLY holding for the conversion being
+		 * reported. Frozen here with everything else "at IRQ entry" - read later it would
+		 * describe a different instant, which is the whole point of freezing. */
+		fw121_ccr3 = (uint16_t)(TIMER_CH3CV(TIMER0) & 0xFFFFU);
+		uint32_t st0 = ADC_STAT(ADC0);
+		if(st0 & ADC_STAT_EOIC) fw121_flags |= ADC_TRIGGER_DIAG_F_ADC0_EOIC;
+		if(st0 & ADC_STAT_STRC) fw121_flags |= ADC_TRIGGER_DIAG_F_ADC0_STRC;
+		if(st0 & ADC_STAT_EOC)  fw121_flags |= ADC_TRIGGER_DIAG_F_ADC0_EOC;
+		if(ADC_STAT(ADC1) & ADC_STAT_EOIC) fw121_flags |= ADC_TRIGGER_DIAG_F_ADC1_EOIC;
+		if(ADC_STAT(ADC2) & ADC_STAT_EOIC) fw121_flags |= ADC_TRIGGER_DIAG_F_ADC2_EOIC;
+	}
+#endif
     /* clear the ADC flag */
 	fwdgt_counter_reload();
     adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOIC);
@@ -3210,41 +4099,49 @@ void ADC0_1_IRQHandler(void)
     i16_ph1_current = adc_inserted_data_read(ADC2, ADC_INSERTED_CHANNEL_0);
     i16_ph2_current = adc_inserted_data_read(ADC1, ADC_INSERTED_CHANNEL_0);
     i16_ph3_current = adc_inserted_data_read(ADC0, ADC_INSERTED_CHANNEL_0);
+    __enable_irq();
 
+	if(ui_8_PWM_ON_Flag && foc_adc1_eoic_at_entry){
+		foc_current_feedback_note_fresh(control_time_ticks);
+	}
 
-	switch (MS.char_dyn_adc_state) //read in according to state
-		{
-		case 1: //Phase C at high dutycycles, read from A+B directly
-			{
-				//first reading is correct, do nothing
-			}
-			break;
-		case 2: //Phase A at high dutycycles, read from B+C (A = -B -C)
-			{
+#if CAN_DIAGNOSTICS_ENABLE
+	/* FW-126.0 captures JDR in its hardware-offset domain, before FW-125 residual subtraction
+	 * and before reconstruction. These are diagnostic evidence only; normal FOC inputs below are
+	 * left byte-for-byte on their existing path. */
+	if(fw121_active){
+		fw121_raw_a = (uint16_t)i16_ph1_current;
+		fw121_raw_b = (uint16_t)i16_ph2_current;
+		fw121_raw_c = (uint16_t)i16_ph3_current;
+	}
+#endif
 
-				//overwrite A with -B-C
-				i16_ph1_current = -i16_ph2_current-i16_ph3_current;
+    // FW-118: subtract the calibrated software offset (JDR - SW_offset = raw - mean ~= 0 at
+    // zero current). FW-119: current_cal.valid is set by the policy, so this one branch covers
+    // runtime offsets and last-known-good alike; when it is 0 the ISR runs the pre-FW-118
+    // hardware-offset-only path unchanged. Read-only here - the ISR never writes the state.
+    //
+    // FW-126: calibration sampling no longer happens here. It used to (FW-125's phase_cal_acc
+    // hook), armed while the bridge was off - but real-bike evidence proved TIMER0 CH3's hardware
+    // trigger produces no injected conversions with MOE off, so that hook never actually ran. See
+    // phase_cal_collect_samples() and documentation/FW-126_CURRENT_FEEDBACK_FRESHNESS_AND_START_TRACE_PL.md.
+    if(current_cal.valid){
+        i16_ph1_current -= current_cal.offset[CURRENT_CAL_PHASE_A];
+        i16_ph2_current -= current_cal.offset[CURRENT_CAL_PHASE_B];
+        i16_ph3_current -= current_cal.offset[CURRENT_CAL_PHASE_C];
+    }
 
-			}
-			break;
-		case 3: //Phase B at high dutycycles, read from A+C (B=-A-C)
-			{
-
-				//overwrite B with -A-C
-				i16_ph2_current = -i16_ph1_current-i16_ph3_current;
-			}
-			break;
-
-		case 0: //timeslot too small for ADC
-			{
-				//do nothing
-			}
-			break;
-
-
-
-
-		} // end case
+	/* FW-120.1: decide the trustworthy pair HERE, from the switchtime[] that is still in the
+	 * array at this point in the ISR - those are the CCRs that were live during the PWM period
+	 * these JDR were physically sampled in (this ISR's FOC_calculation() has not run yet, so
+	 * nothing has overwritten them). Before this card the verdict came from dyn_adc_state()
+	 * called in the PREVIOUS ISR, i.e. from the period before the sampled one, so every crossing
+	 * of a duty-ranking boundary reconstructed one Clarke input from the wrong pair. Programming
+	 * CH3 for the NEXT acquisition is a separate job and stays where it was, further down in
+	 * dyn_adc_trigger_update(). */
+	MS.char_dyn_adc_state = dyn_adc_state_select(switchtime, MS.char_dyn_adc_state);
+	dyn_adc_state_reconstruct(MS.char_dyn_adc_state,
+	                          &i16_ph1_current, &i16_ph2_current, i16_ph3_current);
 
     //get the recent timer value from the Hall timer
     ui16_tim2_recent = timer_counter_read(TIMER2);
@@ -3271,20 +4168,85 @@ void ADC0_1_IRQHandler(void)
 
     }
 
-	//get the Phase with highest duty cycle for dynamic phase current reading
-	dyn_adc_state(q31_rotorposition_absolute);
+	//FW-120.1: prepare the CH3 trigger for the NEXT acquisition (the reconstruction pair for
+	//the sample already in hand was decided at the top of this ISR)
+#if CAN_DIAGNOSTICS_ENABLE
+	/* FW-126.0: exactly one owner of CH3 per ISR. The diagnostic owns only CH3 during the
+	 * pre-existing neutral dwell; it checks the captured dwell/CCR0-2 facts before accepting a
+	 * point, and restores the production trigger on point 3 or abort. */
+	if(fw121_active){
+		adc_trigger_diag_sample_t fw121_s;
+		uint16_t fw121_new_ccr3;
+		/* Built from values captured at ISR ENTRY, never re-read here. */
+		fw121_env_from(&fw121_s.env, fw121_cchp, fw121_ctl0, fw121_cnt,
+						fw121_tick, fw121_lifecycle, fw121_pwm_on, fw121_cutoff,
+						fw121_dwell, fw121_standstill, fw121_iq_setpoint);
+		fw121_s.adc_flags = fw121_flags;
+		fw121_s.safety_flags = (uint8_t)(((fw121_ccr0 == (_T >> 1) &&
+				fw121_ccr1 == (_T >> 1) && fw121_ccr2 == (_T >> 1)) ?
+				ADC_TRIGGER_DIAG_SAFE_NEUTRAL_CCR : 0U)
+			| (fw121_dwell ? ADC_TRIGGER_DIAG_SAFE_FOC_HELD : 0U));
+		fw121_s.raw_a = fw121_raw_a;
+		fw121_s.raw_b = fw121_raw_b;
+		fw121_s.raw_c = fw121_raw_c;
+		fw121_s.ccr3_readback = fw121_ccr3;   //FW-126.2
+		if(adc_trigger_diag_neutral_dwell_isr(&fw121_s, &fw121_new_ccr3)){
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,fw121_new_ccr3);
+		}
+		/* FW-126.2: the sweep now needs more interrupts than the production dwell provides, so
+		 * the dwell was extended when it armed. The moment the measurement is finished, hand
+		 * the remaining cycles back - FOC is released on the next main-loop pass instead of
+		 * idling out the DIAG-only margin. Touches nothing in the NORMAL image. */
+		if(!adc_trigger_diag_needs_dwell() && neutral_dwell_counter > 1U){
+			neutral_dwell_counter = 1U;
+		}
+		/* Clear all three EOIC flags only while the diagnostic owns CH3. Therefore the ready bits
+		 * captured for point N+1 can only belong to conversion N+1, never an old JDR/EOIC. */
+		adc_interrupt_flag_clear(ADC0, ADC_INT_FLAG_EOIC);
+		adc_interrupt_flag_clear(ADC1, ADC_INT_FLAG_EOIC);
+		adc_interrupt_flag_clear(ADC2, ADC_INT_FLAG_EOIC);
+	} else
+#endif
+	dyn_adc_trigger_update();
 
     //q31_rotorposition_absolute=(int16_t)((180.0/75.0)*(float)(1<<31));
     if(ui_8_PWM_ON_Flag){
-		FOC_calculation(i16_ph1_current, i16_ph2_current,
-					q31_rotorposition_absolute,
-					(((int16_t) MP.reverse * i8_reverse_flag)
-							* MS.i_q_setpoint), &MS, &MP);
+    	// STEP 2A: during neutral dwell, block FOC and hold neutral CCR
+    	if(neutral_dwell_active){
+    		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
+    		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
+    		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
+    		// decrement dwell counter; when it reaches 0, signal main loop
+    		if(neutral_dwell_counter > 0){
+    			neutral_dwell_counter--;
+    		}
+    		if(neutral_dwell_counter == 0){
+    			foc_release_pending = 1;
+    		}
+    	} else {
+			FOC_calculation(i16_ph1_current, i16_ph2_current,
+						q31_rotorposition_absolute,
+						(((int16_t) MP.reverse * i8_reverse_flag)
+								* MS.i_q_setpoint), &MS, &MP);
+			/* FW-126: the fresh sequence was stamped at ADC1 EOIC before JDR consumption.
+			 * Do not set `valid` here: a completed conversion still has no derived physical
+			 * PWM sampling-window proof, which is the FW-127 work intentionally not guessed. */
 
-		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,switchtime[0]);
-		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,switchtime[1]);
-		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,switchtime[2]);
-
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,switchtime[0]);
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,switchtime[1]);
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,switchtime[2]);
+			// STEP 2A: mark first active FOC sample after dwell release
+			if(bridge_lifecycle == BRIDGE_LIFECYCLE_FOC_RELEASE && !first_active_foc_sampled){
+				first_active_foc_sampled = 1;
+			}
+    	}
+    } else {
+    	// FW-126: the bridge is off THIS tick, so MS.i_q/i_d are not being refreshed - whatever
+    	// they hold is (at best) the last real sample from before this tick, or a previous run
+    	// entirely. Every ISR tick the bridge is off forces this, so it is set on the very next
+    	// tick after ANY of the several ui_8_PWM_ON_Flag=0 sites in main(), without needing to
+    	// touch each of them individually.
+		foc_current_feedback_invalidate();
     }
     __enable_irq();
 
@@ -3308,25 +4270,32 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 }
 
 
+/*
+ * FW-120.1: this used to do two unrelated jobs under one name - decide the reconstruction pair
+ * AND program the CH3 compare that fires the injected trigger. The decision moved to the top of
+ * the ISR (dyn_adc_state_select(), called on the sample it actually describes); what is left
+ * here is only the trigger side, which legitimately looks FORWARD: CH3 programmed now applies to
+ * the next acquisition. Its behaviour is byte-for-byte what it always was, including the fact
+ * that a tie leaves CH3 untouched.
+ *
+ * Note for FW-121, not acted on here: DYNAMIC_ADC_THRESHOLD is _T (3750) while the largest CCR
+ * the SVPWM can produce at _U_MAX=1920 is about 3633, so the first branch never runs and CH3
+ * effectively sits at TRIGGER_DEFAULT forever. That is a sampling-window question, deliberately
+ * out of this card's scope.
+ */
 //assuming, a proper AD conversion takes 350 timer tics, to be confirmed. DT+TR+TS deadtime + noise subsiding + sample time
-void dyn_adc_state(q31_t angle){
-	if (switchtime[2]>switchtime[0] && switchtime[2]>switchtime[1]){
-		MS.char_dyn_adc_state = 1; // -90Ã‚Â° .. +30Ã‚Â°: Phase C at high dutycycles
-		if(switchtime[2]>DYNAMIC_ADC_THRESHOLD)timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(switchtime[2]-TRIGGER_OFFSET_ADC));
-		else timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
+void dyn_adc_trigger_update(void){
+	uint16_t highest;
+
+	switch(dyn_adc_state_select(switchtime, DYN_ADC_STATE_UNDECIDED)){
+	case DYN_ADC_STATE_C_HIGH: highest = switchtime[2]; break;
+	case DYN_ADC_STATE_A_HIGH: highest = switchtime[0]; break;
+	case DYN_ADC_STATE_B_HIGH: highest = switchtime[1]; break;
+	default: return; //no strict maximum: leave CH3 where it is, exactly as before
 	}
 
-	if (switchtime[0]>switchtime[1] && switchtime[0]>switchtime[2]) {
-		MS.char_dyn_adc_state = 2; // +30Ã‚Â° .. 150Ã‚Â° Phase A at high dutycycles
-		if(switchtime[0]>DYNAMIC_ADC_THRESHOLD)timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(switchtime[0]-TRIGGER_OFFSET_ADC));
-		else timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
-	}
-
-	if (switchtime[1]>switchtime[0] && switchtime[1]>switchtime[2]){
-		MS.char_dyn_adc_state = 3; // +150 .. -90Ã‚Â° Phase B at high dutycycles
-		if(switchtime[1]>DYNAMIC_ADC_THRESHOLD)timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(switchtime[1]-TRIGGER_OFFSET_ADC));
-		else timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
-	}
+	if(highest>DYNAMIC_ADC_THRESHOLD)timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(highest-TRIGGER_OFFSET_ADC));
+	else timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
 }
 
 /* --- the real CAN peripheral, wrapped to the shape can_tx_queue expects (FW-110) ---------- */
@@ -3403,12 +4372,21 @@ static void can_reply_effects_init_wrapper(void)
  * FW-113.2: bumped 2 -> 3. The aggregate block grew from 13 to 14 frames (new 0x10228, the
  * Walk Assist reason/gates frame). No existing frame layout changed - a version-2 log reads
  * every old frame identically and simply does not contain 0x10228.
+ * FW-121.0B: bumped 5 -> 6. The 0x10240 status frame drops four build constants (production
+ * CCR3, point count, ticks per point, CCR3 step) and carries the arm/abort chronology instead;
+ * after an abort 0x10244..0x10246 carry the ARM / ABORT / POEN-ENABLE snapshots, tagged
+ * 0xA1/0xA2/0xA3 in Data0 so no state lookup is needed to decode them. Points keep their layout.
+ * FW-121.0: bumped 4 -> 5. The aggregate block grew from 14 to 21 frames: 0x10240 (trigger
+ * sweep status) and 0x10241..0x10246 (one per CCR3 sweep point). The first attempt used
+ * 0x1022F..0x10235, which FW-112 A/B and FW-117 already own - see inc/diag_efid_map.h. Measurement only, diagnostic
+ * build only - a version-4 log reads every old frame identically and simply contains no
+ * 0x1022F/0x1023x. See inc/adc_trigger_diag.h for how to read them.
  * FW-112-DIAG: bumped 3 -> 4. The dump gained a fifth record source (DIAG_SRC_FW112): each of
  * its records is a header on 0x1022A plus 4 x 8 B snapshot frames on 0x1022B..0x1022E, and the
  * session trailer's byte 7 gained bit 0x04 (DIAG_TRAILER_F_FW112_REJECTED). No existing frame
  * layout changed - a version-3 log reads every old frame identically and simply contains no
  * 0x1022x events. */
-#define DIAG_SCHEMA_VERSION 4U
+#define DIAG_SCHEMA_VERSION 7U /* FW-126.0 reuses 0x10240..46 for neutral-dwell edge evidence */
 
 /* --- the real CAN peripheral, wrapped to the shape diag_session expects ------------------- */
 
@@ -3451,6 +4429,23 @@ static const diag_can_ops_t diag_can_ops = { diag_can_transmit, diag_can_state }
  * makes re-running it harmless. Leaving one behind is precisely how an episode came to be
  * counted twice.
  */
+/*
+ * FW-121.0: the count of frames diag_build_aggregate() below actually produces, asserted against
+ * the cap diag_session.c will snapshot. THIS ASSERT EXISTS BECAUSE THE SILENT VERSION OF IT
+ * ALREADY COST A RIDE: the seven FW-121.0 frames were built here, the cap was still 14, and they
+ * were dropped between the builder and the wire with no error, no counter and nothing in the log.
+ * Adding a frame below without bumping this number now fails the build instead.
+ */
+#define DIAG_AGGREGATE_FIXED_FRAMES   14U   /* 0x10203..0x1020F, 0x10219, 0x10228 */
+#define DIAG_AGGREGATE_FW121_FRAMES   ADC_TRIGGER_DIAG_AGG_FRAMES
+#define DIAG_AGGREGATE_FRAME_COUNT    (DIAG_AGGREGATE_FIXED_FRAMES + DIAG_AGGREGATE_FW121_FRAMES)
+_Static_assert(DIAG_AGGREGATE_FIXED_FRAMES == ADC_TRIGGER_DIAG_AGG_FIRST_INDEX,
+	"the FW-121.0 block does not start where its header says it does - every absolute aggregate "
+	"index published for the log would be wrong");
+_Static_assert(DIAG_AGGREGATE_FRAME_COUNT <= DIAG_AGGREGATE_SNAPSHOT_MAX,
+	"diag_build_aggregate() builds more frames than diag_session can snapshot - the extra ones "
+	"would be silently dropped, exactly as the FW-121.0 frames were");
+
 static uint16_t agg_target, agg_n;
 static uint32_t agg_efid;
 static uint8_t  agg_data[8];
@@ -3802,6 +4797,27 @@ static void diag_build_aggregate(void){
 	transmit_message.tx_data[6] = (wa_hold_ticks)&0xFF;
 	transmit_message.tx_data[7] = 0;
 	DIAG_EMIT();
+
+	/*
+	 * FW-121.0: the seven trigger-sweep frames, aggregate indices
+	 * ADC_TRIGGER_DIAG_AGG_FIRST_INDEX .. +6, on ids ADC_TRIGGER_DIAG_EFID_STATUS and
+	 * ADC_TRIGGER_DIAG_EFID_POINT_BASE+0..+5. Both the ids and the byte layouts live in
+	 * inc/adc_trigger_diag.h and are built by the module itself, so a host test can check the
+	 * exact index -> id -> payload mapping without linking this file. inc/diag_efid_map.h asserts
+	 * the block collides with no other diagnostic range.
+	 */
+	{
+		uint8_t fw121_sub;
+		for(fw121_sub = 0; fw121_sub < ADC_TRIGGER_DIAG_AGG_FRAMES; fw121_sub++){
+			uint32_t fw121_efid = 0;
+			uint8_t  fw121_data[8];
+			uint8_t  fw121_b;
+			if(!adc_trigger_diag_aggregate_frame(fw121_sub, &fw121_efid, fw121_data)) break;
+			transmit_message.tx_efid = fw121_efid;
+			for(fw121_b = 0; fw121_b < 8U; fw121_b++) transmit_message.tx_data[fw121_b] = fw121_data[fw121_b];
+			DIAG_EMIT();
+		}
+	}
 
 }
 
@@ -4238,8 +5254,8 @@ static bool diag_fw112_frame(uint8_t session_id, uint16_t frag, uint32_t *efid, 
 	fw112_diag_record_t rec;
 	if(!fw112_diag_queue_peek_session(session_id, &rec)) return false;
 
-	/* header + 4 data frames, always in order */
-	*last = (frag + 1U) >= 5U;
+	/* C0-PROOF (schema 4): header + 3 data frames = 4 CAN frames total. */
+	*last = (frag + 1U) >= 4U;
 
 	if(frag == 0){
 		*efid = FW112_DIAG_EFID_HEADER;
@@ -4249,45 +5265,36 @@ static bool diag_fw112_frame(uint8_t session_id, uint16_t frag, uint32_t *efid, 
 		data[3] = (uint8_t)(rec.event_id & 0xFF);
 		data[4] = rec.event_type;
 		data[5] = rec.reason_bits;
-		data[6] = 0;
-		data[7] = 0;
+		data[6] = rec.recovery_ev_lo;
+		data[7] = rec.recovery_ev_hi;
 		return true;
 	}
 
 	switch(frag){
 	case 1:
 		*efid = FW112_DIAG_EFID_SNAP_BASE + 0U;
-		data[0] = rec.session_state;
-		data[1] = rec.dir_state;
-		data[2] = rec.recovery_state;
+		data[0] = rec.packed_state;
+		data[1] = rec.permission_bits;
+		data[2] = rec.cadence_rpm;
 		data[3] = rec.fwd_run;
-		data[4] = rec.crank_forward_steps;
-		data[5] = rec.required_steps;
-		data[6] = rec.start_steps;
-		data[7] = rec.cadence_rpm;
+		data[4] = rec.hold_ticks_sat;
+		data[5] = rec.flags2;
+		data[6] = (uint8_t)(rec.elapsed_ticks >> 8);
+		data[7] = (uint8_t)(rec.elapsed_ticks & 0xFF);
 		return true;
 	case 2:
 		*efid = FW112_DIAG_EFID_SNAP_BASE + 1U;
-		data[0] = (uint8_t)(rec.assist_hold_ticks >> 8); data[1] = (uint8_t)(rec.assist_hold_ticks & 0xFF);
-		data[2] = (uint8_t)(rec.load_centikg >> 8);      data[3] = (uint8_t)(rec.load_centikg & 0xFF);
-		data[4] = (uint8_t)(rec.load_threshold_centikg >> 8); data[5] = (uint8_t)(rec.load_threshold_centikg & 0xFF);
-		data[6] = rec.flags;
-		data[7] = 0;
+		data[0] = (uint8_t)(rec.load_centikg >> 8); data[1] = (uint8_t)(rec.load_centikg & 0xFF);
+		data[2] = (uint8_t)(rec.load_threshold_centikg >> 8); data[3] = (uint8_t)(rec.load_threshold_centikg & 0xFF);
+		data[4] = (uint8_t)(rec.motor_voltage_utilization >> 8); data[5] = (uint8_t)(rec.motor_voltage_utilization & 0xFF);
+		data[6] = (uint8_t)(rec.iq_before_pu >> 8); data[7] = (uint8_t)(rec.iq_before_pu & 0xFF);
 		return true;
-	case 3:
+	default:
 		*efid = FW112_DIAG_EFID_SNAP_BASE + 2U;
 		data[0] = (uint8_t)(rec.iq_request >> 8);  data[1] = (uint8_t)(rec.iq_request & 0xFF);
 		data[2] = (uint8_t)(rec.iq_pre_ramp >> 8); data[3] = (uint8_t)(rec.iq_pre_ramp & 0xFF);
 		data[4] = (uint8_t)(rec.iq_setpoint >> 8); data[5] = (uint8_t)(rec.iq_setpoint & 0xFF);
 		data[6] = (uint8_t)(rec.iq_actual >> 8);   data[7] = (uint8_t)(rec.iq_actual & 0xFF);
-		return true;
-	default:
-		*efid = FW112_DIAG_EFID_SNAP_BASE + 3U;
-		data[0] = (uint8_t)(rec.elapsed_ticks >> 24);
-		data[1] = (uint8_t)(rec.elapsed_ticks >> 16);
-		data[2] = (uint8_t)(rec.elapsed_ticks >> 8);
-		data[3] = (uint8_t)(rec.elapsed_ticks & 0xFF);
-		data[4] = 0; data[5] = 0; data[6] = 0; data[7] = 0;
 		return true;
 	}
 }
@@ -4300,6 +5307,264 @@ static void diag_fw112_release(uint8_t session_id, bool sent)
 
 static uint32_t diag_fw112_accepted(void) { return fw112_diag_queue_enqueued(); }
 static uint32_t diag_fw112_refused(void)  { return fw112_diag_queue_rejected(); }
+
+/* --- record source: REARM EPISODES (FW-112 A/B) ---------------------------------------------- */
+
+/*
+ * One record opens with a header frame (0x0001022F), then the 32 B record travels as 4 x 8 B
+ * data frames on 0x00010230..0x00010233. The record union is exactly 32 B with no padding
+ * (asserted in fw112_ab.c), so this serializes it field-by-field into the four fragments rather
+ * than risking a memcpy of a struct whose layout a future edit could break - same discipline as
+ * the FW-111/FW-112-DIAG bridges. The header carries the schema/session/episode/type/milestone;
+ * both record types leave 27 B for the four data fragments.
+ */
+static uint16_t diag_fw112ab_count(uint8_t session_id)
+{
+	return fw112_ab_queue_count_session(session_id);
+}
+
+static bool diag_fw112ab_frame(uint8_t session_id, uint16_t frag, uint32_t *efid, uint8_t *data, bool *last)
+{
+	fw112_ab_record_t rec;
+	if(!fw112_ab_queue_peek_session(session_id, &rec)) return false;
+
+	/* header + 4 data frames, always in order */
+	*last = (frag + 1U) >= (1U + FW117_TRACE_DATA_FRAGMENTS);
+
+	if(frag == 0){
+		*efid = FW112_AB_EFID_HEADER;
+		data[0] = FW112_AB_SCHEMA_VERSION;
+		data[1] = rec.smp.session_id;
+		data[2] = (uint8_t)(rec.smp.episode_id >> 8);
+		data[3] = (uint8_t)(rec.smp.episode_id & 0xFF);
+		data[4] = rec.smp.record_type;
+		data[5] = (rec.smp.record_type == (uint8_t)FW112_AB_REC_SAMPLE) ? rec.smp.ms_and_idx : 0U;
+		data[6] = 0;
+		data[7] = 0;
+		return true;
+	}
+
+	if(rec.smp.record_type == (uint8_t)FW112_AB_REC_CONFIG){
+		switch(frag){
+		case 1:
+			*efid = FW112_AB_EFID_SNAP_BASE + 0U;
+			data[0] = rec.cfg.assist_level;
+			data[1] = rec.cfg.bank_index;
+			data[2] = rec.cfg.mode_type;
+			data[3] = rec.cfg.emtb_parameter;
+			data[4] = (uint8_t)(rec.cfg.support_ratio_pct >> 8);
+			data[5] = (uint8_t)(rec.cfg.support_ratio_pct & 0xFF);
+			data[6] = rec.cfg.max_iq_pct;
+			data[7] = rec.cfg.flags;
+			return true;
+		case 2:
+			*efid = FW112_AB_EFID_SNAP_BASE + 1U;
+			data[0] = rec.cfg.reserved2;
+			data[1] = (uint8_t)(rec.cfg.emtb_reference_voltage_mv >> 8);
+			data[2] = (uint8_t)(rec.cfg.emtb_reference_voltage_mv & 0xFF);
+			data[3] = (uint8_t)(rec.cfg.max_motor_power_w >> 8);
+			data[4] = (uint8_t)(rec.cfg.max_motor_power_w & 0xFF);
+			data[5] = (uint8_t)(rec.cfg.controller_temperature_c >> 8);
+			data[6] = (uint8_t)(rec.cfg.controller_temperature_c & 0xFF);
+			data[7] = 0;
+			return true;
+		case 3:
+			*efid = FW112_AB_EFID_SNAP_BASE + 2U;
+			data[0] = (uint8_t)(rec.cfg.battery_voltage_mv_div10 >> 8);
+			data[1] = (uint8_t)(rec.cfg.battery_voltage_mv_div10 & 0xFF);
+			data[2] = (uint8_t)(rec.cfg.load_threshold_centikg >> 8);
+			data[3] = (uint8_t)(rec.cfg.load_threshold_centikg & 0xFF);
+			data[4] = rec.cfg.required_steps;
+			data[5] = rec.cfg.start_steps;
+			data[6] = rec.cfg.cadence_rpm_at_arm;
+			data[7] = rec.cfg.reserved3;
+			return true;
+		default:
+			*efid = FW112_AB_EFID_SNAP_BASE + 3U;
+			data[0] = (uint8_t)(rec.cfg.arm_tick >> 24);
+			data[1] = (uint8_t)(rec.cfg.arm_tick >> 16);
+			data[2] = (uint8_t)(rec.cfg.arm_tick >> 8);
+			data[3] = (uint8_t)(rec.cfg.arm_tick & 0xFF);
+			data[4] = 0; data[5] = 0; data[6] = 0; data[7] = 0;
+			return true;
+		}
+	}
+
+	switch(frag){
+	case 1:
+		*efid = FW112_AB_EFID_SNAP_BASE + 0U;
+		data[0] = rec.smp.assist_level;
+		data[1] = (uint8_t)(rec.smp.tick_offset >> 8);
+		data[2] = (uint8_t)(rec.smp.tick_offset & 0xFF);
+		data[3] = (uint8_t)(rec.smp.torque_for_assist_mv >> 8);
+		data[4] = (uint8_t)(rec.smp.torque_for_assist_mv & 0xFF);
+		data[5] = (uint8_t)(rec.smp.load_centikg >> 8);
+		data[6] = (uint8_t)(rec.smp.load_centikg & 0xFF);
+		data[7] = rec.smp.cadence_rpm;
+		return true;
+	case 2:
+		*efid = FW112_AB_EFID_SNAP_BASE + 1U;
+		data[0] = rec.smp.session_state;
+		data[1] = rec.smp.recovery_state;
+		data[2] = rec.smp.dir_state;
+		data[3] = rec.smp.flags;
+		data[4] = rec.smp.assist_hold_ticks;
+		data[5] = (uint8_t)(rec.smp.iq_request >> 8);
+		data[6] = (uint8_t)(rec.smp.iq_request & 0xFF);
+		data[7] = 0;
+		return true;
+	case 3:
+		*efid = FW112_AB_EFID_SNAP_BASE + 2U;
+		data[0] = (uint8_t)(rec.smp.iq_after_latch_floor >> 8); data[1] = (uint8_t)(rec.smp.iq_after_latch_floor & 0xFF);
+		data[2] = (uint8_t)(rec.smp.iq_pre_ramp >> 8);          data[3] = (uint8_t)(rec.smp.iq_pre_ramp & 0xFF);
+		data[4] = (uint8_t)(rec.smp.iq_setpoint >> 8);         data[5] = (uint8_t)(rec.smp.iq_setpoint & 0xFF);
+		data[6] = (uint8_t)rec.smp.controller_temperature_c;
+		data[7] = rec.smp.arun_native_clamped;   /* FW-112 TWO-MECHANISM DIAGNOSTIC schema 2 */
+		return true;
+	default:
+		*efid = FW112_AB_EFID_SNAP_BASE + 3U;
+		data[0] = (uint8_t)(rec.smp.battery_voltage_mv_div10 >> 8); data[1] = (uint8_t)(rec.smp.battery_voltage_mv_div10 & 0xFF);
+		/* FW-112 TWO-MECHANISM DIAGNOSTIC schema 2: afilt, full 16-bit precision. */
+		data[2] = (uint8_t)(rec.smp.afilt_native >> 8);            data[3] = (uint8_t)(rec.smp.afilt_native & 0xFF);
+		data[4] = 0; data[5] = 0; data[6] = 0; data[7] = 0;
+		return true;
+	}
+}
+
+static void diag_fw112ab_release(uint8_t session_id, bool sent)
+{
+	(void)sent;
+	fw112_ab_queue_release_session(session_id);
+}
+
+static uint32_t diag_fw112ab_accepted(void) { return fw112_ab_queue_enqueued(); }
+static uint32_t diag_fw112ab_refused(void)  { return fw112_ab_queue_rejected(); }
+
+#if FW117_TRACE_ENABLE
+/* --- FW-117 TEMP: bridge lifecycle trace bridge, same shape as the FW-112 A/B one ------------- */
+
+static uint16_t diag_fw117_count(uint8_t session_id)
+{
+	return fw117_trace_queue_count_session(session_id);
+}
+
+static bool diag_fw117_frame(uint8_t session_id, uint16_t frag, uint32_t *efid, uint8_t *data, bool *last)
+{
+	fw117_trace_sample_t s;
+	if(!fw117_trace_queue_peek_session(session_id, &s)) return false;
+
+	*last = (frag + 1U) >= 5U;
+
+	if(frag == 0){
+		*efid = FW117_TRACE_EFID_HEADER;
+		data[0] = FW117_TRACE_SCHEMA_VERSION;
+		data[1] = session_id;
+		data[2] = 0;                           /* capture_id is a u8, kept at byte 3 for readback */
+		data[3] = fw117_trace_capture_id();
+		data[4] = fw117_trace_event_type();
+		data[5] = 0;
+		data[6] = 0;
+		data[7] = 0;
+		return true;
+	}
+
+	switch(frag){
+	case 1:
+		*efid = FW117_TRACE_EFID_DATA_BASE + 0U;
+		data[0] = (uint8_t)(s.tick_abs >> 24); data[1] = (uint8_t)(s.tick_abs >> 16);
+		data[2] = (uint8_t)(s.tick_abs >> 8);  data[3] = (uint8_t)(s.tick_abs & 0xFF);
+		data[4] = s.flags;
+		data[5] = s.state_and_hall;
+		data[6] = (uint8_t)(s.pi_q_int >> 8); data[7] = (uint8_t)(s.pi_q_int & 0xFF);
+		return true;
+	case 2:
+		*efid = FW117_TRACE_EFID_DATA_BASE + 1U;
+		data[0] = (uint8_t)(s.pi_d_int >> 8);      data[1] = (uint8_t)(s.pi_d_int & 0xFF);
+		data[2] = (uint8_t)(s.iq_request >> 8);    data[3] = (uint8_t)(s.iq_request & 0xFF);
+		data[4] = (uint8_t)(s.iq_setpoint >> 8);   data[5] = (uint8_t)(s.iq_setpoint & 0xFF);
+		data[6] = (uint8_t)(s.iq_meas >> 8);       data[7] = (uint8_t)(s.iq_meas & 0xFF);
+		return true;
+	case 3:
+		*efid = FW117_TRACE_EFID_DATA_BASE + 2U;
+		data[0] = (uint8_t)(s.id_meas >> 8);       data[1] = (uint8_t)(s.id_meas & 0xFF);
+		data[2] = (uint8_t)(s.vq >> 8);            data[3] = (uint8_t)(s.vq & 0xFF);
+		data[4] = (uint8_t)(s.vd >> 8);            data[5] = (uint8_t)(s.vd & 0xFF);
+		data[6] = (uint8_t)(s.angle >> 8);         data[7] = (uint8_t)(s.angle & 0xFF);
+		return true;
+	case 4:
+		*efid = FW117_TRACE_EFID_DATA_BASE + 3U;
+		data[0] = (uint8_t)(s.ccr1 >> 8);          data[1] = (uint8_t)(s.ccr1 & 0xFF);
+		data[2] = (uint8_t)(s.ccr2 >> 8);          data[3] = (uint8_t)(s.ccr2 & 0xFF);
+		data[4] = (uint8_t)(s.ccr3 >> 8);          data[5] = (uint8_t)(s.ccr3 & 0xFF);
+		data[6] = s.bridge_lifecycle;              data[7] = s.reserved;
+		return true;
+	case 5:
+		*efid = FW117_TRACE_EFID_DATA_BASE + 4U;
+		data[0] = (uint8_t)(s.phase_a >> 8);       data[1] = (uint8_t)(s.phase_a & 0xFF);
+		data[2] = (uint8_t)(s.phase_b >> 8);       data[3] = (uint8_t)(s.phase_b & 0xFF);
+		data[4] = (uint8_t)(s.phase_c >> 8);       data[5] = (uint8_t)(s.phase_c & 0xFF);
+		data[6] = (uint8_t)(s.adc_ch3 >> 8);       data[7] = (uint8_t)(s.adc_ch3 & 0xFF);
+		return true;
+	default:
+		*efid = FW117_TRACE_EFID_DATA_BASE + 5U;
+		data[0] = (uint8_t)(s.current_seq >> 24);  data[1] = (uint8_t)(s.current_seq >> 16);
+		data[2] = (uint8_t)(s.current_seq >> 8);   data[3] = (uint8_t)(s.current_seq & 0xFF);
+		data[4] = (uint8_t)(s.current_age >> 8);   data[5] = (uint8_t)(s.current_age & 0xFF);
+		data[6] = (uint8_t)(s.u_abs >> 8);         data[7] = (uint8_t)(s.u_abs & 0xFF);
+		return true;
+	}
+}
+
+static void diag_fw117_release(uint8_t session_id, bool sent)
+{
+	(void)sent;
+	fw117_trace_queue_release_session(session_id);
+}
+
+static uint32_t diag_fw117_accepted(void) { return fw117_trace_queue_enqueued(); }
+static uint32_t diag_fw117_refused(void)  { return fw117_trace_queue_rejected(); }
+#else
+/* FW-117 trace disabled: stubs so diag_ops compiles without the module's RAM. */
+static uint16_t diag_fw117_count(uint8_t session_id) { (void)session_id; return 0U; }
+static bool diag_fw117_frame(uint8_t session_id, uint16_t frag, uint32_t *efid, uint8_t *data, bool *last)
+{ (void)session_id; (void)frag; (void)efid; (void)data; *last = true; return false; }
+static void diag_fw117_release(uint8_t session_id, bool sent) { (void)session_id; (void)sent; }
+static uint32_t diag_fw117_accepted(void) { return 0U; }
+static uint32_t diag_fw117_refused(void)  { return 0U; }
+#endif /* FW117_TRACE_ENABLE */
+
+/* --- Rolling no-assist diagnostic bridge, same shape as fw117's ----------------------------- */
+
+/*
+ * FW-123: this recorder is intentionally manual-only. diag_session's normal automatic dump
+ * retires a source after delivery, which would erase a FROZEN capture before a technician can
+ * inspect/replay it. Keep the accounting hooks for the per-session refusal bit, but expose no
+ * record to the automatic source scan. rolling_no_assist_dump.c owns the explicit CAN replay.
+ */
+static uint16_t diag_rolling_no_assist_count(uint8_t session_id)
+{
+	(void)session_id;
+	return 0U;
+}
+
+static bool diag_rolling_no_assist_frame(uint8_t session_id, uint16_t frag, uint32_t *efid, uint8_t *data, bool *last)
+{
+	(void)session_id;
+	(void)frag;
+	(void)efid;
+	(void)data;
+	*last = true;
+	return false;
+}
+
+static void diag_rolling_no_assist_release(uint8_t session_id, bool sent)
+{
+	(void)session_id;
+	(void)sent;
+}
+
+static uint32_t diag_rolling_no_assist_accepted(void) { return rolling_no_assist_diag_queue_enqueued(); }
+static uint32_t diag_rolling_no_assist_refused(void)  { return rolling_no_assist_diag_queue_rejected(); }
 
 /* --- sealing open captures at the end of a ride -------------------------------------------- */
 
@@ -4318,7 +5583,10 @@ static const diag_ops_t diag_ops = {
 		{ diag_trace_count, diag_trace_frame, diag_trace_release, diag_trace_accepted, diag_trace_refused },
 		{ diag_raw_count,   diag_raw_frame,   diag_raw_release,   diag_raw_accepted,   diag_raw_refused },
 		{ diag_rearm_count, diag_rearm_frame, diag_rearm_release, diag_rearm_accepted, diag_rearm_refused },   //FW-111
-		{ diag_fw112_count, diag_fw112_frame, diag_fw112_release, diag_fw112_accepted, diag_fw112_refused }    //FW-112-DIAG
+		{ diag_fw112_count, diag_fw112_frame, diag_fw112_release, diag_fw112_accepted, diag_fw112_refused },   //FW-112-DIAG
+		{ diag_fw112ab_count, diag_fw112ab_frame, diag_fw112ab_release, diag_fw112ab_accepted, diag_fw112ab_refused },  //FW-112 A/B
+		{ diag_fw117_count, diag_fw117_frame, diag_fw117_release, diag_fw117_accepted, diag_fw117_refused },  //FW-117 TEMP
+		{ diag_rolling_no_assist_count, diag_rolling_no_assist_frame, diag_rolling_no_assist_release, diag_rolling_no_assist_accepted, diag_rolling_no_assist_refused }  //rolling no-assist
 	}
 };
 
@@ -4337,6 +5605,12 @@ static void diag_diagnostics_init(void)
 	pas_raw_init();
 	rearm_delay_init();   //FW-111
 	fw112_diag_init();    //FW-112-DIAG
+	fw112_ab_init();      //FW-112 A/B
+#if FW117_TRACE_ENABLE
+	fw117_trace_init();   //FW-117 TEMP: bridge lifecycle trace
+#endif
+	rolling_no_assist_diag_init(); //rolling no-assist diagnostic
+	rolling_no_assist_dump_init(&diag_can_ops);
 	diag_session_init(&diag_can_ops, &diag_ops);
 }
 
@@ -4364,44 +5638,65 @@ static void diag_dump_step(void)
 	 * never cached, so this can never go stale between calls.
 	 */
 	bool allow_new_tx = (can_tx_queue_depth() == 0U) && !can_multiframe_busy();
-	diag_session_dump_step(control_time_ticks, allow_new_tx);
+	rolling_no_assist_dump_step(control_time_ticks, allow_new_tx, diag_session_is_active());
+	/* A manual replay is one coherent 1792-frame transaction. Do not interleave automatic
+	 * session diagnostics with it: that would make an external Canable capture harder to prove
+	 * complete and offers no benefit while the technician explicitly requested this dump. */
+	if (!rolling_no_assist_dump_busy()) {
+		diag_session_dump_step(control_time_ticks, allow_new_tx);
+	}
 }
 #endif
 
-int16_t T_NTC(uint16_t ADC) // ADC 12 Bit, 10k NTC, RÃ¼ckgabewert in Â°C
+/* Stock M820 NTC LUT: ADC2_IN9 (PB1), 12-bit sample reduced to raw10 = adc12 >> 2.
+ * 191 points, -40 C .. +150 C, 1 C step, strictly descending (NTC).
+ * Recovered from stock Bafang M820 firmware - do not fit a generic NTC curve. */
+static const uint16_t m820_ntc_lut[191] = {
+	1007,1006,1005,1004,1003,1002,1000,999,997,996,994,992,990,988,986,984,
+	982,979,977,974,971,968,965,962,959,955,952,948,944,940,936,931,
+	927,922,917,912,907,901,896,890,884,877,871,865,858,851,844,836,
+	829,821,813,805,797,789,780,771,763,754,744,735,726,716,706,697,
+	687,677,667,656,646,636,626,615,605,594,584,573,563,553,542,532,
+	521,511,501,491,481,471,461,451,441,432,422,413,403,394,385,376,
+	367,359,350,342,334,326,318,310,302,295,288,281,274,267,260,253,
+	247,241,235,229,223,217,211,206,201,196,191,186,181,176,172,167,
+	163,158,154,150,146,142,139,135,132,129,125,122,119,116,113,110,
+	107,105,102,100,97,95,92,90,88,86,84,82,80,78,76,74,
+	72,70,69,67,66,64,62,61,60,58,57,56,55,53,52,51,
+	50,49,47,46,45,44,43,42,41,40,39,39,38,37,36
+};
 
+/* Stock M820 NTC conversion: raw10 = adc12 >> 2, 191-point LUT
+ * (-40..+150 C, 1 C step), linear interpolation between points.
+ * Returns temperature in 0.1 C as int16_t (temperature_dC). */
+int16_t T_NTC(uint16_t ADC)
 {
-	int R = R_TEMP_PULLUP;                                    // Spannungsteiler, fester Widerstand
-	float Rn = 5000;                                         // gemessen (Ohm)
-	float Tn = 23;                                            // gemessen (°C)
-	float B = 3398;
-    float U_ntc = (3.3 * ADC) / 4095;             // Spannung
-    float R_ntc = (U_ntc * R) / (3.3 - U_ntc);           // Widerstand
-                                                          // Temperatur-Berechnung
-        // Rt = Rn * e hoch B*(1/T - 1/Tn)                // Ausgangsformel
-        // T = 1 / [(log(Rt/Rn)/B + 1/Tn] - 273,15        // umgestellt in °K
-        // Tnk = 26,2 + 273,15                            // °K
-    float A1 = log(R_ntc / Rn) / B;
-    float A2 = A1 + 1 / (Tn + 273.15);
-    float T = (1 / A2) - 273.15;
-	return (int)T; // Rundung
+	uint16_t raw10 = ADC >> 2;
 
+	/* clamp outside the LUT range: at/below -40 C -> -400 (0.1 C), at/above +150 C -> 1500 */
+	if (raw10 >= m820_ntc_lut[0])    return -400;
+	if (raw10 <= m820_ntc_lut[190])  return  1500;
+
+	int32_t i;
+	for (i = 0; i < 190; i++) {
+		if (m820_ntc_lut[i] >= raw10 && raw10 >= m820_ntc_lut[i + 1]) break;
+	}
+
+	int32_t temperature_dC =
+		(-400 + i * 10)
+		+ ((m820_ntc_lut[i] - raw10) * 10)
+		  / (m820_ntc_lut[i] - m820_ntc_lut[i + 1]);
+
+	return (int16_t)temperature_dC;
 }
 
 void get_standstill_position(void){
 
-#if CAN_DIAGNOSTICS_ENABLE
-	  /* FW-111: the 25 ms Hall hold is a BLOCKING delay - no control tick runs inside it. The
-	   * hold is measured by the enter/exit tick markers, so each must read the clock FRESH at
-	   * its own side of the delay: a single `now_tick` captured before the delay would stamp
-	   * both markers with the same value and the hold would always measure 0 (Bug 1). The
-	   * subtraction happens in rearm_delay_diag.c via wrap-safe elapsed-from-anchor math. */
-	  rearm_delay_note_standstill_enter(control_time_ticks);   //FW-111: measure the 25 ms Hall hold (enter)
-#endif
-	  delay_1ms(25);
-#if CAN_DIAGNOSTICS_ENABLE
-	  rearm_delay_note_standstill_exit(control_time_ticks);    //FW-111: ... and its exit
-#endif
+	  /* FW-111/FW-112: read the current Hall sector and derive the initial electrical angle.
+	   * No delay: Hall sensors are digital IPU on PC6-8, driven by permanent magnets.
+	   * GPIO is always readable, MOE is still OFF (no switching noise). The ADC ISR
+	   * overwrites q31_rotorposition_absolute from q31_rotorposition_hall on every cycle,
+	   * so the value set here is a one-shot seed for the first FOC calculation. */
 	  ui8_hall_state = (GPIO_ISTAT(GPIOC)>>6)&0x07;
 		switch (ui8_hall_state) {
 			//6 cases for forward direction
@@ -4516,6 +5811,11 @@ uint8_t soc_state_load(void){
 void power_off_controller(void){
 	if(!shutdown_saved){ soc_state_save(); shutdown_saved=1; } //persist SOC before power down
 	timer_primary_output_config(TIMER0,DISABLE); //stop PWM output
+	ui_8_PWM_ON_Flag=0;
+	foc_current_feedback_invalidate();
+	bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE; // STEP 2A: reset lifecycle
+	neutral_dwell_active = 0;
+	foc_release_pending = 0;
 	GPIO_BC(GPIOB) = GPIO_PIN_4; //DC/DC enable off (self power-off)
 	GPIO_BC(GPIOB) = GPIO_PIN_5; //Display off
 }
@@ -5044,6 +6344,7 @@ uint16_t hall_calibration_iq_request(void){
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
 			timer_primary_output_config(TIMER0,DISABLE); //Disable PWM
 			ui_8_PWM_ON_Flag=0;
+			foc_current_feedback_invalidate();
 			pwm_cutoff_active=0;
 			pwm_cutoff_tick=0;
 			uint16_half_rotation_counter=0;

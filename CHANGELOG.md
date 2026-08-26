@@ -6,6 +6,293 @@ local (untracked) notes.
 
 ## [Unreleased]
 
+### FW-125 — phase-current same-path calibration (root-cause fix for CASE C)
+
+- Purpose: fix a confirmed domain mismatch in the FW-118/119 phase-current zero calibration.
+  Calibration measured the ADC0 REGULAR scan (`adc_value[4]/[7]/[8]`); the FOC ISR reads phase
+  current from `adc_inserted_data_read()` on each phase's OWN ADC instance (A=ADC2, B=ADC1,
+  C=ADC0) — a different silicon ADC than ADC0's regular scan for phases A and B, each with its
+  own independent zero-current offset. FW-122 caught the real-bike signature: at a fixed small
+  `FinalIq` (e.g. 14), `IqActual` swung from +8 to -15 depending on the Hall sector alone, and a
+  constant post-Park error vector fit that data with R² > 0.9 — the signature of an offset bug,
+  not a controller or torque-filter bug.
+- Fix: calibration now accumulates `i16_ph1/2/3_current` — the exact `adc_inserted_data_read()`
+  values the FOC ISR consumes — captured inside `ADC0_1_IRQHandler` itself, in a new
+  `phase_cal_acc` accumulator active only during the startup calibration window (bridge OFF).
+  `current_cal_submit()`'s candidate offset is now that measured mean directly; the old second
+  subtraction of the hardware IOFFx constant is removed, since `adc_inserted_data_read()` already
+  returns `raw - IOFFx` in hardware. The calibration domain is therefore a small SIGNED residual
+  around 0, not a ~2048 unsigned ADC12 code — `current_cal_attempt_t.sum/min/max` and
+  `current_cal_t.residual_mean`/`lkg_residual_mean` (renamed from `zero_adc`/`lkg_zero_adc`) are
+  now signed.
+- FW-119's retry → last-known-good → legacy/strict policy is unchanged in shape; only the
+  numbers it operates on changed domain. `CURRENT_CAL_SAMPLES` raised 64 → 128 (still ~8 ms at
+  the 16 kHz PWM/ISR rate the accumulator now samples at, vs. the old 4 kHz TIMER1-paced regular
+  scan). New provisional validation constants `CURRENT_CAL_RESIDUAL_MIN/MAX` (±300 LSB) replace
+  the old regular-ADC-domain `CURRENT_ZERO_MIN/MAX_ADC`.
+- DIAG-only zero-current self-test: a second accumulator, `phase_cal_verify_acc`, captures the
+  signal AFTER the software-offset correction (not the same pre-correction data the calibration
+  itself measures) and exposes `fw125_zero_current_selftest_valid/mean[]/p2p[]` — independent
+  proof the correction lands near zero, not an assumption.
+- Host tests: `fw125_phase_current_calibration_host.c` (T5-T13 — exact mean/P2P over varying
+  samples, atomic publish, STRICT/LEGACY_FALLBACK on the new domain, signed correction exact at
+  0/+5/-7, a three-independent-phase-delta oracle) and `fw125_wiring_guard_host.c` (source-text
+  guard on main.c: T1-T4 same-path source mapping per phase, a regression guard that fails if
+  `adc_value[4]/[7]/[8]` ever reappears in calibration, T13 capture-order, T14/T15 DIAG
+  isolation). `fw119_current_cal_host.c`/`fw119_current_cal_wiring_host.c` updated for the new
+  signed/no-hardware-offset domain; the FW-119 policy tests (T1-T8) are otherwise unchanged.
+  Full `tests/host/run-host-tests.ps1`: PASS.
+- Scope: does NOT touch PI gains, ride_control, the min-Iq floor, start/stop lifecycle (D2,
+  neutral dwell, MOE sequencing), rotor direction, the torque path, or the dynamic PWM-
+  synchronized ADC sampling window (a second suspect the audit found but this card deliberately
+  does not fix - see the FW-125 doc's "falsification" section for the follow-up condition).
+- Awaiting real-bike test: DIAG build, startup calibration readout, standstill starts at low
+  torque, then 20-30 assist→coast→reapply cycles watching for `CAL≈14` behavior; FW-122 capture
+  if CASE C still occurs.
+
+### FW-121.0B — arm → abort chronology instrumentation
+
+- Purpose: resolve the contradiction FW-121.0A found. The arm gate can only pass with POEN clear,
+  yet the ride log showed the sweep aborting on POEN with zero samples counted — while the only
+  runtime POEN enable is preceded by a blocking 25 ms delay that should have produced ~400 counted
+  interrupts first. Nothing recorded today says which premise is false. This card adds the
+  recording; it changes nothing about when or whether the sweep arms or aborts.
+- `arm_isr_count` is incremented at the top of the active ISR path, **before** the MOE guard, so
+  the first interrupt after arming is unambiguously number 1. The per-point `isr_count` keeps its
+  old position and meaning exactly — what the sweep measures is untouched.
+- Three frozen snapshots, each written once and immutable afterwards: **ARM** (on the IDLE→RUNNING
+  transition itself), **ABORT** (before the state changes, so it records the cause not the
+  aftermath) and **POEN ENABLE** (the first `timer_primary_output_config(TIMER0, ENABLE)` seen
+  while the sweep is RUNNING). Each carries control tick, TIMER0 CNT, POEN/DIR/PWM_ON/CUTOFF/
+  standstill/running/iq flags, `bridge_lifecycle` and |i_q_setpoint|.
+- The decisive discriminator is a single bit: `SNAP_POEN_WHILE_RUNNING`. Set + abort means a real
+  bridge start interrupted the sweep. Clear + abort means POEN was already high when the arm gate
+  read it as low — and the contradiction is on the arm side.
+- The module stays hardware-free: main.c reads the registers and hands the snapshot in as data,
+  which is what keeps the whole chronology executable in host tests.
+- CAN: schema 5 → 6. `0x10240` drops four build constants (production CCR3, point count, ticks per
+  point, CCR3 step — all fixed at compile time, and the step is the difference between two
+  consecutive point frames' Data1) and carries the chronology instead. After an abort
+  `0x10244/45/46` carry the ARM / ABORT / POEN snapshots, tagged `0xA1/0xA2/0xA3` in Data0 — values
+  a point frame (`0x80|index`) can never produce, so no state lookup is needed to decode them.
+- Host tests T1–T10 added: snapshot written once, immutable under later riding, first ISR is 1,
+  abort at ISR 1 reports 1, abort at ISR 400 reports 400, an enable outside RUNNING never sets the
+  discriminator bit, a clean sweep behaves exactly as before, and the full frame contract.
+  The main.c wiring guard gained W8 (hook existence, placement relative to the enable, single
+  site, entry-captured registers) — mutation-tested: moving the hook before the enable or deleting
+  it fails the guard.
+- Builds: **DIAG=0 still bit-identical** — 99 852 B / 12 032 B, SHA-256 `9AACC1B9…503CD47`, the same
+  hash as every build since FW-120.1. DIAG=1 141 776 B / 45 584 B (+48 B RAM, measured 180 B module
+  state, budget line 244 B, diagnostic total 34 232 / 34 816 B).
+- No change to the ARM condition, the abort guard, CCR3, the sweep, the ADC trigger, FOC/PI,
+  reconstruction, or FW-117/118/119/120.1.
+- Status: `DIAGNOSTIC_READY / HW_MEASUREMENT_PENDING`. Artifact `0.0404_M820_BL820.bin`.
+
+### FW-121.0 final diagnostic transport fix — 0.0403
+- Second confirmed defect from the ride-log decode: the seven sweep frames used EFIDs
+  `0x1022F..0x10235`, which FW-112 A/B (`0x1022F..0x10233`) and FW-117 (`0x10234..0x10238`)
+  already own. The log did contain those ids - carrying somebody else's records. Moved to
+  `0x10240` (status) and `0x10241..0x10246` (points 0..5).
+- The ids and both byte layouts now live in `inc/adc_trigger_diag.h`, and the frames are built by
+  the module itself. main.c contains no FW-121.0 CAN id literals at all any more.
+- New `inc/diag_efid_map.h`: every diagnostic id block expressed in terms of its owning module's
+  own defines, with pairwise-disjointness `_Static_assert`s. A collision is now a build failure.
+  Verified by mutation: pointing FW-121.0 back at `0x1022F` fails the build on both the FW-112 A/B
+  and FW-117 asserts.
+- `DIAG_AGGREGATE_SNAPSHOT_MAX` stays at 21 - exactly 14 fixed + 7 FW-121.0, no more. main.c also
+  asserts that its own fixed-frame count equals the module's declared first index (14), so the
+  absolute index of every frame is a compile-time fact.
+- Host tests: the FW-121.0 suite gained S9, which checks the whole transport contract against the
+  real module - idx 14..20 -> `0x10240..0x10246`, `Data0 = 0x80|index`, `Data1 = CCR3-3500`
+  (F0 C8 A0 78 50 28), plus that one past the last sub-frame returns false and that an unreached
+  point still names its CCR3 without the complete bit. The isolation guard gained W7 (no magic
+  EFIDs left in main.c, the map header is compiled in).
+- Builds: DIAG=0 unchanged and still byte-identical (99 852 B / 12 032 B, SHA-256
+  9AACC1B9...503CD47). DIAG=1 140 764 B / 45 536 B. Numbered artifact `0.0403_M820_BL820.bin`.
+- No change to the ADC trigger, the CCR3 sweep, FOC, reconstruction, FW-121 or FW-122.
+
+### FW-121.0 fix — the sweep frames never reached the bus
+- Symptom: a DIAG=1 ride log contained every other diagnostic frame but none of 0x1022F /
+  0x10230..0x10235.
+- Root cause: `DIAG_AGGREGATE_SNAPSHOT_MAX` in diag_session.c was 14 and the aggregate block now
+  builds 21 frames. The snapshot loop stops at the cap, so the seven FW-121.0 frames were built
+  by main.c and then dropped before ever being frozen into a session summary - silently: no
+  error, no counter, nothing in the log. The header in diag_session.c had warned in as many
+  words ("Do not add a 15th aggregate frame without re-measuring the budget"); the card added
+  seven and checked only its own module's RAM line item.
+- Fix: cap raised 14 -> 21 (cost 7 x 12 B x 4 summaries = 336 B, re-measured: diag_session.c
+  1660 B, line item 1724 B, diagnostic budget total 34 196 / 34 816 B).
+- So it cannot happen again: the cap moved to inc/diag_session.h and main.c now asserts its own
+  aggregate frame count against it at compile time. Adding a frame without raising the cap is now
+  a build failure instead of a silent loss. Verified by mutation - the assert fires.
+- Builds: DIAG=0 still byte-identical (99 852 B / 12 032 B, SHA-256 9AACC1B9...503CD47);
+  DIAG=1 140 652 B flash / 45 536 B RAM (+336 B, exactly the cap's cost).
+- No change to motor control, to the sweep algorithm or to ADC timing.
+
+### ADC Trigger Timing Diagnostic — FW-121.0
+- Measurement card, not a fix. FW-121 could not be designed because neither the code nor the
+  vendor headers say WHICH edge of TIMER0_CH3 actually starts the injected conversion: the CC3
+  event (both matches under CAM=11, so the up-count match wins and the second is swallowed by the
+  conversion in progress) or the rising edge of OC3REF (the down-count match only). The two differ
+  by 2 x (_T - CCR3) counts and demand OPPOSITE corrections to CCR3, so guessing had a 50% chance
+  of pushing the worst-case sample out of the low-side conduction window instead of into it.
+- A new diagnostic-only module (`src/adc_trigger_diag.c`) sweeps CH3 through
+  3740/3700/3660/3620/3580/3540, holding each point 400 control ticks (100 ms), and records per
+  point: injected-ISR count, TIMER0 CNT at ISR entry (min/max), counter direction, and whether
+  ADC0 and ADC2 had finished their own injected conversions when ADC1's interrupt fired.
+- Two independent readings come out of one sweep. The SIGN of d(CNT)/d(CCR3) decides the trigger
+  edge without needing to know the interrupt latency (which then falls out of the intercept), and
+  the ISR-per-tick count decides whether a second conversion starts in the same PWM period once
+  the two CC3 matches are further apart than the conversion is long — 4 per tick means one, 8
+  means two.
+- Three interlocks, because this moves the instant the FOC's own current samples are taken: it
+  arms only behind the same confirmed-standstill gate that guards Hall autodetect AND a dark
+  bridge; every injected ISR re-reads TIMER0's own output-enable bit and restores the production
+  CCR3 in that same call if the bridge came up, bounding exposure to one PWM period with no
+  current flowing; and CCR3 is clamped inside the module to [3540, 3740]. It arms once per power
+  cycle and never re-arms.
+- Diagnostics: schema version 4 -> 5, new frames 0x1022F (sweep status) and 0x10230..0x10235 (one
+  per sweep point). No existing frame layout changed.
+- Host tests: two new suites (sweep behaviour against the real module, driven at the real
+  16 kHz / 4 kHz ratio; plus an isolation guard that walks main.c's preprocessor nesting and
+  proves every call into the module sits inside `#if CAN_DIAGNOSTICS_ENABLE`).
+- Builds: **DIAG=0 is byte-identical to the FW-120.1 build** — same 99 852 B flash, same 12 032 B
+  RAM, same SHA-256 9AACC1B9...503CD47. DIAG=1 140 648 B flash / 45 200 B RAM (+1964 B / +128 B).
+- Correction to the FW-121 audit note: the GD32F303 ADC clock maximum is 40 MHz, so the existing
+  APB2/6 = 20 MHz is comfortably in specification. The prescaler is not touched and there is no
+  accuracy concern from it.
+- Status: `DIAGNOSTIC_READY / HW_MEASUREMENT_PENDING`. FW-121 proper stays blocked until the
+  sweep has been run on the bench.
+
+### Reconstruction State Timing — FW-120.1
+- The 2-of-3 phase-current reconstruction (rebuild the phase whose shunt has no usable low-side
+  window, from the other two through `Ia + Ib + Ic = 0`) already existed and predates this card.
+  What was wrong was WHICH PWM period it was deciding for: the pair was chosen by
+  `dyn_adc_state()` in the PREVIOUS ISR, from the `switchtime[]` of the period BEFORE the one
+  that was actually sampled. Every crossing of the duty ranking therefore fed Clarke one
+  corrupted current — the sample from the phase that could not be measured.
+- The verdict is now taken at the top of the ISR, from the `switchtime[]` still in the array at
+  that moment — those are the CCRs that shaped the period the samples came from, because this
+  ISR's own `FOC_calculation()` has not run yet. No algorithm, no reconstruction math, no ADC
+  trigger and no PI behaviour changed; only the point at which the existing decision is made.
+- The two jobs the old function conflated are now separate and separately named:
+  `dyn_adc_state_select()` / `dyn_adc_state_reconstruct()` in a new hardware-free module
+  (`src/dyn_adc_state.c`) answer "which pair describes the sample in hand", while
+  `dyn_adc_trigger_update()` in main.c keeps its old, legitimately forward-looking job of arming
+  CH3 for the next acquisition. Its behaviour is unchanged, ties included.
+- Host tests: two new suites. The module one drives the real module through a model of the whole
+  pipeline (switchtime -> CCR -> counter-top sample -> ISR) across a 360° duty sweep in both
+  rotation directions and the three named ranking crossings C->A, A->B, B->C, with a negative
+  control that replays the pre-card ordering and fails on exactly one period per crossing. The
+  wiring guard proves src/main.c really uses that order and that nothing re-decides after FOC.
+- Builds: DIAG=0 99 852 B flash / 12 032 B RAM, DIAG=1 138 684 B flash / 45 072 B RAM, both clean
+  apart from the same pre-existing warnings. No new RAM: the module is stateless.
+- Status: `VERIFIED_SOFTWARE / HW_PENDING` — not yet ridden. Sampling-window validity (is the
+  chosen pair itself sampled inside a valid window?) is deliberately untouched and remains FW-121.
+
+### Current Calibration Safety — FW-119
+- The FW-118 zero calibration now has a defined policy for failing: retry (up to
+  `CURRENT_CAL_MAX_ATTEMPTS`, default 3), then a last-known-good set, then either the legacy
+  hardware-offset path or an inhibited start. Before this, one bad attempt silently dropped the
+  firmware onto the legacy path and set a status byte nothing acted on.
+- The policy lives in a new hardware-free module (`src/current_cal.c`): main.c owns the ADC
+  sampling and hands each attempt in as a plain accumulation, which is what makes the whole
+  policy executable in the host tests.
+- A failing attempt can never overwrite offsets the ISR is using, nor the last-known-good set.
+  LKG is RAM/session-level only — no flash persistence was added, and its scope is documented
+  explicitly: within one power cycle it is the last attempt that passed validation.
+- Start policy is configurable: `LEGACY_FALLBACK` (default) keeps the pre-FW-118 behaviour and
+  flags it as degraded; `STRICT` inhibits FOC start. The default must stay `LEGACY_FALLBACK`
+  until the FW-118 MIN/MAX/P2P limits are measured — they are still PROVISIONAL, and a hard
+  inhibit on top of a guessed threshold can immobilise a working bike.
+- Statuses: UNCALIBRATED / OK / OUT_OF_RANGE / TOO_NOISY / SAMPLE_TIMEOUT / USING_LKG /
+  LEGACY_FALLBACK / HARD_FAILED. Values 0..3 keep their exact FW-118 numeric meaning. Diagnostics
+  (attempt count, final status, active source RUNTIME/LKG/LEGACY, valid, failure reason) are one
+  struct; the CAN protocol was deliberately NOT extended.
+- No second start machine: the policy gates the SAME bridge-start condition the FW-117 neutral
+  dwell lifecycle hangs off, and calibration completes before the main loop, so offsets can never
+  move under a live FOC. With the shipped default the gate always allows FOC, so bike behaviour
+  is unchanged from FW-118.
+- Fixed in passing: the mean was computed as `sum >> 6` against a configurable
+  `CURRENT_CAL_SAMPLES`, so changing that constant would have produced a wrong offset. It now
+  divides by the samples actually taken — identical result at the default 64.
+- Host tests: 40/40 suites pass (two new FW-119 suites). Builds: DIAG=0 99 848 B flash /
+  12 032 B RAM, DIAG=1 138 680 B flash / 45 072 B RAM, both clean apart from pre-existing
+  warnings. RAM cost: +40 B.
+- Status: `VERIFIED_SOFTWARE / HW_PENDING` — every FW-118 bench measurement remains open, and
+  `STRICT` must not be enabled before it is done.
+
+
+### Independent Phase Current Zero Calibration — FW-118
+- Runtime calibration of per-phase ADC current offsets (PA2=A, PA3=B, PA5=C) replaces the
+  hardcoded hardware offsets (2020/2028/2012) that were never tuned to the actual EVistDrive
+  hardware. The Clarke/Park transforms now see ~0 at zero current, eliminating the residual bias
+  (up to +36 LSB) that existed before.
+- 64-sample calibration runs at startup (after `adc_config()`, before FOC), reading raw ADC values
+  from the regular ADC scan (`adc_value[4,7,8]`) while the bridge is OFF. A timeout of 100,000
+  iterations prevents deadlock if TIMER1/DMA is not running.
+- Software offset = calibrated mean − hardware offset. In the ISR, the subtraction is guarded by
+  `current_calibration_valid`: when calibration fails (timeout, out-of-range, or too noisy), the
+  firmware falls back to legacy hardware-offset-only behavior — no change from pre-FW-118.
+- P2P (peak-to-peak) noise is recorded for all three phases. Range validation uses a provisional
+  ±200 LSB window around the nominal 2048 ADC12 midpoint. Both limits are marked
+  PROVISIONAL / NEEDS HARDWARE VALIDATION and must be tuned after bench measurement.
+- PA0 battery current remains on its own independent calibration path (`bat_current_offset`) —
+  not affected by FW-118.
+- Host tests: 38/38 suites pass. Builds: DIAG=0 and DIAG=1 compile clean (only pre-existing
+  warnings). Artifacts: `0.0401_M820_BL820.bin` (DIAG=0, 98 724 B).
+- Status: `VERIFIED_SOFTWARE / HW_PENDING` — needs bench measurement of actual zero ADC values
+  for phases A/B/C, actual P2P, and final tuning of MIN/MAX/P2P limits.
+
+### STEP 2A: neutral dwell before FOC start
+- After MOE ON (bridge output enable), the firmware now holds all three phase CCRs at the neutral
+  value (`_T/2 = 1875`) for a configurable number of real PWM/ISR cycles before releasing the FOC
+  algorithm to write active CCR values. This eliminates the audible click/jerk at motor start
+  caused by FOC immediately writing non-neutral voltages the instant the bridge goes live.
+- Lifecycle states (`BRIDGE_LIFECYCLE_IDLE → NEUTRAL_COMMIT → MOE_ON → NEUTRAL_DWELL →
+  FOC_RELEASE → RUN`) are managed in main.c with the ISR gating FOC via the `neutral_dwell_active`
+  flag. During the dwell, the ISR writes `_T/2` to all three channels and decrements the counter;
+  on reaching zero it signals the main loop, which transitions through FOC_RELEASE to RUN.
+- Configurable constants in `inc/config.h`: `START_NEUTRAL_DWELL_CYCLES` (default 4 = 250 µs @ 16 kHz
+  PWM) and `START_DWELL_TIMEOUT_CYCLES` (default 100 = main-loop failsafe). The dwell counter runs
+  at ISR frequency (16 kHz); the timeout runs at main-loop frequency (~4 kHz).
+- Lifecycle state is reset to IDLE on every bridge-off path: soft cutoff, hard cutoff,
+  `power_off_controller()`, and the dwell-timeout failsafe. This prevents a stale lifecycle from
+  causing an unguarded restart.
+- Host test suite extended with a source-text wiring guard (T1-T6) that verifies the structural
+  invariants: neutral CCR preload before MOE ON, ISR dwell guard, exact counter decrement, lifecycle
+  progression, and reset on all shutdown paths. All 38 host suites pass.
+- Artifacts: `0.0393_M820_BL820.bin` (DIAG=0) and `0.0394_M820_BL820.bin` (DIAG=1). Bench
+  measurement required to validate the 4-cycle dwell value; no `VERIFIED_BENCH` status without
+  physical testing.
+
+### HMI multiframe ACK gate — FW-114
+- Factory M510 controllers pace a READ reply to the display (target=3) as LONG_START, wait for the
+  display's NORMAL_ACK (`8312XXXX`, ~30 ms), and only then send the DATA/END frames. EVistDrive
+  previously sent START+DATA+END back-to-back and ignored the ACK, which left the Controller Info
+  tab dependent on the display's tolerance.
+- Replies to target=3 now gate the DATA phase on the HMI ACK, with a 100 ms (400 tick @ 4 kHz)
+  fail-safe timeout, matching the factory behaviour. The ACK is accepted only while a target=3
+  transfer is active, the command matches, and the current fragment is the START; a stale ACK from
+  a finished transfer can never release a later transfer, and ERROR_ACK never releases the gate.
+- CANable/BESST reads (target=5) are untouched — they never wait for an HMI ACK. The 0x6012
+  trailing marker (`821B6012 01 00 02 06`) stays a phase of the same automaton and is produced
+  only after the END frame is confirmed, so START → DATA → END → trailer order is preserved.
+
+### Controller session counter — FW-114
+- The `0x82F83000` status broadcast previously carried a frozen `00 00 00 0B`. It now carries the
+  factory payload: byte0 = session counter incremented once per 10 s from boot
+  (`floor(uptime/10 s) mod 256`), bytes 1–3 zero. Counter semantics and payload are verified;
+  the stock transmit cadence of this frame is still pending hardware verification.
+
+### FW-114 audit build — 0.0373
+- Production code unchanged after the audit. Host test suite extended with G6 (stale ACK must not
+  release a new same-command transfer), G7 (ACK timeout survives the uint32 tick wrap) and G8
+  (exact START → DATA → END → trailer order for 0x6012 target=3). All 26 host suites pass.
+- Artifact `0.0373_M820_BL820.bin` (DIAG, text 132940 / data 268 / bss 29188) is READY FOR FLASH;
+  only the pre-existing warnings remain (`-Wpointer-sign` in `CAN_Display.c`, unused `fw_ver`).
+- Open (hardware, not a bug): stock transmit cadence of `0x82F83000`.
+
 ### Calmer high assist levels: per-level dynamics defaults
 - All five levels previously shared almost the same assist dynamics. A higher assist ratio
   multiplies the same rider torque change into a much larger motor-torque request, which made

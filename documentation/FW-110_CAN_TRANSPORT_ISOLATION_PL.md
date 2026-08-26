@@ -536,3 +536,18 @@ odroczony reset 0x6029 dokładnie raz po DONE, 0x6200 całkowicie odizolowany od
 przed instalacją i jazdą wymagany jest osobny przegląd. Dodatkowo raport w sposób jawny
 dokumentuje przypadkowe zbudowanie firmware (0.0336/0.0337) mimo zakazu, bez usuwania
 artefaktów.
+
+---
+
+## 12. Follow-up — FW-114 (HMI ACK gate + licznik sesji)
+
+Na automacie v4 z tej karty FW-114 dołożyło **HMI ACK gate** dla reply do `target=3`:
+nowy stan `CANMF_WAIT_HMI_ACK` (`src/can_multiframe.c`) między START a DATA/END, zwalniany przez
+`8312XXXX` (NORMAL_ACK z HMI) albo fail-safe timeout 400 ticków (100 ms @ 4 kHz). `target=5`
+(CANable/BESST) pozostaje bez gate — zgodnie z tą kartą. Do tego FW-114 ustawiło payload
+`82F83000` (licznik sesji co 10 s).
+
+**Diagram v4 w sekcji 5 pozostaje źródłem dla automatu bazowego** (kolejność START→DATA→END→trailer,
+kursor tylko po TOKEN_DONE); FW-114 jedynie wstrzymuje przejście START→DATA dla target=3.
+Szczegóły, status i checklista sprzętowa: `FW-114_HMI_ACK_GATE_AND_SESSION_COUNTER_PL.md`.
+Testy host FW-114 (G1–G8) siedzą w suite'cie `FW-110 can_multiframe`.

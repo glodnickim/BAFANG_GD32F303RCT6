@@ -29,6 +29,10 @@ pozostaje źródłem prawdy dla tematów historycznych/kart FW.
 | **ride latch / gear preload / rampy Iq** | [assist/ASSIST_DYNAMICS.md](assist/ASSIST_DYNAMICS.md) + [assist/START_REARM_RELEASE.md](assist/START_REARM_RELEASE.md) |
 | **finalny Iq/Id do silnika** | [motor/MOTOR_COMMAND.md](motor/MOTOR_COMMAND.md) |
 | **FOC / Hall / PWM** | NIE opisane tu jeszcze — poza zakresem tej karty (test infrastructure foundation kończy się na `motor_command_t`, patrz [motor/MOTOR_COMMAND.md](motor/MOTOR_COMMAND.md) "KNOWN ISSUES"). Do czasu napisania osobnej karty czytaj bezpośrednio `src/FOC.c` i `src/main.c` (ISR sekcja) plus `documentation/ARCHITECTURE_AUDIT_MOTOR_AGNOSTIC_PL.md` sekcja 3/4. |
+| **rolling no-assist diagnostic** (brak wspomagania podczas jazdy, CASE A/B/C, CAN dump → CSV) | [FW-122_ROLLING_NO_ASSIST_DIAGNOSTIC_PL.md](FW-122_ROLLING_NO_ASSIST_DIAGNOSTIC_PL.md) |
+| **kalibracja prądu fazowego** (offsety ADC, sector-dependent Iq error, CASE C) | [FW-125_PHASE_CURRENT_SAME_PATH_CALIBRATION_PL.md](FW-125_PHASE_CURRENT_SAME_PATH_CALIBRATION_PL.md) + [FW-119_CURRENT_CALIBRATION_SAFETY_PL.md](FW-119_CURRENT_CALIBRATION_SAFETY_PL.md) |
+| **okno próbkowania ADC / zbocze TIMER0_CH3 / droga do FW-127** | [FW-127_STATUS.md](FW-127_STATUS.md) (zacznij TU — stan bieżący) → [FW-126_TO_FW-127_AGENT_HANDOFF_PL.md](FW-126_TO_FW-127_AGENT_HANDOFF_PL.md) + [FW-126_HW_TEST_PROCEDURE_PL.md](FW-126_HW_TEST_PROCEDURE_PL.md) |
+| **diagnostics / CAN recorder / efid / session / budget** | [FW-112-DIAG_WHOLECHAIN_RECORDER_PL.md](FW-112-DIAG_WHOLECHAIN_RECORDER_PL.md) + [FW-119_CURRENT_CALIBRATION_SAFETY_PL.md](FW-119_CURRENT_CALIBRATION_SAFETY_PL.md) |
 | **pisanie/uruchamianie testów regresyjnych** | [testing/TEST_ARCHITECTURE.md](testing/TEST_ARCHITECTURE.md) + [testing/TEST_INTERFACES.md](testing/TEST_INTERFACES.md) |
 | **dodawanie nowego scenariusza regresji** | [testing/REGRESSION_SCENARIOS.md](testing/REGRESSION_SCENARIOS.md) + [testing/TEST_INTERFACES.md](testing/TEST_INTERFACES.md) |
 | **planowanie nowej karty zmian** (jakie moduły/testy dotknie) | [testing/CHANGE_CARD_TEMPLATE.md](testing/CHANGE_CARD_TEMPLATE.md) |

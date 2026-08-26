@@ -65,7 +65,7 @@ pomoc wraca dopiero po **mocniejszym** naciśnięciu pedału. Rejestrator:
 Po potwierdzeniu kierunku do przodu (po reverse/invalid) asysta wznawia się dopiero po
 wyraźnie mocniejszym obciążeniu niż przed przerwaniem. Dziennik sam nie potrafił powiedzieć,
 **które** ogniwo łańcucha pochłonęło dodatkowy czas: re-zero/offset, filtr asysty 35 ms,
-obliczenia trybu, latch minimalnego Iq, limiter/rampę czy ~25 ms rozruchu PWM/Hall.
+obliczenia trybu, latch minimalnego Iq, limiter/rampę czy natychmiastowy odczyt Halla.
 
 ---
 
@@ -78,7 +78,7 @@ obliczenia trybu, latch minimalnego Iq, limiter/rampę czy ~25 ms rozruchu PWM/H
 | C | obliczenia trybu / filtr biegu (run filter) | timing `t_run_ready` (`assist_delta_run_native > 0`) |
 | D | latch minimalnego Iq / rampa | timing `t_demand` + migawka `iq_pre_ramp`, `iq_setpoint` |
 | E | limiter / wymuszone zero | flaga `REARM_SNAP_F_LIMITER_ZEROED` + `iq_pre_ramp` |
-| F | rozruch PWM/Hall (~25 ms, `get_standstill_position`) | `t_standstill_enter`/`t_standstill_exit` (długość 25 ms), `t_pwm_on`, luka TARGET_RECOVERED→SETPOINT_RECOVERED |
+| F | odczyt Halla / start PWM (`get_standstill_position` — natychmiastowy) | `t_pwm_on`, luka TARGET_RECOVERED→SETPOINT_RECOVERED |
 
 ---
 
@@ -139,10 +139,8 @@ etapy C–F (DEMAND, PWM_ON, filtry) NIE giną — są w timingu.
 - **baseline = wartość z OSTATNIEGO aktywnego taktu przed reverse** (`R.last_active_iq`), NIE
   maksimum z fazy ACTIVE — maksimum mogłoby sfałszować WEAK_TARGET (przed reverse mógł być
   tylko krótkie, mocne pchnięcie).
-- **start Halla = znaczniki `t_standstill_enter`/`t_standstill_exit`** stemplowane hookiem
-  wokół `delay_1ms(25)`, każdy osobnym, świeżym odczytem globalnego `control_time_ticks` (przed
-  i po blokującym opóźnieniu) — wewnątrz samego opóźnienia nie działa żaden takt sterowania,
-  więc flaga STANDSTILL nie istnieje (nie dałoby się jej nigdy zobaczyć).
+- **start Halla = odczyt GPIO Halla w `get_standstill_position`** — natychmiastowy,
+  bez delay (FW-112: usunięto legacy delay_1ms(25), Hall jest zawsze czytelny z GPIO).
 - **gałąź WAITING próbkuje NAJPIERW wszystkie etapy stanu, a dopiero potem zmienia stan** —
   etap, który pojawia się PO RAZ PIERWSZY dokładnie na takcie COMMIT, jest zmierzony
   (`t_commit` i etap mogą legalnie być równe); wspólna `sample_recovery_chain()` próbkuje

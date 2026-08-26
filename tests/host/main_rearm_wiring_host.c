@@ -3,25 +3,20 @@
  * execute test of the real module. main.c cannot be linked here - it is the ARM entry point,
  * wired directly to GD32 CMSIS registers and real hardware throughout.
  *
- * WHY THIS GUARD EXISTS AT ALL. The unit test of rearm_delay_diag.c can stamp the standstill
- * markers with whatever ticks the harness pleases, so it can never catch the actual Bug 1: in
- * v2, get_standstill_position(uint32_t now_tick) took a single clock snapshot at entry and passed
- * THAT SAME VALUE to both rearm_delay_note_standstill_enter() and rearm_delay_note_standstill_exit()
- * around the blocking delay_1ms(25). Both markers therefore got the same tick, and the measured
- * 25 ms Hall hold was always 0 - a defect only main.c's own call pattern could produce. Only a
- * source-text check of main.c can detect a regression of THAT shape.
+ * UPDATED (FW-112 / standstill-delay removal): the 25 ms blocking delay_1ms(25) and the
+ * rearm_delay_note_standstill_enter/exit markers have been removed from get_standstill_position().
+ * Hall sensors are digital IPU on PC6-8, driven by permanent magnets — GPIO is always readable,
+ * no settling delay is needed. The function now reads the Hall sector directly and derives the
+ * initial electrical angle in zero time.
  *
  * WHAT THIS PROVES, exactly:
  *   1. get_standstill_position takes NO parameters (the v2 signature uint32_t now_tick is gone).
- *   2. Inside its body, rearm_delay_note_standstill_enter(...) occurs with a direct read of the
- *      global control_time_ticks as its argument, STRICTLY BEFORE delay_1ms(25); and
- *   3. rearm_delay_note_standstill_exit(...) likewise reads control_time_ticks STRICTLY AFTER
- *      delay_1ms(25).
- *   The two markers therefore cannot share a stale snapshot, and the hold's length in ticks is
- *   exit-read minus enter-read across the blocking delay - ~25 ms at CONTROL_TIMEBASE_HZ = 4 kHz.
+ *   2. There is NO delay_1ms(25) inside the function body — the legacy blocking hold is removed.
+ *   3. The function reads Hall GPIO: (GPIO_ISTAT(GPIOC)>>6)&0x07.
+ *   4. The function assigns q31_rotorposition_hall from a Hall-lookup table.
+ *   5. The function sets q31_rotorposition_absolute from q31_rotorposition_hall.
  *
- * WHAT THIS DOES NOT PROVE: that the clock actually advances across the delay at runtime (that
- * is the control ISR's job), or anything about rearm_delay_diag.c's own recording - that is the
+ * WHAT THIS DOES NOT PROVE: anything about rearm_delay_diag.c's own recording — that is the
  * unit suite's job (tests/host/rearm_delay_diag_host.c, test_bug1_standstill_span_is_real_time).
  *
  * Comments are stripped the same way as main_startup_wiring_host.c: line comments to end of line,
@@ -119,7 +114,7 @@ static const char *find_function_body(const char *clean, const char *fn_sig)
 int main(void)
 {
 	const char *path = STRINGIZE(MAIN_C_PATH);
-	printf("FW-111 v3 Bug 1 main.c wiring guard (source-text check, see file header)\n");
+	printf("FW-111/112 standstill position wiring guard (source-text check, see file header)\n");
 	printf("  MAIN_C_PATH = %s\n", path);
 
 	long len = 0;
@@ -161,41 +156,28 @@ int main(void)
 	CHECK(body_brace != NULL, "setup: get_standstill_position()'s body found");
 
 	if (body_brace) {
-		/* 2. enter marker: a direct read of the GLOBAL control_time_ticks, before delay_1ms(25). */
-		const char *enter_call = strstr(body_brace, "rearm_delay_note_standstill_enter(");
-		CHECK(enter_call != NULL,
-			"GUARD: rearm_delay_note_standstill_enter(...) is called inside the function");
-		if (enter_call) {
-			/* The argument must be a direct read of the global, i.e. no arithmetic on it. */
-			const char *arg = strstr(enter_call, "control_time_ticks)");
-			CHECK(arg != NULL,
-				"GUARD: rearm_delay_note_standstill_enter() reads the GLOBAL control_time_ticks "
-				"fresh (a direct read, not a stale parameter)");
-		}
-
+		/* 2. No delay_1ms(25) inside get_standstill_position — the legacy 25 ms blocking hold
+		 * is removed. Hall sensors are IPU on PC6-8, always readable, no settling needed. */
 		const char *delay = strstr(body_brace, "delay_1ms(25);");
-		CHECK(delay != NULL,
-			"GUARD: the 25 ms blocking Hall hold (delay_1ms(25)) is present in the function");
+		CHECK(delay == NULL,
+			"GUARD: delay_1ms(25) is NOT present in get_standstill_position — the 25 ms "
+			"blocking hold has been removed (Hall GPIO is always readable, MOE is OFF)");
 
-		const char *exit_call = strstr(body_brace, "rearm_delay_note_standstill_exit(");
-		CHECK(exit_call != NULL,
-			"GUARD: rearm_delay_note_standstill_exit(...) is called inside the function");
-		if (exit_call) {
-			const char *arg = strstr(exit_call, "control_time_ticks)");
-			CHECK(arg != NULL,
-				"GUARD: rearm_delay_note_standstill_exit() reads the GLOBAL control_time_ticks "
-				"fresh (a direct read, not a stale parameter)");
-		}
+		/* 3. Hall GPIO read: the function must read PC6..8 via the standard expression. */
+		const char *hall_read = strstr(body_brace, "GPIO_ISTAT(GPIOC)>>6)&0x07");
+		CHECK(hall_read != NULL,
+			"GUARD: get_standstill_position reads Hall GPIO via (GPIO_ISTAT(GPIOC)>>6)&0x07");
 
-		/* 3. ordering: enter ... delay_1ms(25) ... exit, each with its own read. */
-		if (enter_call && delay && exit_call) {
-			CHECK(enter_call < delay,
-				"GUARD: the enter marker is read BEFORE delay_1ms(25) - the hold is measured "
-				"on its entry side");
-			CHECK(delay < exit_call,
-				"GUARD: delay_1ms(25) sits BETWEEN the two markers - the exit tick is read "
-				"AFTER the blocking hold, so exit-read minus enter-read is the true 25 ms");
-		}
+		/* 4. q31_rotorposition_hall must be assigned from a calibrated Hall constant. */
+		const char *hall_assign = strstr(body_brace, "q31_rotorposition_hall = Hall_");
+		CHECK(hall_assign != NULL,
+			"GUARD: q31_rotorposition_hall is assigned from a calibrated Hall constant "
+			"(Hall_13, Hall_32, etc.)");
+
+		/* 5. q31_rotorposition_absolute must be set from q31_rotorposition_hall. */
+		const char *abs_assign = strstr(body_brace, "q31_rotorposition_absolute = q31_rotorposition_hall");
+		CHECK(abs_assign != NULL,
+			"GUARD: q31_rotorposition_absolute is set from q31_rotorposition_hall (one-shot seed)");
 	}
 
 	/*
@@ -236,8 +218,7 @@ int main(void)
 	free(clean);
 
 	if (host_test_failures == 0) {
-		printf("main.c Bug 1 wiring guard passed - the standstill markers read control_time_ticks\n");
-		printf("fresh on both sides of the blocking delay_1ms(25), so the Hall hold measures ~25 ms.\n");
+		printf("main.c standstill position guard passed - no blocking delay, Hall GPIO read directly.\n");
 		return 0;
 	}
 	printf("\n%d main_rearm_wiring check(s) FAILED.\n", host_test_failures);

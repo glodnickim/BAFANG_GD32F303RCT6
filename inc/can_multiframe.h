@@ -32,6 +32,18 @@
  *   IDLE -> PREPARE_CURRENT -> WAIT_QUEUE_SPACE -> WAIT_FRAGMENT_RESULT -> (next fragment or)
  *           COMPLETE            IDLE            <-   ABORTED
  *
+ * FW-114 (HMI flow control): when the reply is destined for the display (target=3), the
+ * producer additionally holds the DATA phase until the display ACKs the START frame. The
+ * factory display confirms every multiframe START with a NORMAL_ACK of the same command
+ * (e.g. 83126000 right after 821C6000 - see logi m510 original) and only THEN accepts DATA;
+ * sending DATA before that ACK is what leaves the HMI Info tab blank. The wait is bounded
+ * by CANMF_ACK_WAIT_TIMEOUT_TICKS, so a display that does NOT ACK (CANable/BESST, or an
+ * unknown HMI) degrades to the previous immediate-DATA behaviour after that timeout instead
+ * of hanging the reply. The ACK is latched by can_multiframe_hmi_ack() from the RX path and
+ * consumed on the START->DATA transition:
+ *
+ *   WAIT_FRAGMENT_RESULT (START DONE, target=3) -> WAIT_HMI_ACK -> (ACK or timeout) -> PREPARE
+ *
  * Per fragment: build exactly ONE fragment's bytes, enqueue it via
  * can_tx_queue_enqueue_tracked(), keep its token, and do NOT build or enqueue the next fragment
  * until can_tx_queue_token_state() returns CANQ_TOKEN_DONE for it. PENDING keeps the automaton
@@ -48,6 +60,11 @@
  *   - fresh heartbeat/status/poll/ACK HMI frames always have the other 15 slots free;
  *   - no waiting loops, at most one automaton transition per can_multiframe_step() call, no
  *     sleep/delay, no direct access to CAN hardware from this file.
+ *
+ * FW-114: for a target=3 (HMI) reply, no DATA/END fragment may be enqueued until the display's
+ * NORMAL_ACK of the START has been seen or CANMF_ACK_WAIT_TIMEOUT_TICKS have passed. The gate
+ * applies ONLY to the START->DATA transition of a target=3 reply; every other target (5, ...)
+ * is unaffected, and the wait itself holds at most one queue slot like any other state.
  *
  * This module owns exactly ONE multiframe reply at a time and produces it a fragment at a time,
  * across as many can_multiframe_step() calls as it takes. can_multiframe_start()/..._with_
@@ -67,6 +84,12 @@
  */
 
 #define CANMF_MAX_PAYLOAD 255U
+
+/* FW-114: how long a target=3 reply waits for the display's START ACK before proceeding with
+ * DATA anyway. 100 ms at the 4 kHz control timebase (CONTROL_TIMEBASE_HZ/10); the factory
+ * display ACKs ~30-35 ms after START (see logi m510 original), so this is a 3x safety margin.
+ * Also used by the host tests, which drive the automaton with synthetic tick values. */
+#define CANMF_ACK_WAIT_TIMEOUT_TICKS 400U
 
 /* Optional single frame sent after the multiframe reply's END fragment is CONFIRMED done -
  * 0x6012's factory "config transfer complete" marker (01 00 02 06). */
@@ -116,10 +139,20 @@ bool can_multiframe_start_with_trailer(uint16_t command, uint8_t target, uint8_t
 /* Outcome of a transfer id handed out by a successful start. See can_multiframe_xfer_state_t. */
 can_multiframe_xfer_state_t can_multiframe_transfer_state(can_multiframe_id_t id);
 
+/* FW-114: called from the CAN RX path when the display's NORMAL_ACK of a multiframe START is
+ * received (operation 2, same command, source=3 - e.g. 83126000 after 821C6000). Latches the
+ * ACK for the active transfer ONLY if that transfer is currently waiting for exactly this ACK
+ * (target=3, matching command, still at the START gate). A stray or stale ACK can therefore
+ * never release an unrelated transfer, and an ACK that arrives while START is still in flight
+ * is remembered and skips the wait entirely. */
+void can_multiframe_hmi_ack(uint16_t command);
+
 /* Call once per main-loop tick, unconditionally (this is a critical-priority producer, same as
  * can_tx_queue itself - it only ever feeds can_tx_queue_enqueue_tracked(), never touches
- * hardware directly). Does at most one automaton transition per call. Does nothing when idle. */
-void can_multiframe_step(void);
+ * hardware directly). `now_tick` is the current control_time_ticks (the 4 kHz free-running
+ * clock), used to bound the FW-114 START-ACK wait. Does at most one automaton transition per
+ * call. Does nothing when idle. */
+void can_multiframe_step(uint32_t now_tick);
 
 /* Clean the whole automaton and every counter (nothing active, no pending transfer id, all
  * counters 0). Called once at startup (main.c's CAN init), and by host tests between scenarios

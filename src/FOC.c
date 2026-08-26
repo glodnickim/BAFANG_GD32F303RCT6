@@ -22,6 +22,15 @@ q31_t	temp6;
 q31_t q31_i_q_fil = 0;
 q31_t q31_i_d_fil = 0;
 
+/* FW-126 current-feedback publication state. It lives with the current filters, not in a
+ * diagnostic module, because bridge start/stop semantics are production safety semantics.
+ * `valid` is deliberately not inferred from EOIC: FW-127 must first derive the real PWM window. */
+volatile uint32_t foc_current_sample_seq = 0;
+volatile uint32_t foc_current_sample_tick = 0;
+volatile uint8_t  foc_current_fresh = 0;
+volatile uint8_t  foc_current_valid = 0;
+volatile uint16_t foc_current_sample_age = 0;
+
 q31_t x1;
 q31_t x2;
 
@@ -49,6 +58,40 @@ void svpwm(q31_t q31_u_alpha, q31_t q31_u_beta);
 q31_t atan2_LUT(q31_t e_alpha, q31_t e_beta);
 void observer_update(long long v_alpha, long long v_beta, long long i_alpha, long long i_beta,  q31_t *e_alpha,q31_t *e_beta);
 int utils_truncate_number_abs(long long *number, q31_t max);
+
+/* FW-126: see the doc comment in FOC.h for what this does and, just as importantly, does not
+ * touch. Plain assignment, not the IIR's usual "-= >>3; += new" - a hard reset, not one more
+ * decay step, because a decay step would still blend in the stale value. */
+void foc_current_feedback_reset(MotorState_t* MS_FOC)
+{
+	q31_i_q_fil = 0;
+	q31_i_d_fil = 0;
+	foc_current_fresh = 0;
+	foc_current_valid = 0;
+	foc_current_sample_age = 0;
+	if (MS_FOC) {
+		MS_FOC->i_q = 0;
+		MS_FOC->i_d = 0;
+	}
+}
+
+void foc_current_feedback_invalidate(void)
+{
+	foc_current_fresh = 0;
+	foc_current_valid = 0;
+	foc_current_sample_age = 0;
+}
+
+void foc_current_feedback_note_fresh(uint32_t control_tick)
+{
+	/* ADC1 EOIC proves a newly completed injected group. Do not require the unknown PWM-window
+	 * model here: freshness and physical validity are intentionally independent facts. */
+	foc_current_sample_seq++;
+	foc_current_sample_tick = control_tick;
+	foc_current_fresh = 1U;
+	/* No window model exists yet; do not publish the result as valid current feedback. */
+	foc_current_valid = 0U;
+}
 
 void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC, MotorParams_t* MP_FOC)
 {
@@ -239,7 +282,6 @@ int utils_truncate_number_abs(long long *number, q31_t max) {
 
 	return did_trunc;
 }
-
 
 
 

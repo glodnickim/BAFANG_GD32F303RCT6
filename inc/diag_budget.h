@@ -1,6 +1,8 @@
 #ifndef DIAG_BUDGET_H_
 #define DIAG_BUDGET_H_
 
+#include "config.h"  /* CAN_DIAGNOSTICS_ENABLE, FW117_TRACE_ENABLE */
+
 /*
  * FW-106: the diagnostic RAM budget, checked by the COMPILER rather than by a note in a
  * document or a number measured once by hand.
@@ -95,11 +97,51 @@
  * 23564 B before this card and 23932 B after, +368 B), and the real cost is re-checked by the
  * linker map step before any ride, exactly as this header always required.
  *
+ * FW-112 A/B: a SIXTH record source (DIAG_SRC_AB) and a new recorder module (src/fw112_ab.c,
+ * struct R). The rearm-episode logger's ring is 144 x 32 B = 4608 B (six complete worst-case
+ * episodes per batch, reject-on-full, see inc/fw112_ab.h) plus ~36 B of queue/FSM/edge
+ * bookkeeping and a 4 x 4 B pre-grant milestone tick table - measured 4664 B, +64 B headroom =
+ * 4728 B. The sixth source grew diag_session.c's struct D by ~60 B (measured 1264 B: the same
+ * nine per-source arrays each gained one element), line item 1328 B. The line-item total is
+ * 17980 B - past the 13 KB ceiling - so the ceiling is raised to 18 KB. The real cost is
+ * re-checked by the linker map step before any ride, exactly as this header always required.
+ *
+ * FW-117 (TEMPORARY - REMOVE BEFORE SHIPPING): a SEVENTH record source (DIAG_SRC_FW117) and a new
+ * recorder module (src/fw117_trace.c, struct R). The bridge lifecycle trace's ring is
+ * 480 x 32 B = 15360 B (240 ms pre + 240 ms post at 1 kHz, see inc/fw117_trace.h) plus ~32 B of
+ * queue/FSM/edge bookkeeping - measured 15392 B, +64 B headroom = 15456 B, line item 15500 B. The
+ * seventh source grows diag_session.c's struct D by ~64 B (the nine per-source arrays each gained
+ * one element) - measured 1328 B, line item 1392 B. The line-item total is 33316 B - past the
+ * 18 KB ceiling - so the ceiling is raised to 34 KB for this TEMPORARY card. The trace must be
+ * removed (module, source, budget line) before the fix ships; the BRIDGE FIX ITSELF (OSSR/OSSI
+ * ENABLE + the start deadzone) stays. Dead time is NOT part of that fix - it stayed at 32, see
+ * timer0_config() in src/main.c - and neither is the 3 s stop-tick value, which now lives behind
+ * FW117_BRIDGE_TIMING_TEST in inc/config.h and is off by default.
+ *
+ * FW-112-STABILITY (diagnostic-only recovery instrumentation): fw112_diag.c's struct R gains a
+ * 4 B edge-metadata pair beside each of the 24 records (24 x 36 B = 864 B instead of 768 B) plus
+ * three u16 episode counters and a bool (~8 B) - static layout 904 B, up from 800 B. No new wire
+ * traffic: the metadata is written into the record's spare wire bytes (schema 3). The retention
+ * eviction then added two u32 counters (evicted_saga_total/evicted_record_total, internal only,
+ * never on the wire) - static layout 912 B. Line item raised 864 -> 976 B (measured 904 B + 64 B
+ * headroom).
+ *
+ * FW-122.1 (D2 diagnostic extension, diagnostic-only): rolling_no_assist_diag.c's sample struct
+ * grows 44 -> 48 B (two of schema v2's four DATA-5 wire-padding bytes become real fields -
+ * pwm_cutoff_progress, hall_timeout_progress - plus one status_flags bit, RNA_STATUS_PWM_
+ * CUTOFF_ACTIVE, at zero size cost). Ring 256 x 48 B = 12288 B. Re-measured 2026-08-24
+ * (GCC 13.2.1, isolated single-file compile, same method as above): 12316 B bss (was 11264 B),
+ * NORMAL object 0/0/0 (unchanged - the whole module still compiles out). Line item raised
+ * 11356 -> 12380 B (measured 12316 B + 64 B headroom). Full-image DIAG build (0.0422):
+ * FLASH 143836 B (+716 B vs 0.0418's 143120 B), RAM 42592 B (+1040 B vs 41552 B) - both within
+ * the 34 KB diag-budget ceiling and the controller's 48 KB total SRAM. Full-image NORMAL build
+ * (0.0421): FLASH 100140 B, RAM 12032 B - byte-identical to the pre-FW-122.1 baseline.
+ *
  * Each line item below is that measurement plus a fixed 64 B of headroom for compiler/alignment
  * drift between toolchain versions - not slack for casually adding new fields. Re-measure and
  * update these (with the same method) whenever a module's state genuinely needs to grow.
  *
- * The 12/13 KB ceiling is NOT "free RAM". The controller has 48 KB in total and how much of it is
+ * The 34 KB ceiling is NOT "free RAM". The controller has 48 KB in total and how much of it is
  * already spoken for is a question only the linker map answers - a separate, explicit step
  * before any ride, which this header does not and cannot replace.
  */
@@ -107,9 +149,28 @@
 #define DIAG_BUDGET_PAS_RAW_BYTES        4200U  /* measured 4136 B + 64 B headroom */
 #define DIAG_BUDGET_PAS_TRACE_BYTES      7308U  /* measured 7244 B + 64 B headroom (FW-111 v3) */
 #define DIAG_BUDGET_EPISODE_QUEUE_BYTES  2740U  /* measured 2676 B + 64 B headroom (FW-107) */
-#define DIAG_BUDGET_SESSION_BYTES        1268U  /* measured 1204 B + 64 B headroom (FW-112-DIAG fifth source) */
+#define DIAG_BUDGET_SESSION_BYTES        1788U  /* FW-121.0: measured 1660 B + 64 B headroom (DIAG_AGGREGATE_SNAPSHOT_MAX 14 -> 21); +64 B for 8th source (DIAG_SRC_ROLLING_NO_ASSIST) */
 #define DIAG_BUDGET_REARM_DELAY_BYTES    444U   /* FW-111 v5.1: measured 380 B + 64 B headroom */
-#define DIAG_BUDGET_FW112_DIAG_BYTES     864U   /* FW-112-DIAG.1: measured 800 B + 64 B headroom (24 x 32 B records) */
+#define DIAG_BUDGET_FW112_DIAG_BYTES     976U   /* FW-112-STABILITY: measured 904 B + 64 B headroom (24 x (32 B record + 4 B edge meta) + episode counters) */
+#define DIAG_BUDGET_FW112_AB_BYTES       4728U  /* FW-112 A/B: measured 4664 B + 64 B headroom (144 x 32 B records + pre-grant table) */
+#if FW117_TRACE_ENABLE
+#define DIAG_BUDGET_FW117_TRACE_BYTES    3425U /* FW-126: 70 x 48 B compact start trace + state */
+#else
+#define DIAG_BUDGET_FW117_TRACE_BYTES    0U     /* FW-117 trace disabled: replaced by rolling_no_assist_diag */
+#endif
+/* FW-126.2: +112 B for the three-point sample store (7 x u16 CNT per point, plus median,
+ * min/max, counts and the CH3 readback) that replaced FW-126.0's single sample per point.
+ * The legacy six-slot array is deliberately NOT reclaimed to pay for it - section 18 forbids
+ * deleting diagnostics for RAM without a separate audit. Checked against the .map before any
+ * ride, which stays the authoritative number. */
+#define DIAG_BUDGET_ADC_TRIGGER_BYTES    450U   /* FW-126.0 six slots + snapshots; FW-126.2 median store */
+#if ROLLING_NO_ASSIST_DIAG_ENABLE
+#define DIAG_BUDGET_ROLLING_NO_ASSIST_DIAG_BYTES 12380U /* FW-122.1: schema v3, measured arm-none-eabi-size bss=12316 B (256 x 48 B = 12288 B ring + 28 B state) + 64 B headroom; NORMAL object measured 0/0/0 (was 11356 B / 44 B samples at schema v2) */
+#define DIAG_BUDGET_ROLLING_NO_ASSIST_DUMP_BYTES 128U   /* FW-123: explicit replay cursor/transport + 64 B headroom */
+#else
+#define DIAG_BUDGET_ROLLING_NO_ASSIST_DIAG_BYTES 0U
+#define DIAG_BUDGET_ROLLING_NO_ASSIST_DUMP_BYTES 0U
+#endif
 
 /*
  * pas_trace.c keeps ONE slot even in the production build (CAN_DIAGNOSTICS_ENABLE=0) - that slot
@@ -125,9 +186,24 @@
 	DIAG_BUDGET_EPISODE_QUEUE_BYTES + \
 	DIAG_BUDGET_SESSION_BYTES + \
 	DIAG_BUDGET_REARM_DELAY_BYTES + \
-	DIAG_BUDGET_FW112_DIAG_BYTES)
+	DIAG_BUDGET_FW112_DIAG_BYTES + \
+	DIAG_BUDGET_FW112_AB_BYTES + \
+	DIAG_BUDGET_FW117_TRACE_BYTES + \
+	DIAG_BUDGET_ADC_TRIGGER_BYTES + \
+	DIAG_BUDGET_ROLLING_NO_ASSIST_DIAG_BYTES + \
+	DIAG_BUDGET_ROLLING_NO_ASSIST_DUMP_BYTES)
 
-_Static_assert(DIAG_BUDGET_TOTAL_BYTES <= 13U * 1024U,
-	"FW-106: the diagnostic RAM budget exceeds its 13 KB ceiling (raised from 12 KB by FW-112-DIAG)");
+/*
+ * Ceiling:34 KB when fw117 is disabled (production+rolling_no_assist). 40 KB when
+ * fw117 is enabled (temporary bench image, not for shipping). The linker map is the
+ * authoritative check before any ride.
+ */
+#if FW117_TRACE_ENABLE
+_Static_assert(DIAG_BUDGET_TOTAL_BYTES <= 40U * 1024U,
+	"FW-106: the diagnostic RAM budget exceeds its 40 KB ceiling (fw117 trace enabled)");
+#else
+_Static_assert(DIAG_BUDGET_TOTAL_BYTES <= 34U * 1024U,
+	"FW-106: the diagnostic RAM budget exceeds its 34 KB ceiling");
+#endif
 
 #endif /* DIAG_BUDGET_H_ */

@@ -12,6 +12,7 @@ inc/build_version.h
 /.build/
 /.backup/
 /logs/
+/.local/
 
 # Internal working notes/plans, not part of the published project
 /todo/
@@ -23,7 +24,6 @@ inc/build_version.h
 /archive/PLAN_POWER_PATH_smooth_ride.md
 /archive/PLAN_walk_assist_speed_hold.md
 /archive/README.md
-/documentation/BUILD_FIRMWARE.md
 /documentation/CANABLE_EBICS_UI_AUDIT_PL.md
 /documentation/CAN_PROTOCOL_REFERENCE.md
 /documentation/CB-019_HELP_BUBBLES.md
@@ -88,3 +88,8 @@ documentation/CHANGELOG_PL.md
 /documentation/MechanicalParameters.JPG
 /documentation/SpeedSettings.JPG
 /documentation/ThrottleParameters.JPG
+/documentation/BUILD_FIRMWARE_PL.md
+
+# Python bytecode caches from the trace analyzer tooling
+__pycache__/
+*.pyc

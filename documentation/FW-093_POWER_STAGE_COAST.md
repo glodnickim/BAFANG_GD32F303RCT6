@@ -223,9 +223,10 @@ w ruchu. Bez tego karta wprowadziłaby nowy błąd zamiast usunąć stary:
 - **MOE włącza teraz ISR FOC**, zaraz po zapisaniu pierwszego wyliczonego zestawu
   `switchtime[]`. Gdyby włączać w pętli głównej, mostek przez maksymalnie jeden okres PWM
   (62,5 µs) podawałby neutralny wektor `_T/2` — czyli zwarcie uzwojeń.
-- `get_standstill_position()` (blokujące 25 ms) wykonuje się **tylko przy zatrzymanym
+- `get_standstill_position()` wykonuje się **tylko przy zatrzymanym
   wirniku**. Gdy silnik się kręci, kąt jest już prowadzony przez ISR Halla i to
-  odczytanie tylko dokładałoby martwy czas.
+  odczytanie tylko dokładałoby martwy czas. Odczyt Hall jest natychmiastowy (bez delay),
+  bo Hall jest zawsze czytelny z GPIO (IPU na PC6-8, magnesy trwałe).
 - Istniejący bumpless enable z FW-035 **został zachowany** — zerowanie obu regulatorów,
   `u_q`/`u_d`/`u_abs` i wymuszenie 50/50 są nadal na miejscu i są ścieżką domyślną.
 
@@ -358,8 +359,7 @@ oraz małe `Iq`/`Id` w chwili wejścia w COAST. Dopiero te liczby są podstawą 
 
 ### Test 6 — regresja startu z postoju
 1. Kilka startów spod świateł, w tym pod górkę.
-2. **Oczekiwane:** bez zmian względem 0.0297. Ta karta nie miała ruszyć startu, ale
-   dokłada do niego ~25 ms (odtworzenie kąta z postoju) — sprawdź, czy tego nie czuć.
+2. **Oczekiwane:** bez zmian względem 0.0297. Ta karta nie miała ruszyć startu.
 
 Jeżeli coś jest nie tak: zbierz log z ramką **0x00010207** — po niej widać, czy mostek
 zwolnił się na pomiarze, czy na bezpieczniku (flaga b4).

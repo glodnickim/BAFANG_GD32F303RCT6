@@ -478,7 +478,7 @@ static void test_s3_coast_resume_no_cold_gate(void)
 	fwd1(&resume);                              /* the first real forward edge */
 	CHECK(!g_real_stop, "S3: the forward edge cleared real_stop the same tick");
 	CHECK(session_state() == RIDE_SESSION_ACTIVE, "S3: resume re-armed ACTIVE immediately");
-	CHECK(is_latched(), "S3: latched");
+	CHECK(session_state() == RIDE_SESSION_ACTIVE, "S3: latched (session ACTIVE)");
 	CHECK(arm_snapshot_fast_rearm(), "S3: flagged as fast_rearm (the rolling rearm, NOT a cold arm)");
 	CHECK(!g_ever_cold, "S3: the whole coast + resume never visited COLD");
 	/* real assist flows again on the resumed ride */

@@ -10,8 +10,7 @@
 ## Zweryfikowane fakty (0.0206)
 
 - FW-035 juz robi elektryczny bumpless: zero PI_iq.out/PI_id.out + neutralny PWM przed ENABLE.
-- `get_standstill_position()` ma BLOKUJACY `delay_1ms(25)` (main.c:2302) - zamraza petle 25 ms
-  przed ENABLE. Maszyna stanow musi to obejsc nieblokujaco.
+- `get_standstill_position()` odczytuje Hall GPIO bezpośrednio (bez delay) - Hall jest zawsze czytelny
 - Wykrycie ruchu wirnika dostepne: `ui16_erps` (main.c) + przejscia Halla (`ui8_hall_state`).
 - Mostek wlaczany przy pierwszym `MS.i_q_setpoint != 0` (main.c ~739).
 

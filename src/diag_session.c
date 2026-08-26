@@ -32,8 +32,19 @@
  * FW-113.2: main.c now builds exactly 14 aggregate frames (0x10203..0x1020F, 0x10219, 0x10228),
  * filling DIAG_AGGREGATE_SNAPSHOT_MAX exactly. Do not add a 15th aggregate frame without
  * re-measuring the 12 KB budget in inc/diag_budget.h - see the note above.
+ *
+ * FW-121.0: raised 14 -> 21. The sweep publishes seven frames (0x1022F status + 0x10230..0x10235,
+ * one per CCR3 point) and the block therefore builds 21. THIS IS THE CAP THAT SILENTLY DROPPED
+ * THEM: the snapshot loop below stops at DIAG_AGGREGATE_SNAPSHOT_MAX, so frames at index >= 14
+ * were built by main.c and then never frozen, never dumped and never seen on the bus - no error,
+ * no counter, nothing. Cost: 7 x 12 B x DIAG_SESSION_SUMMARIES(4) = 336 B, re-measured into
+ * DIAG_BUDGET_SESSION_BYTES in inc/diag_budget.h. Diagnostic build only.
+ *
+ * IF YOU ADD A 22nd AGGREGATE FRAME, RAISE THIS TOO, or it will vanish exactly the same way.
+ *
+ * The definition itself moved to inc/diag_session.h so main.c can assert its own frame count
+ * against it at compile time.
  */
-#define DIAG_AGGREGATE_SNAPSHOT_MAX 14U
 
 typedef struct {
 	uint8_t  session_id;
@@ -161,7 +172,8 @@ _Static_assert(sizeof(D) <= DIAG_BUDGET_SESSION_BYTES,
 #define PH_TRAILER   5U
 
 static const diag_record_kind_t kind_of_source[DIAG_SRC_COUNT] = {
-	DIAG_REC_EPISODE, DIAG_REC_TRACE, DIAG_REC_RAW, DIAG_REC_REARM, DIAG_REC_FW112
+	DIAG_REC_EPISODE, DIAG_REC_TRACE, DIAG_REC_RAW, DIAG_REC_REARM, DIAG_REC_FW112,
+	DIAG_REC_AB, DIAG_REC_FW117, DIAG_REC_ROLLING_NO_ASSIST
 };
 
 void diag_session_init(const diag_can_ops_t *can, const diag_ops_t *o)
@@ -681,6 +693,15 @@ void diag_session_dump_step(uint32_t now_tick, bool allow_new_tx)
 			}
 			if (s->refused_at_close[DIAG_SRC_FW112] != s->refused_at_open[DIAG_SRC_FW112]) {
 				tf |= DIAG_TRAILER_F_FW112_REJECTED;
+			}
+			if (s->refused_at_close[DIAG_SRC_AB] != s->refused_at_open[DIAG_SRC_AB]) {
+				tf |= DIAG_TRAILER_F_FW112_AB_REJECTED;
+			}
+			if (s->refused_at_close[DIAG_SRC_FW117] != s->refused_at_open[DIAG_SRC_FW117]) {
+				tf |= DIAG_TRAILER_F_FW117_REJECTED;
+			}
+			if (s->refused_at_close[DIAG_SRC_ROLLING_NO_ASSIST] != s->refused_at_open[DIAG_SRC_ROLLING_NO_ASSIST]) {
+				tf |= DIAG_TRAILER_F_ROLLING_NO_ASSIST_REJECTED;
 			}
 			d[7] = tf;
 		}

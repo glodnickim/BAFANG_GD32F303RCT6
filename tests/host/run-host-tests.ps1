@@ -38,6 +38,8 @@ $inc = Join-Path $root 'inc'
 # see main_startup_wiring_host.c's own STRINGIZE() comment for why that matters here.
 $mainCPathForward = (Join-Path $root 'src\main.c') -replace '\\', '/'
 $canDisplayCPathForward = (Join-Path $root 'src\CAN_Display.c') -replace '\\', '/'
+$adcTriggerDiagCPathForward = (Join-Path $root 'src\adc_trigger_diag.c') -replace '\\', '/'
+$rollingNoAssistDiagCPathForward = (Join-Path $root 'src\rolling_no_assist_diag.c') -replace '\\', '/'
 
 # Every harness and the module(s) it links. Add new ones here.
 $suites = @(
@@ -47,7 +49,8 @@ $suites = @(
     @{ Name = 'FW-113.1 Walk Assist RUN minimum Iq (real walk_assist_motor + walk_speed_controller)'
        Harness = Join-Path $PSScriptRoot 'walk_assist_run_min_host.c'
        Modules = @((Join-Path $root 'src\walk_assist_motor.c'),
-                   (Join-Path $root 'src\walk_speed_controller.c')) },
+                   (Join-Path $root 'src\walk_speed_controller.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
     @{ Name = 'FW-113.2 Walk Assist no hold timeout + reason bits (real walk_assist_motor + walk_speed_controller)'
        Harness = Join-Path $PSScriptRoot 'walk_assist_diag_host.c'
        Modules = @((Join-Path $root 'src\walk_assist_motor.c'),
@@ -89,6 +92,51 @@ $suites = @(
        # The module's whole input surface is fw112_diag_input_t, so no other module is linked;
        # the harness drives every event/snapshot field directly (see the harness's file header).
        Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1') },
+    @{ Name = 'FW-112-STABILITY retention: full-ring saga eviction (real fw112_diag.c)'
+       Harness = Join-Path $PSScriptRoot 'fw112_retention_host.c'
+       # Same module pair as the FW-112-STABILITY evidence suite: the real recovery automaton
+       # (torque_input.c) supplies S10's ride output, the real fw112_diag.c supplies the ring.
+       # S1-S9 drive the recorder directly; S10 runs the long ride twice (recorder on/off).
+       Modules = @((Join-Path $root 'src\torque_input.c'),
+                   (Join-Path $root 'src\fw112_diag.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-Wno-type-limits') },
+    @{ Name = 'FW-112 two-mechanism direct-signal diagnostic (real torque_input.c + fw112_ab.c)'
+       Harness = Join-Path $PSScriptRoot 'fw112_ab_two_mechanism_host.c'
+       # Real recovery automaton (torque_input.c) + real rearm-episode logger (fw112_ab.c),
+       # proving schema 2's direct afilt/arun capture matches production and that WAIT_FRESH_LOAD
+       # depends on afilt alone (S1/S2/S5), while the ordinary 48-step RUN window is a real,
+       # separate lag source only when recovery is inactive (S3/S4) - see the harness's own file
+       # header for S1-S6.
+       Modules = @((Join-Path $root 'src\torque_input.c'),
+                   (Join-Path $root 'src\fw112_ab.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-Wno-type-limits') },
+    @{ Name = 'FW-117.1 bridge lifecycle trace, TRIGGER_EVENT=START (real fw117_trace.c)'
+       Harness = Join-Path $PSScriptRoot 'fw117_trace_host.c'
+       Modules = @(Join-Path $root 'src\fw117_trace.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       # FW117_TRACE_TRIGGER_EVENT is left at its default (0 = START) here; the STOP-triggered
+       # image is the separate suite entry right below, from the SAME harness source.
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-DFW117_TRACE_ENABLE=1', '-DROLLING_NO_ASSIST_DIAG_ENABLE=0') },
+    @{ Name = 'FW-117.1 bridge lifecycle trace, TRIGGER_EVENT=STOP (real fw117_trace.c)'
+       Harness = Join-Path $PSScriptRoot 'fw117_trace_host.c'
+       Modules = @(Join-Path $root 'src\fw117_trace.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-DFW117_TRACE_TRIGGER_EVENT=1', '-DFW117_TRACE_ENABLE=1', '-DROLLING_NO_ASSIST_DIAG_ENABLE=0') },
+    @{ Name = 'FW-117.1 TRIGGER_EVENT selector rejects an invalid value (must FAIL to build)'
+       Harness = Join-Path $PSScriptRoot 'fw117_trace_bad_selector_host.c'
+       Modules = @()
+       Defines = @('-DFW117_TRACE_TRIGGER_EVENT=2')
+       # This probe is SUPPOSED to fail to compile (inc/fw117_trace.h's #error) - see the
+       # harness's own file header. ExpectBuildFailure inverts the pass/fail check below: a
+       # build that succeeds here is the test FAILING, not passing.
+       ExpectBuildFailure = $true },
+    @{ Name = 'FW-126.0 neutral-dwell ADC trigger edge/coherency diagnostic (real adc_trigger_diag.c)'
+       Harness = Join-Path $PSScriptRoot 'fw126_neutral_dwell_diag_host.c'
+       Modules = @(Join-Path $root 'src\adc_trigger_diag.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-DROLLING_NO_ASSIST_DIAG_ENABLE=0') },
     @{ Name = 'FW-111 Bug 1 main.c standstill wiring (source-text guard)'
        Harness = Join-Path $PSScriptRoot 'main_rearm_wiring_host.c'
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
@@ -137,6 +185,7 @@ $suites = @(
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
                    (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
@@ -157,6 +206,7 @@ $suites = @(
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
                    (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
@@ -164,6 +214,60 @@ $suites = @(
                    (Join-Path $PSScriptRoot 'common\motor_service_stub.c'))
 IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScriptRoot 'common'))
         Defines = @('-Wno-type-limits') },
+    @{ Name = 'FW-112.4 ordinary-RUN asymmetric filter (real torque_input.c, S1-S8 host comparison)'
+       Harness = Join-Path $PSScriptRoot 'torque\torque_run_asym_host.c'
+       # Real torque_input.c only - no rearm/session chain needed, this card's filter is scoped
+       # to recovery_state == IDLE (ordinary RUN). Compares the shipped module's real ARUN
+       # output against an in-harness replica of the pre-card 48-step plain moving average fed
+       # the SAME real afilt stream, across S1-S8 trajectories at 20/40/60/80 rpm, plus a direct
+       # cold-arm/rolling-rearm seed-parity check. See the harness's own file header.
+       Modules = @((Join-Path $root 'src\torque_input.c'),
+                   (Join-Path $PSScriptRoot 'common\crank_model.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-Wno-type-limits') },
+    @{ Name = 'FW-112 PATCH A stale-torque safety proof (S1-S5, real production chain)'
+       Harness = Join-Path $PSScriptRoot 'torque\patchA_stale_torque_proof_host.c'
+       # Proves the simplified rolling-rearm authorization (torque_input_begin_rolling_rearm()
+       # now opens directly in TRACK_FAST) never reuses stale pre-reverse torque and always
+       # defers to brake/fault regardless of pedal pressure - see the harness's own file header
+       # for S1-S5.
+       Modules = @((Join-Path $root 'src\torque_input.c'), (Join-Path $root 'src\rider_input.c'),
+                   (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
+                   (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
+                   (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
+                   (Join-Path $root 'src\assist_dynamics.c'),
+                   (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
+                   (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
+                   (Join-Path $PSScriptRoot 'common\map_adapter.c'),
+                   (Join-Path $PSScriptRoot 'common\motor_service_stub.c'))
+       IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScriptRoot 'common'))
+       Defines = @('-Wno-type-limits') },
+    @{ Name = 'FW-112.5 recovery-freshness A/B: ordinary RUN vs rolling rearm, identical torque (audit-only, no fix)'
+       Harness = Join-Path $PSScriptRoot 'torque\recovery_freshness_ab_host.c'
+       # Audit finding (no production change): torque_input.c's WAIT_FRESH_LOAD -> TRACK_FAST
+       # transition DOES compare AFILT (already deadband-subtracted) against
+       # TORQUE_ASSIST_DEADBAND_NATIVE a second time - a real double application of the same
+       # constant. This harness proves that double application has NO effect on rider-felt
+       # motor demand, because ride_control.c substitutes the same AFILT value (single
+       # deadband) into the mode calculation for the whole recovery_active() duration
+       # regardless of the automaton's internal sub-state - first positive iq_request lands at
+       # the identical delta in both scenarios. Kept as a permanent regression: a future change
+       # that accidentally makes recovery gate on the double threshold would break this.
+       Modules = @((Join-Path $root 'src\torque_input.c'), (Join-Path $root 'src\rider_input.c'),
+                   (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
+                   (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
+                   (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
+                   (Join-Path $root 'src\assist_dynamics.c'),
+                   (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
+                   (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
+                   (Join-Path $PSScriptRoot 'common\map_adapter.c'),
+                   (Join-Path $PSScriptRoot 'common\motor_service_stub.c'))
+       IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScriptRoot 'common'))
+       Defines = @('-Wno-type-limits') },
     @{ Name = 'FW-112.1 REAL_STOP liveness separation (real liveness + rearm chain)'
        Harness = Join-Path $PSScriptRoot 'fw112_1_realstop_host.c'
        # Same real-module chain as the FW-109 v2 ride control suite PLUS the FW-112.1 liveness
@@ -174,6 +278,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
                    (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
@@ -182,6 +287,16 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $PSScriptRoot 'common\motor_service_stub.c'))
         IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScriptRoot 'common'))
         Defines = @('-Wno-type-limits') },
+    @{ Name = 'FW-112-STABILITY recovery stability evidence (real torque_input + fw112_diag)'
+       Harness = Join-Path $PSScriptRoot 'fw112_stability_diag_host.c'
+       # The real recovery automaton (torque_input.c) is driven by real raw torque
+       # samples and the real fw112_diag.c recorder captures the transition evidence,
+       # wired exactly as main.c wires them; S5/S6 prove the recorder is measurement-
+       # only. torque_input.c carries the same pre-existing tautological-comparison
+       # warning every other torque_input suite applies -Wno-type-limits for.
+       Modules = @((Join-Path $root 'src\torque_input.c'), (Join-Path $root 'src\fw112_diag.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-Wno-type-limits') },
     @{ Name = 'FW-112.2 REAL_STOP vs ROLLING COAST (real liveness + wheel model + rearm chain)'
        Harness = Join-Path $PSScriptRoot 'fw112_2_rolling_coast_host.c'
        # Same real-module chain as the FW-112.1 suite PLUS the FW-112.2 wheel-freshness helper:
@@ -193,6 +308,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
                    (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
@@ -240,7 +356,97 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        # here, so this reads their SOURCE TEXT instead (see the harness's own file header).
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCAN_DISPLAY_C_PATH=$canDisplayCPathForward") }
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCAN_DISPLAY_C_PATH=$canDisplayCPathForward") },
+    @{ Name = 'STEP 2A neutral-dwell wiring guard (main.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'step2a_neutral_dwell_wiring_host.c'
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-119 current calibration safety policy (real current_cal.c)'
+       Harness = Join-Path $PSScriptRoot 'fw119_current_cal_host.c'
+       Modules = @(Join-Path $root 'src\current_cal.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-119 calibration wiring guard (main.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'fw119_current_cal_wiring_host.c'
+       # main.c is the ARM entry point and cannot be linked here - same reasoning as the
+       # STEP 2A guard above. This reads its SOURCE TEXT instead.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-125 phase-current same-path calibration (real current_cal.c)'
+       Harness = Join-Path $PSScriptRoot 'fw125_phase_current_calibration_host.c'
+       Modules = @(Join-Path $root 'src\current_cal.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-125 phase-current calibration wiring guard (main.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'fw125_wiring_guard_host.c'
+       # main.c is the ARM entry point and cannot be linked here - same reasoning as the
+       # FW-119 guard above. This reads its SOURCE TEXT instead.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-120.1 reconstruction / PWM-period timing (real dyn_adc_state.c)'
+       Harness = Join-Path $PSScriptRoot 'fw120_1_reconstruction_timing_host.c'
+       # The module is driven through a model of the whole acquisition pipeline (switchtime ->
+       # CCR -> counter-top sample -> ISR), including a negative control that replays the
+       # pre-card ordering and MUST fail on every ranking crossing - see the harness header.
+       Modules = @(Join-Path $root 'src\dyn_adc_state.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-120.1 ISR order wiring guard (main.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'fw120_1_isr_order_wiring_host.c'
+       # The module test proves which ORDER is correct; only this proves src/main.c uses it.
+       # main.c cannot be linked here - same reasoning as the FW-119 guard above.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-121.0 ADC trigger timing sweep (real adc_trigger_diag.c)'
+       Harness = Join-Path $PSScriptRoot 'fw121_0_trigger_diag_host.c'
+       # Diagnostic-only module: the harness plays the injected ISR at the real 16 kHz / 4 kHz
+       # ratio and drives MOE the way a bridge start would, so the safety interlock and the whole
+       # sweep sequence are executed, not inspected. See the harness header for S1-S8.
+       Modules = @(Join-Path $root 'src\adc_trigger_diag.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1') },
+    @{ Name = 'FW-121.0 diagnostic isolation guard (main.c + module source-text check)'
+       Harness = Join-Path $PSScriptRoot 'fw121_0_diag_isolation_host.c'
+       # Walks main.c's preprocessor nesting and proves EVERY call into the module sits inside a
+       # #if CAN_DIAGNOSTICS_ENABLE region - the production build gains nothing. Neither file can
+       # be linked here, same reasoning as the other wiring guards.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward",
+                     "-DADC_TRIGGER_DIAG_C_PATH=$adcTriggerDiagCPathForward",
+                     "-DROLLING_NO_ASSIST_DIAG_C_PATH=$rollingNoAssistDiagCPathForward") },
+    @{ Name = 'Rolling no-assist diagnostic (real rolling_no_assist_diag.c)'
+       Harness = Join-Path $PSScriptRoot 'rolling_no_assist_diag_host.c'
+       Modules = @((Join-Path $root 'src\rolling_no_assist_diag.c'),
+                   (Join-Path $root 'src\rolling_no_assist_dump.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1')
+       # The same real-module harness writes its fake physical-CAN capture. This post-step runs
+       # the production PowerShell decoder in strict mode: 256 samples, 1792 frames, continuous
+       # sample indices/timestamps and no missing fragments. It is intentionally an extension of
+       # the recorder suite, not a second encoder/decoder model.
+       TransportDecoder = $true },
+    @{ Name = 'FW-112 PATCH B0 pedal-assist gate scenario proof (S1-S10 + M1-M9)'
+       Harness = Join-Path $PSScriptRoot 'fw112_b0_gate_host.c'
+       # Same real-module chain as the FW-109 v2 ride control suite: the pedal_assist_gate
+       # (when implemented) is exercised THROUGH ride_control_update(), not called directly.
+       # S8 is the key scenario that FAILS against the current (pre-gate) codebase — it proves
+       # the gate changes the start_load=0 behavior. All other scenarios PASS now and must
+       # continue to PASS after B0a implementation.
+       Modules = @((Join-Path $root 'src\torque_input.c'), (Join-Path $root 'src\rider_input.c'),
+                   (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
+                   (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
+                   (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
+                   (Join-Path $root 'src\assist_dynamics.c'),
+                   (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
+                   (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
+                   (Join-Path $PSScriptRoot 'common\map_adapter.c'),
+                   (Join-Path $PSScriptRoot 'common\motor_service_stub.c'))
+       IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScriptRoot 'common'))
+       Defines = @('-Wno-type-limits') }
 )
 
 function Find-HostCompiler {
@@ -298,10 +504,42 @@ if ($host_cc) {
                     '/nologo', '/W4', '/WX') + $msvcIncludeFlags + @("/Fe:$exe", $s.Harness) + $s.Modules)
             } finally { Pop-Location }
         }
+        # FW-117.1: a suite that is SUPPOSED to fail to build (proving a compile-time #error
+        # actually fires - see fw117_trace_bad_selector_host.c) inverts the usual pass/fail
+        # check: succeeding here is the failure.
+        if ($s.ContainsKey('ExpectBuildFailure') -and $s.ExpectBuildFailure) {
+            if ($built -eq 0) {
+                Write-Host "$($s.Name): unexpectedly BUILT (this probe must fail to compile)"
+                Remove-Item $exe -ErrorAction SilentlyContinue
+                $failed++
+            } else {
+                Write-Host "$($s.Name): correctly refused to build"
+            }
+            continue
+        }
         if ($built -ne 0) { Write-Host "$($s.Name): harness failed to BUILD"; $failed++; continue }
+        $transportFixture = $null
+        $transportCsv = $null
+        if ($s.ContainsKey('TransportDecoder') -and $s.TransportDecoder) {
+            $transportFixture = Join-Path $env:TEMP 'rolling_no_assist_transport_host_capture.log'
+            $transportCsv = Join-Path $env:TEMP 'rolling_no_assist_transport_host_capture.csv'
+            Remove-Item -LiteralPath $transportFixture,$transportCsv -Force -ErrorAction SilentlyContinue
+            $env:RNA_CAPTURE_FILE = $transportFixture
+        }
         $code = Invoke-Native $exe @()
+        if ($null -ne $transportFixture) { Remove-Item Env:RNA_CAPTURE_FILE -ErrorAction SilentlyContinue }
         Remove-Item $exe -ErrorAction SilentlyContinue
-        if ($code -ne 0) { $failed++ }
+        if ($code -ne 0) {
+            $failed++
+        } elseif ($null -ne $transportFixture) {
+            $decoder = Join-Path $root 'tools\decode_rolling_no_assist.ps1'
+            $decoded = Invoke-Native 'powershell.exe' @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $decoder,
+                '-InputFile', $transportFixture, '-OutputFile', $transportCsv,
+                '-RequireCompleteCapture')
+            Remove-Item -LiteralPath $transportFixture,$transportCsv -Force -ErrorAction SilentlyContinue
+            if ($decoded -ne 0) { $failed++ }
+        }
     }
     if ($failed -ne 0) { throw "$failed host suite(s) FAILED" }
     Write-Host 'All host suites: PASS'
@@ -321,6 +559,14 @@ foreach ($s in $suites) {
     $built = Invoke-Native $cross (@(
         '-std=c11', '-Wall', '-Wextra', '-Werror', "-I$inc", '-mcpu=cortex-m4', '-mthumb',
         '--specs=nosys.specs', '--specs=nano.specs', '-o', $elf, $s.Harness) + $s.Modules) -Quiet
+    if ($s.ContainsKey('ExpectBuildFailure') -and $s.ExpectBuildFailure) {
+        if ($built -eq 0) {
+            Remove-Item $elf -ErrorAction SilentlyContinue
+            throw "$($s.Name): unexpectedly compiled (this probe must fail to compile)"
+        }
+        Write-Host "$($s.Name): correctly refused to build."
+        continue
+    }
     if ($built -ne 0) { throw "$($s.Name): harness does not compile" }
     Remove-Item $elf -ErrorAction SilentlyContinue
     Write-Host "$($s.Name): COMPILES AND LINKS (behaviour NOT verified - SKIPPED)."

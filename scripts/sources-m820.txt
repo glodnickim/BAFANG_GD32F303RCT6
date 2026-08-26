@@ -9,6 +9,9 @@ src/cadence_comp.c
 src/can_multiframe.c
 src/can_reply_effects.c
 src/can_tx_queue.c
+src/adc_trigger_diag.c
+src/current_cal.c
+src/dyn_adc_state.c
 src/CAN_Display.c
 src/FOC.c
 src/gd32f307c_eval.c
@@ -18,9 +21,14 @@ src/main.c
 src/motor_core.c
 src/parser.c
 src/diag_session.c
+src/fw112_ab.c
 src/fw112_diag.c
+src/fw117_trace.c
+src/rolling_no_assist_diag.c
+src/rolling_no_assist_dump.c
 src/pas_direction.c
 src/pas_liveness.c
+src/pedal_assist_gate.c
 src/pas_quadrature.c
 src/pas_raw.c
 src/pas_trace.c

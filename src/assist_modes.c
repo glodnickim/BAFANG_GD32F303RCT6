@@ -646,16 +646,20 @@ static bool prepare_assist_input(
 	output->cadence_for_assist_rpm = cadence_for_assist;
 	output->assist_without_rotation_active = without_rotation_active;
 	/*
-	 * FW-087: a zero cadence blocks assist ONLY when nothing else says pedalling has
-	 * begun. Two states legitimately have no cadence reading yet and must pass:
+	 * FW-087 / FW-112 B0a: sensor validity and cadence gate.
+	 * The old !pedaling_active check (fwd_run >= start_steps) was a permission gate
+	 * masquerading as sensor validity — it blocked the calculation when the direction
+	 * automaton hadn't yet accumulated enough forward steps, requiring a separate
+	 * rearm_permission_active fake to unblock it during fast rearm. Removed: the gate
+	 * module owns permission; the calculation always runs on valid sensor data.
+	 *
+	 * Zero cadence blocks assist ONLY when nothing else says pedalling has begun.
+	 * Two states legitimately have no cadence reading yet and must pass:
 	 * the start phase (cranks turning, first interval not measured) and a
-	 * without-rotation launch (deliberate push from a dead stop). Both used to sneak
-	 * through by pretending the cadence was 1 rpm; asking the flags is the same test
-	 * without the pretence, and it cannot be defeated by a bad measurement.
+	 * without-rotation launch (deliberate push from a dead stop).
 	 */
 	if (!input->torque_sensor_valid ||
 		!input->pas_sensor_valid ||
-		(!input->pedaling_active && !without_rotation_active) ||
 		(cadence_for_assist == 0 && !input->start_phase && !without_rotation_active)) {
 		return false;
 	}
@@ -814,6 +818,11 @@ static bool finish_power_request(
 	if (phase_iq_request > profile_iq_limit) {
 		phase_iq_request = profile_iq_limit;
 	}
+	/* C0-PROOF: snapshot the phase Iq request AFTER the per-level ceiling and
+	 * the profile Iq limit, but BEFORE the P/U voltage ceiling. This is the
+	 * exact diagnostic boundary — a difference between this and iq_request tells
+	 * the reader "the P/U ceiling clamped the request", not any other limiter. */
+	output->iq_before_pu = phase_iq_request;
 	if (!input->start_phase && requested_current_ma > 0U &&
 		input->motor_voltage_utilization > 0U) {
 		uint32_t power_iq_limit =

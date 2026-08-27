@@ -39,6 +39,7 @@ $inc = Join-Path $root 'inc'
 $mainCPathForward = (Join-Path $root 'src\main.c') -replace '\\', '/'
 $canDisplayCPathForward = (Join-Path $root 'src\CAN_Display.c') -replace '\\', '/'
 $currentCalCPathForward = (Join-Path $root 'src\current_cal.c') -replace '\\', '/'
+$rideControlCPathForward = (Join-Path $root 'src\ride_control.c') -replace '\\', '/'
 $rollingNoAssistDiagCPathForward = (Join-Path $root 'src\rolling_no_assist_diag.c') -replace '\\', '/'
 
 # Every harness and the module(s) it links. Add new ones here.
@@ -180,6 +181,7 @@ $suites = @(
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
@@ -201,6 +203,7 @@ $suites = @(
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
@@ -231,6 +234,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
@@ -255,6 +259,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
@@ -273,6 +278,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
@@ -303,6 +309,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
@@ -379,6 +386,11 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'fw127d_current_feedback_host.c'
        Modules = @(Join-Path $root 'src\current_feedback.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-128A canonical q-current ownership (real iq_chain.c + source guard)'
+       Harness = Join-Path $PSScriptRoot 'fw128a_iq_chain_host.c'
+       Modules = @(Join-Path $root 'src\iq_chain.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
     @{ Name = 'FW-126.7 production current calibration (real current_cal.c)'
        Harness = Join-Path $PSScriptRoot 'fw1267_current_cal_host.c'
        Modules = @(Join-Path $root 'src\current_cal.c')
@@ -413,6 +425,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
                    (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),

@@ -3,7 +3,7 @@
 Plik statusowy wymagany przez `FW-126_TO_FW-127_AGENT_HANDOFF_PL.md` §20.
 Aktualizowany po każdym etapie. Format wg §20 karty.
 
-**Ostatnia aktualizacja:** 2026-08-27 — FW-128 PRE-AUDIT ZAKONCZONY: werdykt YES. Potwierdzony BUG feedback-domain switching (main.c:3517-3527), brak ochrony nadpradowej osi q, brak anti-windup saturacji. 6 kart A-F zaproponowanych, zero implementacji.
+**Ostatnia aktualizacja:** 2026-08-27 — FW-128A WDROZONE (NORMAL+DIAG 0.0447): kanoniczne Iq_requested/Iq_allowed/Iq_ref, jeden wlasciciel wejsc PI_iq, legacy BC izolowane i oznaczone dla FW-128B. Zero zmian zachowania, 0 nowych regresji, sprzet NIEWYMAGANY.
 
 ---
 
@@ -12,9 +12,8 @@ MASTER:
 FW-127 Phase Current Acquisition
 
 CURRENT CARD:
-FW-128 PRE-AUDIT = ZAKONCZONY (YES). Czeka na przeglad architektury przed implementacja.
-FW-126 i FW-127 = ZAMKNIETE. OPEN/LATENT: selektor rekonstrukcji sieroty.
-FW-126.3 = CLOSED (przy MOE off CC3 nie napędza żadnej konwersji).
+FW-128A = WDROZONE. Nastepne: FW-128B (usuniecie LEGACY_BC_OVERRIDE).
+FW-126, FW-127 = ZAMKNIETE. OPEN/LATENT: selektor rekonstrukcji sieroty.
 FW-126.4 = CLOSED (CASE B — trigger uniewinniony, delta TRGO-SW = 0/0/1).
 FW-126 overall = OPEN wyłącznie z powodu równoważności ścieżki kalibracji.
 

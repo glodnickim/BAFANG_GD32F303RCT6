@@ -57,6 +57,7 @@ OF SUCH DAMAGE.
 #include "current_sample_ctx.h"  /* FW-127B: one object per PWM/ADC transaction        */
 #include "sample_window.h"       /* FW-127C: sampling window from APPLIED geometry     */
 #include "current_feedback.h"    /* FW-127D: validity, last-valid and sample age       */
+#include "iq_chain.h"            /* FW-128A: named q-current demand stages             */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
@@ -1344,6 +1345,7 @@ int main(void)
 					 * previous motor-active session may survive into it - that is what makes
 					 * rolling start deterministic rather than dependent on what was left over. */
 					current_sample_ctx_reset();
+					iq_chain_reset();           /* FW-128A: no demand carried across a start */
 					current_feedback_reset();   /* FW-127D: a new run may not inherit a current */
 					bridge_lifecycle = BRIDGE_LIFECYCLE_NEUTRAL_COMMIT;
 					neutral_dwell_counter = START_NEUTRAL_DWELL_CYCLES;
@@ -3507,25 +3509,57 @@ int32_t speed_PLL (int32_t ist, int32_t soll, uint8_t speedadapt)
     return (q31_d_dc);
   }
 
-void runPIcontrol(void){
-
-	//check, if Battery Current limit is exceeded
+/*
+ * FW-128A: THE one place that supplies PI_iq with its reference and feedback.
+ *
+ * Normal mode is now visibly the invariant the whole FW-128 series is built around:
+ *
+ *     reference = Iq_ref   (MS.i_q_setpoint, single writer motor_core.c:22)
+ *     feedback  = measured Iq
+ *
+ * Everything in this function is lifted verbatim from where it used to sit inline in
+ * runPIcontrol(). FW-128A changes no control behaviour; it makes the ONE violation of that
+ * invariant impossible to miss and impossible to spread.
+ */
+static void pi_iq_apply_inputs(void)
+{
+	/* ---- LEGACY_BC_OVERRIDE ------------------------------------------------------------
+	 * TODO FW-128B - DELETE LEGACY FEEDBACK-DOMAIN SWITCH
+	 *
+	 * This is the ONLY known violation of the final FW-128 invariant, kept deliberately
+	 * unchanged so FW-128A stays a pure ownership card. What it does, and why it has to go:
+	 *
+	 *   - it swaps PI_iq's FEEDBACK from measured Iq (phase-current domain) to measured
+	 *     battery current (mA >> 6), and its SETPOINT from MS.i_q_setpoint to
+	 *     battery_current_max >> 6. Different physical quantity, different order of magnitude.
+	 *   - PI_iq.integral_part carries straight across that swap. No reset, no bumpless
+	 *     transfer, no back-calculation - so the loop can leave battery-limit mode holding an
+	 *     integrator built for the wrong controlled variable.
+	 *   - the exit test below evaluates a PREDICTED battery current from the COMMANDED
+	 *     MS.i_q_setpoint, which this limiter never reduces. The flag can therefore only clear
+	 *     through MS.u_abs - the output of the very loop whose feedback was swapped.
+	 *
+	 * FW-128B replaces all of it with a battery limiter that acts UPSTREAM on the demand, so
+	 * PI_iq keeps one feedback for its whole life. Do not improve the equations here.
+	 */
 	if(MS.Battery_Current>MP.battery_current_max) BC_limit_flag=1;
-	//check, if theoretical Battery current would be below limit with some hysteresis
 	if((MS.i_q_setpoint*CAL_I*MS.u_abs)>>11<(MP.battery_current_max*0.9)) BC_limit_flag=0; //duty cycle is scaled to 2048 = 2^11
 
-	if(!BC_limit_flag){
-	//control iq
-	  PI_iq.recent_value = MS.i_q;
-	  PI_iq.setpoint = MP.reverse*i8_reverse_flag*MS.i_q_setpoint;
-
+	if(BC_limit_flag){
+		/* LEGACY_BC_OVERRIDE - see above. Verbatim. */
+		PI_iq.recent_value = MP.reverse*i8_reverse_flag*MS.Battery_Current>>6;
+		PI_iq.setpoint = MP.reverse*i8_reverse_flag*(MP.battery_current_max>>6);
+		return;
 	}
-	else{
-	 //control Battery_Current
-	  PI_iq.recent_value = MP.reverse*i8_reverse_flag*MS.Battery_Current>>6;
-	  PI_iq.setpoint = MP.reverse*i8_reverse_flag*(MP.battery_current_max>>6);
 
-	}
+	/* Normal mode: the invariant. */
+	PI_iq.recent_value = MS.i_q;                                          /* measured Iq   */
+	PI_iq.setpoint = MP.reverse*i8_reverse_flag*MS.i_q_setpoint;          /* Iq_ref        */
+}
+
+void runPIcontrol(void){
+
+	pi_iq_apply_inputs();
 	q31_u_q_temp =  PI_control(&PI_iq);
 	//control id
 	  PI_id.recent_value = MS.i_d;

@@ -1,4 +1,5 @@
 #include "ride_control.h"
+#include "iq_chain.h"   /* FW-128A: names for the demand stages, no ownership change */
 
 #include "assist_dynamics.h"
 #include "assist_extended_boost.h"
@@ -816,6 +817,11 @@ void ride_control_update(const ride_control_input_t *input)
 			limits_input.source = ASSIST_LIMIT_SOURCE_PEDAL_CONFIRMED;
 		}
 		if (!latched) debug_flags |= RIDE_DBG_NOT_LATCHED;   //FW-096
+
+		/* FW-128A: Iq_requested - the rider/assist demand, before any dynamic limiter.
+		 * Recorded here because this is the last point at which iq_target still means that. */
+		iq_chain_note_requested(iq_target);
+
 		int32_t pedal_iq = assist_limits_apply(iq_target, &limits_input);
 		/*
 		 * FW-100: remember what normal pedalling was getting. This is the boost's entire
@@ -991,6 +997,10 @@ void ride_control_update(const ride_control_input_t *input)
 		.coast_release = coast_release,   //FW-048
 		.force_zero_reference = force_zero_reference   //FW-112 v2
 	};
+	/* FW-128A: Iq_allowed - after every limiter still active in this card, before the ramp.
+	 * The ramp below turns it into Iq_ref, which lives in MS.i_q_setpoint and nowhere else. */
+	iq_chain_note_allowed(iq_target);
+
 	int32_t iq_reference = assist_dynamics_apply(
 		iq_target,
 		input->current_iq,

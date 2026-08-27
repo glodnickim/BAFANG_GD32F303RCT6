@@ -156,3 +156,19 @@ natychmiast rozwiązana.
 **OBSERWACJA (jakościowa, nie pomiar):** załączanie wspomagania stało się wyraźnie powtarzalne.
 Prawdopodobny mechanizm: stary kod zawsze rekonstruował fazę o najwyższym wypełnieniu, więc jedno
 wejście Clarke było zawsze sumą obliczoną; teraz oba są pomiarami bezpośrednimi.
+
+### 2026-08-27 — FW-127 ścieżka STARVED: dowód statyczny + jedno utajone zagrożenie
+
+**CONFIRMED (audyt kodu, bez sprzętu):** przy `INVALID && have_last == false`
+`current_feedback_update()` zwraca 0 **przed** zapisem wskaźników wyjściowych, więc
+`FOC_calculation()` nie jest wołane. Clarke, Park, `runPIcontrol()` i `svpwm()` leżą
+wewnątrz tej funkcji, więc żadna podejrzana wartość nie dociera do sterowania, całki PI
+pozostają nietknięte, a ISR komenderuje neutralnie (CCR 1875/1875/1875) — zero momentu.
+Własność „no active FOC on uninitialized last_valid" = **PASS**.
+
+**OPEN / LATENT HAZARD / NON-BLOCKING:** `consume()` czyści `sector = 0`, a
+`sample_window_reconstruct()` czyta 0 jako „odbuduj fazę A" (wartość „nie rekonstruuj" to
+`SAMPLE_WINDOW_RECONSTRUCT_NONE = 3`). Dziś martwa dana — obie ścieżki INVALID odrzucają te
+wartości przed FOC. Ścieżka wystąpiła 7× na sprzęcie **bez** regresji. Ryzyko dotyczy przyszłego
+refaktoru, który zacząłby konsumować świeże prądy przy INVALID.
+**NIE jest regresją FW-127 i nie otwiera go ponownie.**

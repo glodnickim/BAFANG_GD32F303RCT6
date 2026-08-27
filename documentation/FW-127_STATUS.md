@@ -12,9 +12,9 @@ MASTER:
 FW-127 Phase Current Acquisition
 
 CURRENT CARD:
-FW-127 = ZAMKNIETE (HW PASS). FW-126 = ZAMKNIETE.
+FW-127 = ZAMKNIETE (HW PASS + dowod statyczny sciezki STARVED). FW-126 = ZAMKNIETE.
+OPEN/LATENT/NON-BLOCKING: selektor rekonstrukcji sieroty (sector=0 vs RECONSTRUCT_NONE).
 Nastepne: FW-128 PRE-AUDIT - CZEKA na raport reverse stockowego current-control.
-FW-126.2 = CLOSED (zbocze CH3 zmierzone i zamrożone).
 FW-126.3 = CLOSED (przy MOE off CC3 nie napędza żadnej konwersji).
 FW-126.4 = CLOSED (CASE B — trigger uniewinniony, delta TRGO-SW = 0/0/1).
 FW-126 overall = OPEN wyłącznie z powodu równoważności ścieżki kalibracji.

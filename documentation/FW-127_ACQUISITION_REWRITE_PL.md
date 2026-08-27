@@ -298,6 +298,91 @@ załączenia. Związek przyczynowy z odczuciem nie jest zmierzony.
 
 ---
 
+## 13. DOWÓD STATYCZNY — ścieżka STARVED (audyt kodu, bez sprzętu)
+
+Test sprzętowy pokazał `invalid_count` = `starved_count` = 7 przy `reuse_count` = 0, czyli
+**każdy** zaobserwowany INVALID wystąpił, zanim w danym przebiegu istniała próbka last-valid.
+Ten rozdział dowodzi z kodu produkcyjnego, co dokładnie dzieje się w tym stanie.
+
+### Ślad producent → konsument dla `INVALID && have_last == false`
+
+| krok | lokalizacja | co się dzieje |
+|---|---|---|
+| ADC/JDR | `main.c:3719-3721` | `i16_ph1/2/3_current = adc_inserted_data_read(...)` |
+| korekta offsetu | `main.c:3754` | `-= current_cal.offset[...]` |
+| consume | `main.c:3770` | brak publikacji → `current_sample_ctx.c:60` wymusza `state = INVALID`, `orphan_count++` |
+| rekonstrukcja | `main.c:3779` | zapisuje `i16_ph1_current` (patrz §14) |
+| **bramka ważności** | `main.c:3853` | `current_feedback_update()` → gałąź `if (!fb.have_last)`: `starved_count++`, **`return 0` BEZ zapisu `*i_a/*i_b/*i_c`** |
+| **bramka wykonania FOC** | `main.c:3854` | warunek fałszywy → `FOC_calculation()` **nie jest wołane** |
+| gałąź `else` | `main.c:3870` | `switchtime[0..2] = _T>>1` |
+| PWM | `main.c:3879-3898` | clamp (no-op), `CCR0/1/2 = 1875` → **zerowe napięcie różnicowe** |
+
+### Odpowiedzi
+
+**1. Czy podejrzany świeży JDR trafia kiedykolwiek do FOC w przypadku STARVED? — NO.**
+`current_feedback_update()` zwraca 0 **przed** dotknięciem wskaźników wyjściowych. Podstawienie
+`*i_a = fb.last_a` leży **poniżej** tego `return`.
+
+**2. Czy aktywny FOC jest pominięty w tym cyklu? — YES.**
+`FOC_calculation()` jest ciałem `if`, którego warunek jest fałszywy.
+
+**3. Jakie wartości docierają do Clarke/Park? — ŻADNE.**
+`arm_clarke_q31()` (`FOC.c:123`) i `arm_park_q31()` (`FOC.c:130/135`) są **wewnątrz**
+`FOC_calculation()`. Nie zostaje wywołane, więc nie biegnie też `runPIcontrol()` (`FOC.c:166` —
+całki PI nietknięte), nie są aktualizowane `MS.i_q`/`MS.i_d` (`FOC.c:140/145`), ani `svpwm()`
+(`FOC.c:199`) nie pisze `switchtime`. Podejrzane wartości giną, nadpisane następnym odczytem JDR.
+
+**4. Co zwalnia normalny FOC po starcie?**
+`main.c:1382`: `bridge_lifecycle == BRIDGE_LIFECYCLE_NEUTRAL_DWELL && foc_release_pending`
+**oraz** `main.c:1392`: `current_cal_foc_allowed(&current_cal)` → ustawia `neutral_dwell_active = 0`,
+co przełącza ISR z gałęzi wybiegu na gałąź FOC (`main.c:3809`). W DIAG `fw1267_diag_abort_armed`
+zjada pierwsze udane zwolnienie jednorazowo.
+
+**5. Czy spełnia „no active FOC on uninitialized last_valid"? — PASS.**
+Mocniej, niż wymagano: cykl starved nie tylko pomija FOC, ale **aktywnie komenderuje neutralnie**
+(1875/1875/1875) — to „zero momentu", a nie „poprzednie compare zostają".
+
+---
+
+## 14. OPEN / LATENT HAZARD / NON-BLOCKING — selektor rekonstrukcji sieroty
+
+**Klasyfikacja właściciela: OPEN / LATENT HAZARD / NON-BLOCKING. NIE jest regresją FW-127.
+NIE jest powodem do ponownego otwarcia FW-127.**
+
+**Lokalizacja:**
+
+```
+current_sample_ctx.c  consume(), gałąź sieroty   ->  sector = 0
+sample_window.c       sample_window_reconstruct() ->  case 0: odbuduj fazę A
+
+wartość znacząca "nie rekonstruuj" to:
+sample_window.h       SAMPLE_WINDOW_RECONSTRUCT_NONE = 3
+```
+
+**Znalezisko.** Przy konsumpcji sieroty kontekst jest czyszczony przez `sector = 0`, ale dla
+`sample_window_reconstruct()` zero znaczy **„odbuduj fazę A"**, a nie „nie rekonstruuj".
+
+**Wpływ na sterowanie produkcyjne: ŻADEN.** Obie ścieżki INVALID nie dopuszczają zrekonstruowanej
+świeżej próbki do FOC:
+
+1. `INVALID && !have_last` → `current_feedback_update()` zwraca 0 → FOC pominięty → `CCR = neutral`
+2. `INVALID && have_last` → wszystkie trzy wartości zastąpione przez last-valid **przed** FOC
+
+Błędnie zrekonstruowana faza A jest więc obecnie **martwą daną**.
+
+**Ekspozycja sprzętowa.** Ścieżka sieroty/STARVED **wystąpiła** podczas walidacji sprzętowej
+(7 przypadków). **Żadna regresja sterowania z tego nie wynikła.**
+
+**Ryzyko.** Przyszły refaktor, który zacznie konsumować świeże wartości prądu fazowego w stanie
+INVALID, po cichu odsłoniłby fałszywie zrekonstruowaną fazę A.
+
+**Zalecana przyszła korekta** (jedna linia, **NIE w ramach zamknięcia FW-127**):
+ustawić selektor rekonstrukcji w kontekście sieroty na `SAMPLE_WINDOW_RECONSTRUCT_NONE`.
+
+Test sprzętowy **nie jest teraz wymagany**.
+
+---
+
 ## Czego ta karta NIE robi
 
 - nie zmienia matematyki FOC (Clarke, Park, PI, inv. Park, SVPWM bez zmian),

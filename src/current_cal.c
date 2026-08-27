@@ -1,233 +1,228 @@
-/*
- * FW-119: retry / last-known-good / fallback policy for the FW-118 current calibration.
- *
- * See inc/current_cal.h for what this module is and, just as importantly, what it is not.
- * Nothing here touches hardware: main.c owns the ADC sampling and hands each attempt in as a
- * plain accumulation, which is what lets the whole policy be exercised on the host.
- */
-
 #include "current_cal.h"
 #include "config.h"
 
-static void copy3_i16(int16_t *dst, const int16_t *src)
-{
-	dst[0] = src[0];
-	dst[1] = src[1];
-	dst[2] = src[2];
-}
+#include <string.h>
 
-static void copy3_u16(uint16_t *dst, const uint16_t *src)
-{
-	dst[0] = src[0];
-	dst[1] = src[1];
-	dst[2] = src[2];
-}
+/*
+ * FW-126.7 phase-current zero calibration. See inc/current_cal.h for the domain contract, the
+ * evidence that replaced the old dark-bridge calibration, and the deadlock this design avoids.
+ *
+ * Everything here is pure arithmetic on values handed in by main.c. No register is touched.
+ */
 
-void current_cal_init(current_cal_t *s, current_cal_policy_t policy)
+static void cal_restart_collection(current_cal_t *s)
 {
 	uint8_t i;
-
-	if (!s) return;
-
 	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
-		s->offset[i] = 0;
-		s->residual_mean[i] = 0;
-		s->p2p[i] = 0;
-		s->lkg_offset[i] = 0;
-		s->lkg_residual_mean[i] = 0;
+		s->acc[i].sum = 0;
+		s->acc[i].min = 0;
+		s->acc[i].max = 0;
 	}
-	s->valid = 0;
-	s->lkg_valid = 0;
-	s->attempt_status = CURRENT_CAL_UNCALIBRATED;
-	s->policy = policy;
-	s->status = CURRENT_CAL_UNCALIBRATED;
-	s->failure_reason = CURRENT_CAL_UNCALIBRATED;
-	/*
-	 * Before any measurement exists, the honest state is "legacy path, allowed to run": that is
-	 * literally what the firmware did before FW-118. Starting from SRC_NONE / foc_allowed = 0
-	 * would mean a controller that refuses to move if the calibration sequence is never reached
-	 * at all - a failure mode this card must not introduce.
-	 */
-	s->source = CURRENT_CAL_SRC_LEGACY;
-	s->attempts = 0;
-	s->foc_allowed = 1;
-	s->degraded = 1;
-	s->last_sample_count = 0;
-	s->last_moe_on = 0;
+	s->eligible = 0;
+	s->stable_count = 0;
 }
 
-void current_cal_begin(current_cal_t *s)
+void current_cal_init(current_cal_t *s)
 {
-	uint8_t i;
-
 	if (!s) return;
-
-	s->attempts = 0;
-	s->attempt_status = CURRENT_CAL_UNCALIBRATED;
-	s->failure_reason = CURRENT_CAL_UNCALIBRATED;
-	s->last_sample_count = 0;
-	s->last_moe_on = 0;
-	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
-		s->residual_mean[i] = 0;
-		s->p2p[i] = 0;
-	}
-	/*
-	 * offset[], valid, lkg_* and foc_allowed are deliberately NOT touched. Starting a fresh
-	 * sequence must never pull the offsets out from under a running ISR, and must never discard
-	 * a set that already passed.
-	 */
+	memset(s, 0, sizeof(*s));
+	s->state = CURRENT_CAL_ST_UNCALIBRATED;
+	s->failure_reason = CURRENT_CAL_FAIL_NONE;
+	s->source = CURRENT_CAL_SRC_NONE;
+	/* valid = 0 and offset[] = 0: the ISR applies no software correction and active FOC is
+	 * forbidden until something has actually been measured. */
 }
 
-uint8_t current_cal_attempt_allowed(const current_cal_t *s)
+uint8_t current_cal_needs_calibration(const current_cal_t *s)
 {
-	if (!s) return 0;
-	if (s->attempt_status == CURRENT_CAL_OK) return 0;
-	return (uint8_t)(s->attempts < CURRENT_CAL_MAX_ATTEMPTS);
+	if (!s) return 0U;
+	if (s->state == CURRENT_CAL_ST_VALID) return 0U;
+	return (uint8_t)(s->attempts < (uint8_t)CURRENT_CAL_MAX_ATTEMPTS);
 }
 
-current_cal_status_t current_cal_submit(current_cal_t *s, const current_cal_attempt_t *a)
+void current_cal_begin_attempt(current_cal_t *s)
 {
-	uint8_t i;
-	int16_t mean[CURRENT_CAL_PHASES];
-	uint16_t p2p[CURRENT_CAL_PHASES];
-	current_cal_status_t status = CURRENT_CAL_OK;
-
-	if (!s || !a) return CURRENT_CAL_UNCALIBRATED;
+	if (!s) return;
+	if (!current_cal_needs_calibration(s)) return;
 
 	if (s->attempts < 0xFFu) s->attempts++;
-	s->last_sample_count = a->samples;
-	s->last_moe_on = a->moe_on ? 1U : 0U;
-
-	/* This module never writes a timer register, but it must still refuse to bless a sample
-	 * sequence collected while bridge output was active. main.c detects POEN both before and
-	 * during its software-triggered conversion loop and carries that fact here. */
-	if (a->moe_on) {
-		s->attempt_status = CURRENT_CAL_MOE_ON;
-		s->failure_reason = CURRENT_CAL_MOE_ON;
-		return CURRENT_CAL_MOE_ON;
-	}
-
-	/*
-	 * A timed-out attempt has no numbers at all, so it must not overwrite the recorded means
-	 * and P2P of whatever was measured before - a decoder reading those must not see a zero row
-	 * that looks like a real measurement.
-	 */
-	if (a->timed_out || a->samples == 0u) {
-		s->attempt_status = CURRENT_CAL_SAMPLE_TIMEOUT;
-		s->failure_reason = CURRENT_CAL_SAMPLE_TIMEOUT;
-		return CURRENT_CAL_SAMPLE_TIMEOUT;
-	}
-
-	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
-		/*
-		 * Divide by the samples actually taken, not by a hardcoded shift. FW-118 used `>> 6`
-		 * against a configurable CURRENT_CAL_SAMPLES, so changing that constant would have
-		 * silently produced a wrong mean and, through it, a wrong offset.
-		 */
-		mean[i] = (int16_t)(a->sum[i] / (int32_t)a->samples);
-		p2p[i] = (a->max[i] >= a->min[i]) ? (uint16_t)(a->max[i] - a->min[i]) : 0u;
-	}
-
-	copy3_i16(s->residual_mean, mean);
-	copy3_u16(s->p2p, p2p);
-
-	/*
-	 * Range before noise, so that a wildly wrong zero is reported as OUT_OF_RANGE even when it
-	 * is also noisy - the range failure is the more actionable one on the bench.
-	 *
-	 * FW-125: mean[] is the SAME domain adc_inserted_data_read() returns at runtime (hardware
-	 * IOFFx already subtracted in silicon), so the candidate offset is simply that mean - no
-	 * second subtraction of the hardware offset constant. See current_cal.h.
-	 */
-	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
-		if (mean[i] < (int16_t)CURRENT_CAL_RESIDUAL_MIN || mean[i] > (int16_t)CURRENT_CAL_RESIDUAL_MAX) {
-			status = CURRENT_CAL_OUT_OF_RANGE;
-			break;
-		}
-	}
-	if (status == CURRENT_CAL_OK) {
-		for (i = 0; i < CURRENT_CAL_PHASES; i++) {
-			if (p2p[i] > (uint16_t)CURRENT_ZERO_MAX_P2P_ADC) {
-				status = CURRENT_CAL_TOO_NOISY;
-				break;
-			}
-		}
-	}
-
-	if (status != CURRENT_CAL_OK) {
-		s->attempt_status = status;
-		s->failure_reason = status;
-		/* offset[], valid and the LKG set are untouched: a failure never degrades a good set. */
-		return status;
-	}
-
-	/*
-	 * Publication order matters: the ISR reads `valid` and then offset[]. Dropping valid first
-	 * means an ISR that fires mid-update sees the legacy path rather than a half-written set.
-	 */
-	s->valid = 0;
-	copy3_i16(s->offset, mean);
-	s->valid = 1;
-
-	copy3_i16(s->lkg_offset, mean);
-	copy3_i16(s->lkg_residual_mean, mean);
-	s->lkg_valid = 1;
-
-	s->attempt_status = CURRENT_CAL_OK;
-	return CURRENT_CAL_OK;
+	s->state = CURRENT_CAL_ST_SETTLING;
+	s->failure_reason = CURRENT_CAL_FAIL_NONE;
+	s->cycles = 0;
+	s->restarts = 0;
+	s->timeout_hit = 0;
+	s->neutral_ok = 1U;
+	s->seen_sample = 0;
+	cal_restart_collection(s);
 }
 
-void current_cal_finalize(current_cal_t *s)
+uint8_t current_cal_wants_dwell(const current_cal_t *s)
 {
-	if (!s) return;
-
-	if (s->attempt_status == CURRENT_CAL_OK) {
-		s->status = CURRENT_CAL_OK;
-		s->source = CURRENT_CAL_SRC_RUNTIME;
-		s->degraded = 0;
-		s->foc_allowed = 1;
-		return;
-	}
-
-	if (s->lkg_valid) {
-		/*
-		 * Every attempt in THIS sequence failed but an earlier one passed. Keep running on it
-		 * and say so: the offsets are real, but nobody re-confirmed them, so the ride is
-		 * diagnostically degraded even though it is mechanically normal.
-		 */
-		s->valid = 0;
-		copy3_i16(s->offset, s->lkg_offset);
-		s->valid = 1;
-		s->status = CURRENT_CAL_USING_LKG;
-		s->source = CURRENT_CAL_SRC_LKG;
-		s->degraded = 1;
-		s->foc_allowed = 1;
-		return;
-	}
-
-	if (s->policy == CURRENT_CAL_POLICY_STRICT) {
-		s->valid = 0;
-		s->status = CURRENT_CAL_HARD_FAILED;
-		s->source = CURRENT_CAL_SRC_NONE;
-		s->degraded = 1;
-		s->foc_allowed = 0;
-		return;
-	}
-
-	/*
-	 * LEGACY_FALLBACK: the pre-FW-118 hardware-offset-only path. This is not "fine" - it is the
-	 * old residual bias back again - so it is flagged degraded and carries its own status, but
-	 * it does keep the bike rideable while the FW-118 limits are still provisional.
-	 */
-	s->valid = 0;
-	s->status = CURRENT_CAL_LEGACY_FALLBACK;
-	s->source = CURRENT_CAL_SRC_LEGACY;
-	s->degraded = 1;
-	s->foc_allowed = 1;
+	if (!s) return 0U;
+	return (uint8_t)(s->state == CURRENT_CAL_ST_SETTLING || s->state == CURRENT_CAL_ST_COLLECTING);
 }
 
 uint8_t current_cal_foc_allowed(const current_cal_t *s)
 {
-	if (!s) return 1;
-	return s->foc_allowed;
+	if (!s) return 0U;
+	return (uint8_t)(s->state == CURRENT_CAL_ST_VALID && s->valid);
+}
+
+/* Fail this attempt. Nothing the ISR depends on is written: a failed attempt can never install,
+ * degrade or resurrect an offset set. */
+static current_cal_state_t cal_fail(current_cal_t *s, current_cal_fail_t why)
+{
+	s->state = CURRENT_CAL_ST_FAILED;
+	s->failure_reason = why;
+	return s->state;
+}
+
+/*
+ * Validate and publish. Range is checked BEFORE noise, because a wildly wrong zero is the more
+ * actionable failure on the bench - and because the whole point of this card is that a quiet
+ * signal in the wrong place must not pass.
+ */
+static current_cal_state_t cal_finish(current_cal_t *s)
+{
+	uint8_t i;
+	int16_t mean[CURRENT_CAL_PHASES];
+	uint16_t p2p[CURRENT_CAL_PHASES];
+
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
+		/*
+		 * Round to NEAREST, not toward zero. Plain integer division truncates toward zero, which
+		 * rounds a negative phase up and a positive phase down - and the three phases genuinely
+		 * do straddle zero (measured -16 / -5 / +8). That asymmetry would inject a sub-LSB
+		 * DIFFERENTIAL offset between phases, and a differential offset is precisely what Clarke
+		 * and Park turn into a spurious current vector. Symmetric rounding costs two
+		 * instructions, once per calibration.
+		 */
+		{
+			const int32_t n = (int32_t)s->eligible;
+			const int32_t half = n / 2;
+			const int32_t sum = s->acc[i].sum;
+			mean[i] = (int16_t)((sum >= 0) ? ((sum + half) / n) : ((sum - half) / n));
+		}
+		p2p[i] = (s->acc[i].max >= s->acc[i].min)
+		         ? (uint16_t)(s->acc[i].max - s->acc[i].min) : 0u;
+		s->mean[i] = mean[i];
+		s->p2p[i] = p2p[i];
+	}
+
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
+		if (mean[i] < (int16_t)CURRENT_CAL_RESIDUAL_MIN ||
+		    mean[i] > (int16_t)CURRENT_CAL_RESIDUAL_MAX) {
+			return cal_fail(s, CURRENT_CAL_FAIL_OUT_OF_RANGE);
+		}
+	}
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
+		if (p2p[i] > (uint16_t)CURRENT_CAL_MAX_P2P) {
+			return cal_fail(s, CURRENT_CAL_FAIL_TOO_NOISY);
+		}
+	}
+
+	/* Publication order matters: the ISR reads `valid` and then offset[]. Clearing valid first
+	 * means an ISR firing mid-update applies no correction rather than a half-written set. */
+	s->valid = 0;
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) s->offset[i] = mean[i];
+	s->valid = 1;
+
+	s->source = CURRENT_CAL_SRC_NEUTRAL_DWELL;
+	s->failure_reason = CURRENT_CAL_FAIL_NONE;
+	s->state = CURRENT_CAL_ST_VALID;
+	return s->state;
+}
+
+current_cal_state_t current_cal_sample(current_cal_t *s, const int16_t jdr[CURRENT_CAL_PHASES],
+                                       uint8_t bridge_neutral)
+{
+	uint8_t i, in_window = 1U, steady = 1U;
+
+	if (!s || !jdr) return CURRENT_CAL_ST_FAILED;
+	if (s->state != CURRENT_CAL_ST_SETTLING && s->state != CURRENT_CAL_ST_COLLECTING) {
+		return s->state;
+	}
+
+	/* The caller verifies the electrical state; this module refuses to measure without it. */
+	if (!bridge_neutral) {
+		s->neutral_ok = 0U;
+		return cal_fail(s, CURRENT_CAL_FAIL_NOT_NEUTRAL);
+	}
+
+	if (s->cycles < 0xFFFFu) s->cycles++;
+	if (s->cycles > (uint16_t)CURRENT_CAL_MAX_CYCLES) {
+		s->timeout_hit = 1U;
+		return cal_fail(s, CURRENT_CAL_FAIL_TIMEOUT);
+	}
+
+	/*
+	 * GATE 1 - MIDPOINT / RESIDUAL WINDOW, checked first and on its own merit.
+	 * The saturated dark reading (JDR ~ +1850) and the bridge-enable transient (JDR ~ +2050)
+	 * are both far outside this window, so neither can ever reach the estimator.
+	 */
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
+		if (jdr[i] < (int16_t)CURRENT_CAL_RESIDUAL_MIN ||
+		    jdr[i] > (int16_t)CURRENT_CAL_RESIDUAL_MAX) {
+			in_window = 0U;
+			break;
+		}
+	}
+
+	/*
+	 * GATE 2 - STABILITY, and only as a SECOND condition. Saturation was stable too, so this
+	 * can never be the whole test. Its job is to catch the tail of the rail->midpoint ramp:
+	 * during that ramp the reading moves by hundreds of LSB per cycle, which this band rejects
+	 * decisively, while settled noise (measured spread ~10 LSB over 16 samples) passes.
+	 */
+	if (s->seen_sample) {
+		for (i = 0; i < CURRENT_CAL_PHASES; i++) {
+			int32_t d = (int32_t)jdr[i] - (int32_t)s->prev[i];
+			if (d < 0) d = -d;
+			if (d > (int32_t)CURRENT_CAL_STABLE_BAND) { steady = 0U; break; }
+		}
+	} else {
+		steady = 0U;   /* the very first cycle cannot prove stability against anything */
+	}
+
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) s->prev[i] = jdr[i];
+	s->seen_sample = 1U;
+
+	if (!in_window || !steady) {
+		/*
+		 * Gate lost. Policy: RESTART the collection, never blend. A set mixing settled samples
+		 * with transient ones would still pass a mean test while being wrong by whatever the
+		 * transient contributed - exactly the class of quiet-but-wrong result this card exists
+		 * to eliminate. Restarting is safe because the whole attempt is bounded by
+		 * CURRENT_CAL_MAX_CYCLES, so this cannot loop forever.
+		 */
+		if (s->state == CURRENT_CAL_ST_COLLECTING && s->restarts < 0xFFFFu) s->restarts++;
+		s->state = CURRENT_CAL_ST_SETTLING;
+		cal_restart_collection(s);
+		return s->state;
+	}
+
+	if (s->stable_count < 0xFFFFu) s->stable_count++;
+
+	/* Not yet proven steady for long enough - eligible samples do not start here. */
+	if (s->stable_count < (uint16_t)CURRENT_CAL_STABLE_CYCLES) {
+		s->state = CURRENT_CAL_ST_SETTLING;
+		return s->state;
+	}
+
+	/* GATE SATISFIED: this sample, and only from here, is eligible. */
+	s->state = CURRENT_CAL_ST_COLLECTING;
+	for (i = 0; i < CURRENT_CAL_PHASES; i++) {
+		if (s->eligible == 0u) {
+			s->acc[i].min = jdr[i];
+			s->acc[i].max = jdr[i];
+		} else {
+			if (jdr[i] < s->acc[i].min) s->acc[i].min = jdr[i];
+			if (jdr[i] > s->acc[i].max) s->acc[i].max = jdr[i];
+		}
+		s->acc[i].sum += (int32_t)jdr[i];
+	}
+	s->eligible++;
+
+	if (s->eligible >= (uint16_t)CURRENT_CAL_COLLECT_SAMPLES) return cal_finish(s);
+	return s->state;
 }

@@ -23,7 +23,6 @@
 #include "parser.h"
 #include "FOC.h"
 #include "current_cal.h"
-#include "fw1264_probe.h"   //FW-126.4 A/B probe (shared layout)
 #include "assist_extended_boost.h"
 #include "assist_modes.h"
 #include "tuning_config.h"
@@ -108,15 +107,8 @@ extern int32_t i32_hall_order;
 extern int32_t Hall_13, Hall_32, Hall_26, Hall_64, Hall_45, Hall_51;
 extern uint8_t param_record_state; //FW-023: 0 = valid record, 1 = defaults, 2 = halls rejected
 extern current_cal_t current_cal;
-extern uint32_t fw126_cal_conversion_count;
-extern uint32_t fw126_cal_fresh_conversion_count;
-extern uint8_t fw126_cal_trigger_mode;
-extern uint8_t fw126_cal_moe_off_verified;
-extern uint8_t fw125_zero_current_selftest_valid;
-extern uint16_t fw125_zero_current_selftest_samples;
-extern uint8_t fw125_zero_current_selftest_moe_on;
-extern int16_t fw125_zero_current_selftest_mean[CURRENT_CAL_PHASES];
-extern uint16_t fw125_zero_current_selftest_p2p[CURRENT_CAL_PHASES];
+//FW-126.7: the dark-bridge sampler, its counters and its self-test are gone. The
+//calibration now reports itself through current_cal - one source, one report.
 #endif
 uint8_t tx_data_length;
 uint8_t rx_data_length;
@@ -167,105 +159,65 @@ static uint16_t crc16_ccitt(const uint8_t *data, uint8_t len)
 	return crc;
 }
 
-/* 0x602D, DIAG only, read-only. A self-contained snapshot avoids another write command or
- * mutable diagnostic namespace. The 55-byte payload ends in CRC16-CCITT over bytes 0..52:
- *   0..2 magic "CC\1"; 3 flags(valid/fallback/verify/MOE-off); 4..7 status/reason/source/tries;
- *   8..13 latest/verify sample evidence; 14..21 trigger/fresh counts; 22..51 offset, residual,
- *   P2P and independent verify statistics; 52 self-test status; 53..54 CRC little-endian. */
-static void current_cal_serialize_dump(uint8_t out[55])
+extern uint8_t fw1267_diag_abort_armed;   /* FW-126.7 DIAG post-validation stop */
+
+/*
+ * 0x602D - the phase-current calibration report, DIAG only, read-only. Schema 2 (FW-126.7).
+ *
+ * THE THREE DOMAINS ARE KEPT APART ON THE WIRE, because conflating them is what took four
+ * cards to untangle:
+ *
+ *     physical ADC result  =  JDR + IOFF   (reported as `midpoint`, ~2020 at zero current)
+ *     JDR                  =  hardware-offset-corrected inserted result (small, signed)
+ *     software offset      =  current_cal.offset[], what the FOC ISR subtracts from JDR
+ *
+ * Nothing here is labelled "raw ADC" without qualification. 66-byte payload, CRC16-CCITT over
+ * bytes 0..63, little-endian throughout.
+ */
+static void current_cal_serialize_dump(uint8_t out[66])
 {
 	uint8_t i;
+	static const uint16_t hw_ioff[CURRENT_CAL_PHASES] = {
+		(uint16_t)CURRENT_HW_OFFSET_A, (uint16_t)CURRENT_HW_OFFSET_B, (uint16_t)CURRENT_HW_OFFSET_C
+	};
+	/* Bit 3 is a constant 1 and says so: the only caller of current_cal_sample() is the dwell
+	 * branch of the FOC ISR, which is mutually exclusive with FOC_calculation(). It is on the
+	 * wire so a decoder need not know that, not because it was measured. */
 	uint8_t flags = (uint8_t)((current_cal.valid ? 0x01U : 0U)
-		| ((current_cal.source != CURRENT_CAL_SRC_RUNTIME) ? 0x02U : 0U)
-		| (fw125_zero_current_selftest_valid ? 0x04U : 0U)
-		| (fw126_cal_moe_off_verified ? 0x08U : 0U));
+		| (current_cal.timeout_hit ? 0x02U : 0U)
+		| (current_cal.neutral_ok ? 0x04U : 0U)      /* MOE on + compares neutral, every sample */
+		| 0x08U                                       /* FOC blocked: structural                 */
+		| (fw1267_diag_abort_armed ? 0x10U : 0U));
 
-	for (i = 0U; i < 55U; i++) out[i] = 0U;
-	out[0] = 'C'; out[1] = 'C'; out[2] = 1U; out[3] = flags;
-	out[4] = (uint8_t)current_cal.status;
+	for (i = 0U; i < 66U; i++) out[i] = 0U;
+	out[0] = 'C'; out[1] = 'C'; out[2] = 2U; out[3] = flags;
+	out[4] = (uint8_t)current_cal.state;
 	out[5] = (uint8_t)current_cal.failure_reason;
 	out[6] = (uint8_t)current_cal.source;
 	out[7] = current_cal.attempts;
-	put_u16_le(&out[8], current_cal.last_sample_count);
-	put_u16_le(&out[10], fw125_zero_current_selftest_samples);
-	out[12] = fw125_zero_current_selftest_moe_on;
-	out[13] = fw126_cal_trigger_mode;
-	put_i32_le(&out[14], (int32_t)fw126_cal_conversion_count);
-	put_i32_le(&out[18], (int32_t)fw126_cal_fresh_conversion_count);
+	put_u16_le(&out[8],  current_cal.cycles);
+	put_u16_le(&out[10], current_cal.stable_count);
+	put_u16_le(&out[12], current_cal.eligible);
+	put_u16_le(&out[14], current_cal.restarts);
 	for (i = 0U; i < CURRENT_CAL_PHASES; i++) {
-		put_u16_le(&out[22U + 2U * i], (uint16_t)current_cal.offset[i]);
-		put_u16_le(&out[28U + 2U * i], (uint16_t)current_cal.residual_mean[i]);
-		put_u16_le(&out[34U + 2U * i], current_cal.p2p[i]);
-		put_u16_le(&out[40U + 2U * i], (uint16_t)fw125_zero_current_selftest_mean[i]);
-		put_u16_le(&out[46U + 2U * i], fw125_zero_current_selftest_p2p[i]);
+		put_u16_le(&out[16U + 2U * i], (uint16_t)current_cal.offset[i]);   /* software offset */
+		put_u16_le(&out[22U + 2U * i], (uint16_t)current_cal.mean[i]);     /* JDR mean        */
+		put_u16_le(&out[28U + 2U * i], (uint16_t)current_cal.acc[i].min);  /* JDR min         */
+		put_u16_le(&out[34U + 2U * i], (uint16_t)current_cal.acc[i].max);  /* JDR max         */
+		put_u16_le(&out[40U + 2U * i], current_cal.p2p[i]);                /* JDR P2P         */
+		put_u16_le(&out[46U + 2U * i], hw_ioff[i]);                        /* hardware IOFF   */
+		/* The physical ADC result implied by the calibrated zero - the number that has to land
+		 * near mid-scale for the measurement to have been taken in a valid electrical state. */
+		put_u16_le(&out[52U + 2U * i], (uint16_t)((int32_t)hw_ioff[i] + (int32_t)current_cal.mean[i]));
 	}
-	out[52] = fw125_zero_current_selftest_valid;
-	put_u16_le(&out[53], crc16_ccitt(out, 53U));
+	/* Gate constants echoed, so a report can be read without the build's config.h to hand. */
+	out[58] = (uint8_t)CURRENT_CAL_STABLE_CYCLES;
+	out[59] = (uint8_t)CURRENT_CAL_COLLECT_SAMPLES;
+	put_u16_le(&out[60], (uint16_t)CURRENT_CAL_MAX_CYCLES);
+	put_u16_le(&out[62], (uint16_t)CURRENT_CAL_RESIDUAL_MAX_DEVIATION);
+	put_u16_le(&out[64], crc16_ccitt(out, 64U));
 }
 
-/*
- * FW-126.4 A/B probe report, 0x602E schema 3. Same 55-byte framing and CRC as 0x602D.
- *
- * THE LAYOUT IS DEFINED ONCE, in protocol/fw1264_probe_schema.json, and BOTH decoders read
- * their offsets from that file. FW-126.3 had the layout written out twice and they drifted:
- * the PowerShell decoder kept schema 1 offsets after the JS side moved to schema 2, printed
- * BAD MAGIC, and then printed a verdict anyway - the opposite of the truth. Any change here
- * must change that file, and the golden-payload test compares both decoders field by field.
- *
- *   0..2   'C','P',3
- *   3      flags: bit0 MOE off, bit1 POEN off (same fact, kept separate on the wire so a
- *          decoder never has to infer one from the other), bit2 TIMER0 running,
- *          bit3 restore verified, bit4 done
- *   4..5   TIMER0 CH3CV
- *   6/7    ADC0 / ADC2 inserted trigger selector BEFORE (ADC_CTL1.ETSIC)
- *   8/9    ...and after the restore, read back
- *   10/11/12  TIMER0 CTL1.MMC before / during / restored
- *   13..15 SW samples per phase A/B/C     16..21 SW median A/B/C
- *   22..27 SW min A/B/C                   28..33 SW max A/B/C
- *   34..39 TRGO EOIC events per ADC0/ADC1/ADC2
- *   40..42 TRGO samples per phase         43..48 TRGO median A/B/C
- *   49..51 TRGO span (max-min, clamped 255) per phase
- *   52     schema echo   53..54 CRC16-CCITT over 0..52
- */
-void fw1264_serialize_probe(uint8_t out[55])
-{
-	const fw1264_probe_t *p = fw1264_probe_state();
-	uint8_t i;
-
-	for (i = 0U; i < 55U; i++) out[i] = 0U;
-	out[0] = 'C'; out[1] = 'P'; out[2] = 3U;
-	out[3] = (uint8_t)((p->moe_off ? 0x01U : 0U)
-		| (p->moe_off ? 0x02U : 0U)
-		| (p->timer_running ? 0x04U : 0U)
-		| (p->restore_ok ? 0x08U : 0U)
-		| (p->done ? 0x10U : 0U));
-	put_u16_le(&out[4], p->ch3);
-	out[6] = p->adc0_src_before;
-	out[7] = p->adc2_src_before;
-	out[8] = p->adc0_src_restored;
-	out[9] = p->adc2_src_restored;
-	out[10] = p->trgo_before;
-	out[11] = p->trgo_during;
-	out[12] = p->trgo_restored;
-	for (i = 0U; i < FW1264_PHASES; i++) {
-		out[13U + i] = p->sw.n[i];
-		put_u16_le(&out[16U + 2U * i], (uint16_t)p->sw.median[i]);
-		put_u16_le(&out[22U + 2U * i], (uint16_t)p->sw.smin[i]);
-		put_u16_le(&out[28U + 2U * i], (uint16_t)p->sw.smax[i]);
-	}
-	for (i = 0U; i < FW1264_ADCS; i++) {
-		put_u16_le(&out[34U + 2U * i], p->trgo.events[i]);
-	}
-	for (i = 0U; i < FW1264_PHASES; i++) {
-		int32_t span = (int32_t)p->trgo.smax[i] - (int32_t)p->trgo.smin[i];
-		if (span < 0) span = 0;
-		out[40U + i] = p->trgo.n[i];
-		put_u16_le(&out[43U + 2U * i], (uint16_t)p->trgo.median[i]);
-		out[49U + i] = (uint8_t)((span > 255) ? 255 : span);
-	}
-	out[52] = 3U;
-	put_u16_le(&out[53], crc16_ccitt(out, 53U));
-}
 #endif
 
 void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
@@ -1002,18 +954,11 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 				}
 			}
 			break;
-		case 0x602D: //FW-126: read-only phase-current calibration proof (Canable diagnostics only)
+		case 0x602D: //FW-126.7: read-only phase-current calibration report (Canable diagnostics only)
 			if(Ext_ID_Rx.operation==1 && Ext_ID_Rx.source==5){
-				uint8_t cal_dump[55];
+				uint8_t cal_dump[66];
 				current_cal_serialize_dump(cal_dump);
 				send_multiframe(Ext_ID_Rx.command, (char*)&cal_dump[0], sizeof(cal_dump));
-			}
-			break;
-		case 0x602E: //FW-126.4: read-only TRGO parity A/B probe, taken with MOE OFF
-			if(Ext_ID_Rx.operation==1 && Ext_ID_Rx.source==5){
-				uint8_t probe_dump[55];
-				fw1264_serialize_probe(probe_dump);
-				send_multiframe(Ext_ID_Rx.command, (char*)&probe_dump[0], sizeof(probe_dump));
 			}
 			break;
 #endif

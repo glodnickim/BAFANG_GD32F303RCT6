@@ -158,12 +158,10 @@
 #else
 #define DIAG_BUDGET_FW117_TRACE_BYTES    0U     /* FW-117 trace disabled: replaced by rolling_no_assist_diag */
 #endif
-/* FW-126.2: +112 B for the three-point sample store (7 x u16 CNT per point, plus median,
- * min/max, counts and the CH3 readback) that replaced FW-126.0's single sample per point.
- * The legacy six-slot array is deliberately NOT reclaimed to pay for it - section 18 forbids
- * deleting diagnostics for RAM without a separate audit. Checked against the .map before any
- * ride, which stays the authoritative number. */
-#define DIAG_BUDGET_ADC_TRIGGER_BYTES    450U   /* FW-126.0 six slots + snapshots; FW-126.2 median store */
+/* FW-126.5: the FW-121/FW-126.2 CH3 sweep was DELETED once its question was answered, and its
+ * 450 B line item with it. What remains under this name is the FW-126.5 campaign probe: five
+ * snapshots, two dark statistic sets and three ADC configuration captures. */
+#define DIAG_BUDGET_ADC_TRIGGER_BYTES    260U   /* FW-126.5 campaign probe state */
 #if ROLLING_NO_ASSIST_DIAG_ENABLE
 #define DIAG_BUDGET_ROLLING_NO_ASSIST_DIAG_BYTES 12380U /* FW-122.1: schema v3, measured arm-none-eabi-size bss=12316 B (256 x 48 B = 12288 B ring + 28 B state) + 64 B headroom; NORMAL object measured 0/0/0 (was 11356 B / 44 B samples at schema v2) */
 #define DIAG_BUDGET_ROLLING_NO_ASSIST_DUMP_BYTES 128U   /* FW-123: explicit replay cursor/transport + 64 B headroom */

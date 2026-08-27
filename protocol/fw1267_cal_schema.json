@@ -1,0 +1,253 @@
+{
+  "_comment": [
+    "FW-126.7 phase-current calibration report - the 0x602D schema 2 payload, defined ONCE.",
+    "",
+    "Both decoders read their offsets from here: the PowerShell one opens this file, the JS",
+    "one mirrors it and tests/fw1267_cal_parity.js fails if the mirror differs by a single",
+    "field. Producer: src/CAN_Display.c current_cal_serialize_dump().",
+    "",
+    "THREE DOMAINS, NEVER MIXED:",
+    "  physical ADC result = JDR + IOFF   -> the 'midpoint_*' fields, ~2020 at zero current",
+    "  JDR                 = hardware-offset-corrected inserted result (small, signed)",
+    "                        -> mean_*, min_*, max_*, p2p_*",
+    "  software offset     = what the FOC ISR subtracts from JDR -> offset_*",
+    "Never call JDR 'raw ADC' without qualification.",
+    "",
+    "flags: 0x01 valid, 0x02 timeout hit, 0x04 MOE on + compares neutral for every sample,",
+    "0x08 FOC blocked during calibration (structural - the only sampling call site is the",
+    "dwell branch of the FOC ISR), 0x10 DIAG post-validation stop was spent."
+  ],
+  "magic": [
+    67,
+    67
+  ],
+  "magic_text": "CC",
+  "schema": 2,
+  "length": 66,
+  "crc": {
+    "offset": 64,
+    "over": 64,
+    "algorithm": "crc16-ccitt-false"
+  },
+  "state_names": {
+    "0": "UNCALIBRATED",
+    "1": "SETTLING",
+    "2": "COLLECTING",
+    "3": "VALID",
+    "4": "FAILED"
+  },
+  "failure_names": {
+    "0": "NONE",
+    "1": "TIMEOUT",
+    "2": "OUT_OF_RANGE",
+    "3": "TOO_NOISY",
+    "4": "NOT_NEUTRAL",
+    "5": "ATTEMPTS_SPENT"
+  },
+  "source_names": {
+    "0": "NONE",
+    "1": "NEUTRAL_DWELL"
+  },
+  "reference": {
+    "midpoint_nominal": 2048,
+    "saturated_dark_example": 3890,
+    "rail_example": 4078
+  },
+  "phases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "phase_adc": {
+    "A": 2,
+    "B": 1,
+    "C": 0
+  },
+  "fields": [
+    {
+      "name": "magic0",
+      "offset": 0,
+      "type": "u8"
+    },
+    {
+      "name": "magic1",
+      "offset": 1,
+      "type": "u8"
+    },
+    {
+      "name": "schema",
+      "offset": 2,
+      "type": "u8"
+    },
+    {
+      "name": "flags",
+      "offset": 3,
+      "type": "u8"
+    },
+    {
+      "name": "state",
+      "offset": 4,
+      "type": "u8"
+    },
+    {
+      "name": "failure_reason",
+      "offset": 5,
+      "type": "u8"
+    },
+    {
+      "name": "source",
+      "offset": 6,
+      "type": "u8"
+    },
+    {
+      "name": "attempts",
+      "offset": 7,
+      "type": "u8"
+    },
+    {
+      "name": "cycles",
+      "offset": 8,
+      "type": "u16"
+    },
+    {
+      "name": "stable_count",
+      "offset": 10,
+      "type": "u16"
+    },
+    {
+      "name": "eligible",
+      "offset": 12,
+      "type": "u16"
+    },
+    {
+      "name": "restarts",
+      "offset": 14,
+      "type": "u16"
+    },
+    {
+      "name": "offset_A",
+      "offset": 16,
+      "type": "i16"
+    },
+    {
+      "name": "offset_B",
+      "offset": 18,
+      "type": "i16"
+    },
+    {
+      "name": "offset_C",
+      "offset": 20,
+      "type": "i16"
+    },
+    {
+      "name": "mean_A",
+      "offset": 22,
+      "type": "i16"
+    },
+    {
+      "name": "mean_B",
+      "offset": 24,
+      "type": "i16"
+    },
+    {
+      "name": "mean_C",
+      "offset": 26,
+      "type": "i16"
+    },
+    {
+      "name": "min_A",
+      "offset": 28,
+      "type": "i16"
+    },
+    {
+      "name": "min_B",
+      "offset": 30,
+      "type": "i16"
+    },
+    {
+      "name": "min_C",
+      "offset": 32,
+      "type": "i16"
+    },
+    {
+      "name": "max_A",
+      "offset": 34,
+      "type": "i16"
+    },
+    {
+      "name": "max_B",
+      "offset": 36,
+      "type": "i16"
+    },
+    {
+      "name": "max_C",
+      "offset": 38,
+      "type": "i16"
+    },
+    {
+      "name": "p2p_A",
+      "offset": 40,
+      "type": "u16"
+    },
+    {
+      "name": "p2p_B",
+      "offset": 42,
+      "type": "u16"
+    },
+    {
+      "name": "p2p_C",
+      "offset": 44,
+      "type": "u16"
+    },
+    {
+      "name": "ioff_A",
+      "offset": 46,
+      "type": "u16"
+    },
+    {
+      "name": "ioff_B",
+      "offset": 48,
+      "type": "u16"
+    },
+    {
+      "name": "ioff_C",
+      "offset": 50,
+      "type": "u16"
+    },
+    {
+      "name": "midpoint_A",
+      "offset": 52,
+      "type": "u16"
+    },
+    {
+      "name": "midpoint_B",
+      "offset": 54,
+      "type": "u16"
+    },
+    {
+      "name": "midpoint_C",
+      "offset": 56,
+      "type": "u16"
+    },
+    {
+      "name": "gate_stable_cycles",
+      "offset": 58,
+      "type": "u8"
+    },
+    {
+      "name": "gate_collect_samples",
+      "offset": 59,
+      "type": "u8"
+    },
+    {
+      "name": "gate_max_cycles",
+      "offset": 60,
+      "type": "u16"
+    },
+    {
+      "name": "gate_residual_window",
+      "offset": 62,
+      "type": "u16"
+    }
+  ]
+}

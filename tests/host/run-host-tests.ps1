@@ -38,7 +38,7 @@ $inc = Join-Path $root 'inc'
 # see main_startup_wiring_host.c's own STRINGIZE() comment for why that matters here.
 $mainCPathForward = (Join-Path $root 'src\main.c') -replace '\\', '/'
 $canDisplayCPathForward = (Join-Path $root 'src\CAN_Display.c') -replace '\\', '/'
-$adcTriggerDiagCPathForward = (Join-Path $root 'src\adc_trigger_diag.c') -replace '\\', '/'
+$currentCalCPathForward = (Join-Path $root 'src\current_cal.c') -replace '\\', '/'
 $rollingNoAssistDiagCPathForward = (Join-Path $root 'src\rolling_no_assist_diag.c') -replace '\\', '/'
 
 # Every harness and the module(s) it links. Add new ones here.
@@ -132,11 +132,6 @@ $suites = @(
        # harness's own file header. ExpectBuildFailure inverts the pass/fail check below: a
        # build that succeeds here is the test FAILING, not passing.
        ExpectBuildFailure = $true },
-    @{ Name = 'FW-126.0 neutral-dwell ADC trigger edge/coherency diagnostic (real adc_trigger_diag.c)'
-       Harness = Join-Path $PSScriptRoot 'fw126_neutral_dwell_diag_host.c'
-       Modules = @(Join-Path $root 'src\adc_trigger_diag.c')
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-DROLLING_NO_ASSIST_DIAG_ENABLE=0') },
     @{ Name = 'FW-111 Bug 1 main.c standstill wiring (source-text guard)'
        Harness = Join-Path $PSScriptRoot 'main_rearm_wiring_host.c'
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
@@ -362,28 +357,17 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
-    @{ Name = 'FW-119 current calibration safety policy (real current_cal.c)'
-       Harness = Join-Path $PSScriptRoot 'fw119_current_cal_host.c'
+    @{ Name = 'FW-126.7 production current calibration (real current_cal.c)'
+       Harness = Join-Path $PSScriptRoot 'fw1267_current_cal_host.c'
        Modules = @(Join-Path $root 'src\current_cal.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
-    @{ Name = 'FW-119 calibration wiring guard (main.c source-text check)'
-       Harness = Join-Path $PSScriptRoot 'fw119_current_cal_wiring_host.c'
-       # main.c is the ARM entry point and cannot be linked here - same reasoning as the
-       # STEP 2A guard above. This reads its SOURCE TEXT instead.
+    @{ Name = 'FW-126.7 calibration wiring guard (main.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'fw1267_cal_wiring_host.c'
+       # main.c is the ARM entry point and cannot be linked here - same reasoning as the other
+       # source-text guards. The module's own behaviour is covered by the harness above.
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
-    @{ Name = 'FW-125 phase-current same-path calibration (real current_cal.c)'
-       Harness = Join-Path $PSScriptRoot 'fw125_phase_current_calibration_host.c'
-       Modules = @(Join-Path $root 'src\current_cal.c')
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
-    @{ Name = 'FW-125 phase-current calibration wiring guard (main.c source-text check)'
-       Harness = Join-Path $PSScriptRoot 'fw125_wiring_guard_host.c'
-       # main.c is the ARM entry point and cannot be linked here - same reasoning as the
-       # FW-119 guard above. This reads its SOURCE TEXT instead.
-       Modules = @()
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCURRENT_CAL_C_PATH=$currentCalCPathForward") },
     @{ Name = 'FW-120.1 reconstruction / PWM-period timing (real dyn_adc_state.c)'
        Harness = Join-Path $PSScriptRoot 'fw120_1_reconstruction_timing_host.c'
        # The module is driven through a model of the whole acquisition pipeline (switchtime ->
@@ -398,24 +382,6 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
-    @{ Name = 'FW-121.0 ADC trigger timing sweep (real adc_trigger_diag.c)'
-       Harness = Join-Path $PSScriptRoot 'fw121_0_trigger_diag_host.c'
-       # Diagnostic-only module: the harness plays the injected ISR at the real 16 kHz / 4 kHz
-       # ratio and drives MOE the way a bridge start would, so the safety interlock and the whole
-       # sweep sequence are executed, not inspected. See the harness header for S1-S8.
-       Modules = @(Join-Path $root 'src\adc_trigger_diag.c')
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1') },
-    @{ Name = 'FW-121.0 diagnostic isolation guard (main.c + module source-text check)'
-       Harness = Join-Path $PSScriptRoot 'fw121_0_diag_isolation_host.c'
-       # Walks main.c's preprocessor nesting and proves EVERY call into the module sits inside a
-       # #if CAN_DIAGNOSTICS_ENABLE region - the production build gains nothing. Neither file can
-       # be linked here, same reasoning as the other wiring guards.
-       Modules = @()
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward",
-                     "-DADC_TRIGGER_DIAG_C_PATH=$adcTriggerDiagCPathForward",
-                     "-DROLLING_NO_ASSIST_DIAG_C_PATH=$rollingNoAssistDiagCPathForward") },
     @{ Name = 'Rolling no-assist diagnostic (real rolling_no_assist_diag.c)'
        Harness = Join-Path $PSScriptRoot 'rolling_no_assist_diag_host.c'
        Modules = @((Join-Path $root 'src\rolling_no_assist_diag.c'),

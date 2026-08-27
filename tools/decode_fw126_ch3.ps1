@@ -5,6 +5,12 @@ param(
 )
 # FW-126.0: TIMER0_CH3 trigger-edge decoder (neutral-dwell CH3 sweep, DIAG schema 7).
 #
+# HISTORICAL LOGS ONLY. The producer this decoder reads - the adc_trigger_diag layer and its
+# 0x10240..0x10246 aggregate block - was DELETED in FW-126.5, once its question was answered
+# (the CH3 conversion starts on the DOWN-count match, measured, HIGH confidence). Firmware from
+# DIAG_SCHEMA_VERSION 8 onwards emits no 0x1024x frames at all. This script is kept so the logs
+# that DID contain them still read; the source files it names below no longer exist.
+#
 # WHAT IT DECIDES. Which edge of TIMER0_CH3 actually starts the injected ADC conversion. The
 # whole of FW-127 is blocked on that answer (see documentation/FW-126_TO_FW-127_AGENT_HANDOFF_PL.md
 # section 1), and guessing it has a 50% chance of moving the sample OUT of the low-side conduction

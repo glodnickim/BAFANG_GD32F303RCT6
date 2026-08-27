@@ -71,3 +71,63 @@
 ### 2026-08-25 — INVALID hold
 
 **Doprecyzowanie:** stock 2.1 przy `sample_state=0` trzyma poprzedni poprawny current state, ale w prześledzonej ścieżce nie znaleziono osobnego `sample_age`/timeoutu. Bounded sample age pozostaje ulepszeniem EVistDrive ponad stock.
+
+### 2026-08-26 — domena wartości „~0" w wybiegu neutralnym (FW-126.5, FAZA 0)
+
+**Było:** otwarta sprzeczność „przy zgaszonym mostku ADC czyta ~1850, a w pracy prąd wychodzi ~0",
+z niewykluczoną możliwością, że porównujemy dwie różne domeny (surowy JDR vs wartość po odjęciu
+offsetu i po rekonstrukcji 2-z-3).  
+**Jest:** obie liczby są **surowym JDR** — odczytem `adc_inserted_data_read()` sprzed odjęcia
+`current_cal.offset[]`, w bootcie w którym `current_cal.valid == 0`, więc krok korekty i tak nic
+nie odejmował. **Porównanie nigdy nie było międzydomenowe.**  
+**Powód:** prześledzenie ścieżki w ISR instrukcja po instrukcji, od `ADC_IDATA0` do zmiennych
+`i16_ph1/2/3_current`, z wypisaniem producenta, konsumenta i jednostki każdego kroku.  
+**Otwarte:** czy surowa liczba **zmienia się** wraz ze stanem mostka, jak szybko i czy wraca —
+to mierzy kampania A0→B0/B1/B2→C0 w DIAG 0.0439 (jeszcze nie na rowerze).
+
+### 2026-08-26 — warstwa adc_trigger_diag usunięta
+
+**Było:** diagnostyka przemiatania CH3 (`0x10240..0x10246`) plus model „ADC0 && ADC1 && ADC2 EOIC",
+obalony w FW-126.3.  
+**Jest:** warstwa **usunięta z kodu**, nie wyłączona flagą; zero referencji runtime. Zachowane
+dokumenty wyników, historyczne logi i dekoder starych schematów 7/8.  
+**Powód:** decyzja właściciela (DELETE, nie DISABLE) po regule „nie naprawiaj architektury
+kolejnymi wyjątkami". `DIAG_SCHEMA_VERSION` podbity 7 → 8, żeby „brak ramek 0x1024x" nie było
+nieodróżnialne od „przemiatanie się nie uzbroiło".
+
+### 2026-08-27 — nasycenie toru prądowego przy zgaszonym mostku (FW-126.6/126.7)
+
+**CONFIRMED:** przy zgaszonym mostku wyjście wzmacniacza prądowego stoi **w nasyceniu przy
+szynie dodatniej** — odtworzona konwersja 3874/3910/3898 = 3,12–3,15 V przy 3,3 V, czyli
+`V+ − 0,18 V`. To nie jest zero z offsetem, to brak ważnego pomiaru.
+**Powód:** rekonstrukcja `raw = JDR + IOFF` z pomiaru FW-126.5 (log 2026-08-26 15:21).
+
+**CONFIRMED:** aktywny mostek neutralny przywraca punkt pracy na **środek skali** — 2004/2023/2020
+= 1,615–1,630 V, zgodne z zaprogramowanymi IOFF 2020/2028/2012 w granicach **16 LSB**.
+Stałe IOFF od zawsze opisywały stan aktywnego mostka i są poprawne.
+
+**CONFIRMED:** źródło wyzwalania **nie jest** przyczyną — FW-126.4 zmierzył deltę TRGO−SW = 0/0/1
+przy rozrzucie własnym 13–15.
+
+**CONFIRMED:** nasycenie jest **ciche** (rozrzut 10 LSB, P2P dumpu 17–19). Mały peak-to-peak
+nie może być kryterium ważności kalibracji — to właśnie przez to stara ścieżka przechodziła
+kontrole przez cztery karty.
+
+**PRODUCTION FIX — CONFIRMED NA SPRZĘCIE (log 2026-08-27 12:05, DIAG 0.0442).**
+FW-126.7 zastąpił ciemną kalibrację pomiarem w istniejącym wybiegu neutralnym FW-117.
+Pierwszy przebieg: `state VALID`, `source NEUTRAL_DWELL`, attempts 1, eligible 32/32,
+restarts 0, wszystkie 11 kryteriów PASS.
+
+  JDR mean      −18 / −10 / +5      P2P 3 / 2 / 2
+  physical ADC  2002 / 2018 / 2017  = 1,613 / 1,626 / 1,625 V   (środek skali)
+
+Odtwarzalność: FW-126.5 zmierzył 2004/2023/2020 w innym boocie — **zgodność 2–5 LSB**.
+Wobec starej ciemnej kalibracji (3874/3910/3898) różnica to ~1880 LSB.
+
+**Przelot B0 REALNIE ODRZUCONY:** cycles 41, stable_count 39 → dokładnie 2 cykle spalone, zanim
+liczenie stabilności ruszyło. To rampa szyna→środek odrzucona przez bramkę na żywym sprzęcie,
+nie w symulacji. Czas kalibracji 41 × 62,5 µs = **2,56 ms**.
+
+`diag_stop=1` — DIAG odmówił zwolnienia FOC, więc po kalibracji nie było momentu.
+**OTWARTE:** jazda na NORMAL 0.0442. Offsety są pierwszy raz niezerowe, więc ISR faktycznie
+zacznie je odejmować — to zmiana zachowania, którą pokaże dopiero jazda.

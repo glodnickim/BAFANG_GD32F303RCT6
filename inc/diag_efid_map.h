@@ -24,7 +24,6 @@
 #include "fw112_diag.h"        /* FW112_DIAG_EFID_*       (FW-112-DIAG) */
 #include "fw112_ab.h"          /* FW112_AB_EFID_*         (FW-112 A/B) */
 #include "fw117_trace.h"       /* FW117_TRACE_EFID_*      (FW-117, TEMPORARY) */
-#include "adc_trigger_diag.h"  /* ADC_TRIGGER_DIAG_EFID_* (FW-121.0) */
 #include "rolling_no_assist_diag.h" /* ROLLING_NO_ASSIST_EFID_* (rolling no-assist diagnostic) */
 
 /* --- the occupied ranges, inclusive on both ends ------------------------------------------- */
@@ -45,10 +44,6 @@
 #define DIAG_EFID_FW117_LO        (FW117_TRACE_EFID_HEADER)
 #define DIAG_EFID_FW117_HI        (FW117_TRACE_EFID_DATA_BASE + FW117_TRACE_DATA_FRAGMENTS - 1U)
 
-/* FW-121.0 ADC trigger sweep: status + one frame per sweep point */
-#define DIAG_EFID_FW121_LO        (ADC_TRIGGER_DIAG_EFID_STATUS)
-#define DIAG_EFID_FW121_HI        (ADC_TRIGGER_DIAG_EFID_POINT_BASE + ADC_TRIGGER_DIAG_POINTS - 1U)
-
 /* Rolling no-assist diagnostic schema v2: header + 6 data fragments */
 #define DIAG_EFID_RNA_LO          (ROLLING_NO_ASSIST_EFID_HEADER)
 #define DIAG_EFID_RNA_HI          (ROLLING_NO_ASSIST_EFID_DATA_BASE + ROLLING_NO_ASSIST_DATA_FRAGMENTS - 1U)
@@ -56,19 +51,6 @@
 /* --- the check ----------------------------------------------------------------------------- */
 
 #define DIAG_EFID_DISJOINT(a_lo, a_hi, b_lo, b_hi) (((a_hi) < (b_lo)) || ((b_hi) < (a_lo)))
-
-_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_FW121_LO, DIAG_EFID_FW121_HI,
-                                  DIAG_EFID_REARM_LO, DIAG_EFID_REARM_HI),
-	"FW-121.0 CAN ids overlap the FW-111 rearm recorder's block");
-_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_FW121_LO, DIAG_EFID_FW121_HI,
-                                  DIAG_EFID_FW112_DIAG_LO, DIAG_EFID_FW112_DIAG_HI),
-	"FW-121.0 CAN ids overlap FW-112-DIAG's block");
-_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_FW121_LO, DIAG_EFID_FW121_HI,
-                                  DIAG_EFID_FW112_AB_LO, DIAG_EFID_FW112_AB_HI),
-	"FW-121.0 CAN ids overlap FW-112 A/B's block - this is the exact collision that shipped once");
-_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_FW121_LO, DIAG_EFID_FW121_HI,
-                                  DIAG_EFID_FW117_LO, DIAG_EFID_FW117_HI),
-	"FW-121.0 CAN ids overlap the FW-117 bridge trace's block");
 
 _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
                                   DIAG_EFID_REARM_LO, DIAG_EFID_REARM_HI),
@@ -82,9 +64,6 @@ _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
 _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
                                   DIAG_EFID_FW117_LO, DIAG_EFID_FW117_HI),
 	"Rolling no-assist diagnostic CAN ids overlap the FW-117 bridge trace's block");
-_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
-                                  DIAG_EFID_FW121_LO, DIAG_EFID_FW121_HI),
-	"Rolling no-assist diagnostic CAN ids overlap FW-121.0's block");
 
 /* The pre-existing neighbours must stay disjoint from each other too - otherwise this map would
  * only ever protect the newest arrival, which is precisely how the last collision happened. */
@@ -105,16 +84,5 @@ _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_FW112_AB_LO, DIAG_EFID_FW112_AB_HI,
  * the one worth pinning, is simpler: the newest block goes above everything already taken.
  */
 #define DIAG_EFID_AGG_WALK_ASSIST 0x00010228U
-
-_Static_assert(DIAG_EFID_FW121_LO > DIAG_EFID_REARM_HI
-            && DIAG_EFID_FW121_LO > DIAG_EFID_FW112_DIAG_HI
-            && DIAG_EFID_FW121_LO > DIAG_EFID_FW112_AB_HI
-            && DIAG_EFID_FW121_LO > DIAG_EFID_FW117_HI
-            && DIAG_EFID_FW121_LO > DIAG_EFID_AGG_WALK_ASSIST,
-	"FW-121.0's id block must start above every id already taken - if a neighbour grew into it, "
-	"move FW-121.0 up rather than interleaving blocks");
-
-_Static_assert(DIAG_EFID_RNA_LO > DIAG_EFID_FW121_HI,
-	"Rolling no-assist diagnostic's id block must start above FW-121.0's block");
 
 #endif /* DIAG_EFID_MAP_H_ */

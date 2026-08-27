@@ -3,7 +3,7 @@
 Plik statusowy wymagany przez `FW-126_TO_FW-127_AGENT_HANDOFF_PL.md` §20.
 Aktualizowany po każdym etapie. Format wg §20 karty.
 
-**Ostatnia aktualizacja:** 2026-08-26 — FW-126.4 ZAMKNIĘTE: CASE B, trigger uniewinniony. Przyczyna ~1850 leży w stanie mostka, nie w akwizycji.
+**Ostatnia aktualizacja:** 2026-08-27 — FW-126.7 **POTWIERDZONE NA SPRZĘCIE** (log 12:05, DIAG 0.0442): state VALID, physical ADC 2002/2018/2017 (środek skali, nie ~3890), przelot B0 odrzucony, 11/11 kryteriów PASS. Pozostaje jazda na NORMAL 0.0442.
 
 ---
 
@@ -12,11 +12,20 @@ MASTER:
 FW-127 Phase Current Acquisition
 
 CURRENT CARD:
-FW-126.3 CALIBRATION PATH EQUIVALENCE — etap A (audyt) ZAKOŃCZONY,
-etap B (pomiar) ZBUDOWANY, czeka na jazdę. DIAG 0.0431.
+FW-126.7 PRODUCTION CURRENT CAL REPLACEMENT - POTWIERDZONE NA SPRZECIE.
+Pozostaje jeden test jazdy na NORMAL 0.0442 (ten sam kod kalibracji).
 
 FW-126.2 = CLOSED (zbocze CH3 zmierzone i zamrożone).
+FW-126.3 = CLOSED (przy MOE off CC3 nie napędza żadnej konwersji).
+FW-126.4 = CLOSED (CASE B — trigger uniewinniony, delta TRGO-SW = 0/0/1).
 FW-126 overall = OPEN wyłącznie z powodu równoważności ścieżki kalibracji.
+
+FW-126.5 FAZA 0 — WYNIK (audyt kodu, bez sprzętu):
+  ~1850 (most zgaszony) i ~0 (wybieg neutralny) to OBIE surowy JDR, odczyt
+  adc_inserted_data_read() SPRZED odjęcia current_cal.offset[], w bootcie
+  z current_cal.valid == 0. PORÓWNANIE NIGDY NIE BYŁO MIĘDZYDOMENOWE.
+  Zostaje jedno wąskie pytanie: czy surowa liczba ZMIENIA SIĘ ze stanem mostka,
+  jak szybko i czy wraca -> mierzy to kampania A0/B0/B1/B2/C0.
 
 LAST COMPLETED:
 FW-126.0 implementacja + host suite PASS (build 0.0428 NORMAL / 0.0429 DIAG)
@@ -38,7 +47,8 @@ CONFIRMED (log log-2026-08-25-19-28-08-n0.log, obraz DIAG 0.0430, schema 8):
 
 CURRENT CODE:
 branch      = diag/fw112-real-bike-ab
-HEAD        = ba794be  ("WIP: preserve integrated state before FW-112 isolation")
+HEAD        = 5ffaa14  (checkpoint przed destrukcyjną czystką FW-126.5;
+              poprzedni ba794be "WIP: preserve integrated state before FW-112 isolation")
 worktree    = DIRTY — FW-102..FW-126 są NIEZACOMMITOWANE; HEAD nie opisuje tego,
               co jest w binarkach. Oba manifesty mają worktree_dirty: true.
 NORMAL build = 0.0428  FLASH 101004 B  RAM 12064 B
@@ -46,7 +56,15 @@ NORMAL build = 0.0428  FLASH 101004 B  RAM 12064 B
                PRZEBUDOWANY 2026-08-25 po FW-126.2, przypięty do 0.0428 (wersja jest
                wkompilowana w obraz, więc tylko przy tej samej wersji test bitowy ma sens)
                -> BIT W BIT IDENTYCZNY z baseline. FW-126.2 nie dołożyło do NORMAL nic.
-DIAG build   = 0.0435 (FW-126.4 sonda A/B, schema 3; 0.0432 = FW-126.3 per-ADC, 0.0431 = complete-triple, oba WYCOFANE)
+DIAG build   = 0.0440 (FW-126.5 kampania A0/B0/B1/B2/C0, schema 4)
+               SHA256 20D6D0F18C9022BEB38CCFE2EBB8F12DF02C943F1A2025876321CF5ED5C1D814
+               FLASH 150820 B (64,04 %)  RAM 46056 B (93,70 %, wolne 3096 B)
+               .map: bez overflow. .bss.fw1265 = 202 B przy budżecie 260 B
+               (pilnowane _Static_assert).
+               Względem 0.0435 czystka adc_trigger_diag oddała 2588 B FLASH i 304 B RAM.
+DIAG 0.0439  = ten sam kod przed bramką złożoności (adc_stat[1..2] bez konsumenta). NIE UŻYWAĆ.
+DIAG 0.0438  = 0.0438 — przed podbiciem DIAG_SCHEMA_VERSION. NIE UŻYWAĆ.
+DIAG 0.0435  = HISTORYCZNY (FW-126.4 sonda A/B, schema 3)
                SHA256 FEC3AD81D5800D60DFC4B97F195458FB25747A344B1A3A9EB9626C622658FF5A
                FLASH 153408 B  RAM 46360 B (94,32 %, wolne 2792 B)
 DIAG 0.0432  = 0.0432
@@ -150,6 +168,97 @@ i na podstawie werdyktu:
   BOTH / INCONCLUSIVE  -> STOP wg §9, wyłącznie minimalne rozszerzenie DIAG
 FW-126 nie może zostać CLOSED wg §22, dopóki oba polecenia nie dadzą wyniku z roweru.
 ```
+
+---
+
+## FW-126.7 — kalibracja wymieniona (2026-08-27)
+
+Ciemna kalibracja usunięta z kodu; pomiar przeniesiony do istniejącego wybiegu neutralnego
+FW-117, gdzie odczyt jest ważny. Rozdzielone bramki: wejście w stan neutralny wymaga tylko
+żądania momentu, `current_cal_foc_allowed()` bramkuje wyłącznie aktywny FOC — to usuwa
+zakleszczenie „nieskalibrowany nigdy się nie skalibruje".
+
+Bramka ustalenia = KONIUNKCJA: okno residual ±300 NAJPIERW, stabilność DRUGA. Nasycenie było
+ciche (rozrzut 10 LSB, P2P 17–19), więc sam peak-to-peak nigdy nie może decydować.
+
+**UWAGA: NORMAL celowo się zmienił.** Baseline 0.0428 / `7DB8317A…2CE3CE94` NIE OBOWIĄZUJE.
+
+| | NORMAL 0.0442 | DIAG 0.0442 |
+|---|---|---|
+| FLASH | 100 572 B (42,66 %) | 145 496 B (61,78 %) |
+| RAM | 12 072 B (24,56 %) | 45 840 B (93,26 %, wolne 3 312 B) |
+| SHA256 | `2D1123F7…8C55211E` | `D6EC0AC7…01024C4F` |
+
+Oba obrazy używają TEGO SAMEGO kodu kalibracji; DIAG ma wyłącznie post-walidacyjny STOP,
+żeby pierwszy test nowej kalibracji nie przeszedł od razu do momentu.
+
+Testy hosta: **12 → 2** czerwone (zostały T14/T9 w rolling_no_assist, sprzed tej karty).
+Dziesięć zniknęło razem z usuniętą architekturą, nie zostało wyciszone. Raport 0x602D to
+schema 2 (66 B), layout w `protocol/fw1267_cal_schema.json`, parytet dekoderów pod testem.
+
+Szczegóły: [FW-126.7_PRODUCTION_CURRENT_CAL_REPLACEMENT_PL.md](FW-126.7_PRODUCTION_CURRENT_CAL_REPLACEMENT_PL.md).
+
+---
+
+## FW-126.6 — stan ważnego pomiaru prądu (audyt, 2026-08-26)
+
+Odtworzenie surowej konwersji (`raw = JDR + IOFF`, IOFF A/B/C = 2020/2028/2012) rozstrzyga
+sprzeczność, która ciągnęła się od FW-125:
+
+| stan | raw A/B/C | napięcie | co to jest |
+|---|---|---|---|
+| ciemno (stara CAL) | 3874 / 3910 / 3898 | 3,12–3,15 V | **wzmacniacz w nasyceniu przy szynie** |
+| chwila po MOE ON (B0) | 4078 / 4077 / 4079 | 3,29 V | twarda szyna |
+| ustalone (B1/B2) | 2004 / 2023 / 2020 | 1,615–1,630 V | **środek skali** |
+| stałe IOFF w firmware | 2020 / 2028 / 2012 | 1,621–1,634 V | zgodne w granicach 16 LSB |
+
+Wniosek: **stara ciemna kalibracja mierzyła nasycony wzmacniacz.** Okno ±300 nigdy nie było
+błędem — błędem był stan. Nasycenie jest ciche (rozrzut A0 = 10 LSB, P2P dumpu 17–19), więc
+sam rozrzut nie może być kryterium ważności.
+
+Różnica eVistDrive ↔ stock, wcześniej przeoczona: eVistDrive ma `CHCTL2 = 0x1DDD`
+(EN=NEN=1 **zawsze**), więc przy `IOS=1` jego piny w stanie ciemnym są **aktywnie napędzane**
+na poziomy idle. Stock w CAL ma `EN=NEN=0` — timer **zwalnia** wszystkie sześć pinów. To trzy
+różne stany elektryczne, nie dwa.
+
+`0x0880/0x0808/0x0088`: we wszystkich trzech `EN=NEN=0`, więc na pinach **nie różnią się**;
+po co stock rotuje NP = **OPEN**. Gate driver = **OPEN** (brak oznaczenia w całym repo).
+
+Model: **E z przechyłem ku C** (potrzeba faktycznego przełączania) — ale 437 µs to też
+realistyczna stała czasowa po skokowym enable, więc C i A nie są rozdzielone.
+
+Stan stock-like (`EN=NEN=0`+POEN=1) jest **niezautoryzowany**: zwolnienie pinów oznacza
+nieznany poziom na wejściach drivera bez schematu. Odblokowuje go schemat/PCB albo pomiar.
+
+Szczegóły: [FW-126.6_CURRENT_SENSE_VALID_STATE_PL.md](FW-126.6_CURRENT_SENSE_VALID_STATE_PL.md).
+
+---
+
+## FW-126.5 — czystka architektoniczna i stan na 2026-08-26
+
+Decyzja właściciela: **DELETE, nie DISABLE.** Zamknięta warstwa `adc_trigger_diag` została
+usunięta z kodu, a nie wyłączona flagą kompatybilności.
+
+Usunięte: `src/adc_trigger_diag.c`, `inc/adc_trigger_diag.h`, `inc/fw1264_probe.h`,
+`protocol/fw1264_probe_schema.json`, trzy testy hostowe tej warstwy, blok 7 ramek zbiorczych
+w `main.c`, osierocona zmienna ścieżki w `run-host-tests.ps1`. Zero referencji runtime
+(`grep` po `src/`, `inc/`, `scripts/`). Żadnego `#if 0`, flagi legacy, gałęzi zgodności
+ani martwych liczników. Checkpoint `5ffaa14` powstał **przed** czystką; historii nie ruszano.
+
+Zachowane, bo są dowodem albo są potrzebne do starych logów: dokumentacja wyników FW-126.2,
+rejestr dowodów, historyczne logi, dekoder `decode_fw126_ch3.ps1` dla schematów 7/8.
+
+**`DIAG_SCHEMA_VERSION` podbity 7 → 8.** Log w wersji 7 *zawiera* ramki `0x10240..0x10246`;
+log w wersji 8 nigdy ich nie zawiera. Bez tego „brak ramek 0x1024x" byłoby nieodróżnialne od
+„przemiatanie się nie uzbroiło" — a to jest werdykt, nie brak. Zmiana nie dotknęła NORMAL:
+przebudowa 0.0428 dała ten sam hash bit w bit.
+
+Testy: pakiet hostowy ma **3 czerwone pakiety** — FW-119 wiring (3), FW-125 wiring (7),
+rolling_no_assist (T14, T9). To **mniej** niż deklarowana baza, bo dwa pakiety FW-121 zniknęły
+razem z usuniętą warstwą. **Żadnego nowego FAIL.** Nowy `fw1265_campaign_probe_host.c` (S1–S11)
+przechodzi i został zweryfikowany mutacjami. Pakiet Canable zielony, lint czysty.
+
+Szczegóły: [FW-126.5_RAW_DOMAIN_BRIDGE_STATE_PL.md](FW-126.5_RAW_DOMAIN_BRIDGE_STATE_PL.md).
 
 ---
 

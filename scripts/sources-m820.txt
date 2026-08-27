@@ -9,7 +9,6 @@ src/cadence_comp.c
 src/can_multiframe.c
 src/can_reply_effects.c
 src/can_tx_queue.c
-src/adc_trigger_diag.c
 src/current_cal.c
 src/dyn_adc_state.c
 src/CAN_Display.c

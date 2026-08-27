@@ -4,53 +4,57 @@
 #include <stdint.h>
 
 /*
- * FW-119: safety policy around the FW-118 phase-current zero calibration.
- * FW-125: same-path measurement fix - see below and documentation/
- * FW-125_PHASE_CURRENT_SAME_PATH_CALIBRATION_PL.md.
+ * FW-126.7: phase-current zero calibration, measured in the ONE electrical state that was
+ * proven to produce a valid reading.
  *
- * FW-118 measures the per-phase ADC zero once at startup and, on success, installs a software
- * correction the ISR subtracts from the injected readings. What it did NOT have was a policy:
- * one bad attempt simply left the firmware on the legacy hardware-offset path with a status
- * byte nobody acts on, and there was no way to distinguish "never calibrated" from "calibrated,
- * then a later attempt failed".
+ * WHY THE PREVIOUS CALIBRATION WAS REPLACED, not repaired
+ * ------------------------------------------------------
+ * Every calibration before this card sampled with the bridge DARK (MOE off). FW-126.6 showed
+ * what that actually measured, by reconstructing the physical ADC result (raw = JDR + IOFF):
  *
- * This module owns that policy and nothing else:
+ *     dark  : raw 3874 / 3910 / 3898  =  3.12-3.15 V of 3.3 V   -> amplifier AT ITS RAIL
+ *     first conversion after MOE ON   :  raw ~4078              -> harder into the rail
+ *     settled neutral bridge          :  raw 2004 / 2023 / 2020 -> ~1.62 V, MID-SCALE
+ *     hardware IOFF constants         :      2020 / 2028 / 2012 -> agrees within 16 LSB
  *
- *     retry  ->  last-known-good  ->  legacy fallback / hard fail
+ * The dark reading was a SATURATED amplifier output, not a zero-current offset. It was also
+ * extremely quiet (spread 10 LSB, dump P2P 17-19), which is why it passed every noise check
+ * for three cards running. THAT is the lesson encoded below: a small peak-to-peak proves
+ * nothing on its own, because saturation is stable too. Validity is decided by the window
+ * FIRST and by stability only SECOND.
  *
- * It is deliberately hardware-free: main.c does the sampling (it is the only place that may
- * touch the ADC registers) and hands each attempt's raw accumulation in here as a plain struct.
- * That is what makes the policy testable on the host, and it is the same split FW-106 used for
- * diag_session.c.
+ * THE THREE DOMAINS - never mixed anywhere in this module or its report
+ * --------------------------------------------------------------------
+ *     physical ADC result  =  JDR + IOFF          (~2020 at zero current, mid-scale)
+ *     JDR                  =  what adc_inserted_data_read() returns, i.e. raw - IOFF in
+ *                             silicon (a small signed residual around 0)
+ *     software offset      =  current_cal.offset[], subtracted by the FOC ISR from JDR
  *
- * FW-125 CHANGED THE SAMPLING DOMAIN (the policy above is otherwise untouched):
- *   FW-118/119 sampled the ADC0 REGULAR scan (adc_value[7]/[8]/[4], raw ADC12 counts around
- *   2048) and computed the software offset as (that mean - the hardware IOFFx constant). But the
- *   FOC ISR reads phase current from adc_inserted_data_read() on each phase's OWN ADC instance
- *   (A=ADC2, B=ADC1, C=ADC0) - a DIFFERENT silicon ADC than ADC0's regular scan for phases A and
- *   B, with its own independent zero-current offset. Measuring one ADC and correcting the other
- *   is a domain mismatch; it was the confirmed root cause of FW-122 CASE C.
+ * Hardware IOFF stays a FIXED coarse centering (2012/2028/2020, written once in adc_config()
+ * and nowhere else). This module calibrates only the small residual JDR zero on top of it.
  *
- *   The fix: calibration now accumulates i16_ph1/2/3_current - the exact adc_inserted_data_read()
- *   values the FOC ISR consumes, captured inside ADC0_1_IRQHandler itself before any software
- *   offset or sector reconstruction is applied (main.c owns this; see phase_cal_acc_t there).
- *   Because adc_inserted_data_read() already returns (raw - IOFFx) in hardware, that accumulated
- *   mean IS the residual software offset directly - no second subtraction of the hardware offset
- *   constant. attempt_t.sum/min/max are therefore SIGNED (int32_t/int16_t): the residual domain
- *   is a small value centred on 0, not a ~2048 unsigned ADC12 code.
+ * WHAT THIS MODULE OWNS, AND WHAT IT DOES NOT
+ * -------------------------------------------
+ * It owns the DATA state of the calibration: settling, eligibility, the estimator, validation
+ * and the resulting offsets. It is deliberately hardware-free - it never reads or writes a
+ * timer, ADC or GPIO register, which is what makes it testable on the host.
  *
- * WHAT THIS MODULE DOES NOT DO:
- *   - it does not change the provisional residual/P2P limits - those stay HW_PENDING
- *   - it does not persist anything to flash. LKG is RAM/session-level only; see below.
+ * It does NOT own the bridge. MOE, the neutral compares and the start progression belong to
+ * exactly one place: the motor-start lifecycle in main.c. This module can ASK for the existing
+ * neutral dwell to be held (current_cal_wants_dwell()); the lifecycle decides. There is no
+ * second state machine driving the bridge.
  *
- * SCOPE OF "LAST-KNOWN-GOOD" (read this before relying on it):
- *   LKG lives in RAM and dies with power. It is NOT a value carried over from a previous ride.
- *   Within one power cycle it means exactly this: the last attempt that passed validation. Its
- *   value today is that (a) a failing retry can never overwrite a set that already passed, and
- *   (b) if calibration is ever re-run while the bike is live - it is not, today, but the
- *   lifecycle now supports it - the running FOC keeps the good offsets instead of dropping to
- *   legacy mid-ride. Adding flash persistence would need storage infrastructure this card
- *   deliberately does not introduce.
+ * THE DEADLOCK THIS CARD ALSO FIXES
+ * ---------------------------------
+ * Two different questions used to share one flag:
+ *
+ *     "may the controller enter the safe neutral bridge state?"   and
+ *     "may the controller run active FOC?"
+ *
+ * Gating the first on calibration validity is a deadlock: an uncalibrated controller could
+ * never reach the only state in which it can be calibrated. They are now separate. Entering
+ * the neutral dwell needs only a legitimate torque/walk request; current_cal_foc_allowed()
+ * gates ONLY the transition to active FOC.
  */
 
 /* Phase index into every three-element array below. */
@@ -60,124 +64,122 @@
 #define CURRENT_CAL_PHASES   3
 
 /*
- * Status codes. 0..3 keep the exact numeric meaning FW-118 shipped with, so any log or decoder
- * already reading current_calibration_status keeps reading it correctly; 4..8 are new.
+ * Data state. This is the calibration's own status - it says nothing about the bridge.
+ * The numbering is stable because it goes on the wire in the 0x602D report.
  */
 typedef enum {
-	CURRENT_CAL_UNCALIBRATED    = 0, /* no attempt has been evaluated yet */
-	CURRENT_CAL_OK              = 1, /* this attempt passed; runtime offsets installed */
-	CURRENT_CAL_OUT_OF_RANGE    = 2, /* a phase mean fell outside the provisional window */
-	CURRENT_CAL_TOO_NOISY       = 3, /* a phase P2P exceeded the provisional noise limit */
-	CURRENT_CAL_SAMPLE_TIMEOUT         = 4, /* the sampling loop never got its samples */
-	CURRENT_CAL_USING_LKG       = 5, /* every attempt failed; a previously accepted set is active */
-	CURRENT_CAL_LEGACY_FALLBACK = 6, /* no usable set; running the pre-FW-118 hardware-offset path */
-	CURRENT_CAL_HARD_FAILED     = 7, /* no usable set and STRICT policy: FOC start is inhibited */
-	CURRENT_CAL_MOE_ON          = 8  /* calibration observed TIMER0 POEN; reject without touching PWM */
-} current_cal_status_t;
+	CURRENT_CAL_ST_UNCALIBRATED = 0,  /* power-on, or after an invalidate                  */
+	CURRENT_CAL_ST_SETTLING     = 1,  /* in the dwell, waiting for a valid, steady reading */
+	CURRENT_CAL_ST_COLLECTING   = 2,  /* gate satisfied, accumulating eligible samples     */
+	CURRENT_CAL_ST_VALID        = 3,  /* offsets installed; active FOC may be released     */
+	CURRENT_CAL_ST_FAILED       = 4   /* this attempt gave up; FOC stays forbidden         */
+} current_cal_state_t;
 
-/* Where the offsets the ISR applies right now came from. */
+/*
+ * Why an attempt ended. UNCALIBRATED means "no failure recorded yet".
+ * Also on the wire - keep the numbering stable.
+ */
 typedef enum {
-	CURRENT_CAL_SRC_NONE    = 0, /* nothing applied, and FOC is inhibited (STRICT hard fail) */
-	CURRENT_CAL_SRC_RUNTIME = 1, /* offsets from the attempt that just passed */
-	CURRENT_CAL_SRC_LKG     = 2, /* offsets from an earlier attempt that passed */
-	CURRENT_CAL_SRC_LEGACY  = 3  /* no software offsets; hardware offset only, as before FW-118 */
+	CURRENT_CAL_FAIL_NONE        = 0,
+	CURRENT_CAL_FAIL_TIMEOUT     = 1,  /* never got a settled reading inside the budget     */
+	CURRENT_CAL_FAIL_OUT_OF_RANGE= 2,  /* final mean outside the residual window            */
+	CURRENT_CAL_FAIL_TOO_NOISY   = 3,  /* eligible samples still too spread out             */
+	CURRENT_CAL_FAIL_NOT_NEUTRAL = 4,  /* the caller reported the bridge was not neutral    */
+	CURRENT_CAL_FAIL_ATTEMPTS    = 5   /* attempt budget for this power cycle is spent      */
+} current_cal_fail_t;
+
+/* The only source that can produce valid offsets. There is deliberately no second one. */
+typedef enum {
+	CURRENT_CAL_SRC_NONE          = 0,
+	CURRENT_CAL_SRC_NEUTRAL_DWELL = 1
 } current_cal_source_t;
 
 /*
- * Start policy when calibration produced nothing usable.
+ * Per-phase measurement of the accepted sample set. Streaming - no sample array is kept, so
+ * the collection length can be raised without costing RAM.
  *
- * LEGACY_FALLBACK is the default and the only one that may be ridden until the FW-118 limits
- * have been measured on the bench. The provisional +-200 LSB window and the 200 LSB P2P limit
- * are guesses; STRICT on top of a guessed threshold is a way to immobilise a working bike over
- * a number nobody has verified. STRICT exists so the policy can be switched over in one place
- * once those limits are real.
- */
-typedef enum {
-	CURRENT_CAL_POLICY_LEGACY_FALLBACK = 0,
-	CURRENT_CAL_POLICY_STRICT          = 1
-} current_cal_policy_t;
-
-/*
- * One attempt's raw accumulation, filled in by the caller's sampling loop.
- *
- * `timed_out` means the loop gave up waiting for the ISR accumulator. `samples` is how many
- * samples were actually accumulated - the mean is computed from THIS, not from a hardcoded
- * shift, so a changed CURRENT_CAL_SAMPLES cannot silently produce a wrong mean.
- *
- * FW-125: sum/min/max are SIGNED. The source is now adc_inserted_data_read() (already
- * hardware-offset-corrected, see current_cal.h's top comment), a small residual around 0 that
- * can legitimately go negative - unlike the old regular-ADC raw counts, which never could.
+ *   PRODUCER  : current_cal_sample(), while state == COLLECTING
+ *   CONSUMER  : the validator, and the 0x602D report
+ *   RESET     : cal_restart_collection(), and current_cal_begin_attempt()
+ *   PURPOSE   : the estimator and the evidence behind its verdict
  */
 typedef struct {
-	uint8_t  timed_out;
-	uint8_t  moe_on;  /* sampling observed TIMER0 CCHP.POEN; a valid startup attempt requires 0 */
-	uint16_t samples;
-	int32_t  sum[CURRENT_CAL_PHASES];
-	int16_t  min[CURRENT_CAL_PHASES];
-	int16_t  max[CURRENT_CAL_PHASES];
-} current_cal_attempt_t;
+	int32_t  sum;
+	int16_t  min;
+	int16_t  max;
+} current_cal_acc_t;
 
 typedef struct {
-	/* --- what the ISR uses. Nothing else may write these. --- */
-	int16_t              offset[CURRENT_CAL_PHASES];
-	uint8_t              valid;   /* 1 = ISR subtracts offset[]; 0 = legacy hardware-offset path */
+	/* --- what the FOC ISR consumes. Nothing outside this module may write these. --- */
+	int16_t  offset[CURRENT_CAL_PHASES];
+	uint8_t  valid;            /* 1 = ISR subtracts offset[]. The ONE source of that truth. */
 
-	/* --- result of the most recent attempt (diagnostic). FW-125: signed residual domain, see
-	 * above - `residual_mean` replaces FW-118's `zero_adc` name to make that domain change
-	 * explicit at every call site. --- */
-	int16_t               residual_mean[CURRENT_CAL_PHASES];
-	uint16_t              p2p[CURRENT_CAL_PHASES];
-	current_cal_status_t  attempt_status;
-
-	/* --- last accepted set. RAM/session only - see the header comment. --- */
-	int16_t              lkg_offset[CURRENT_CAL_PHASES];
-	int16_t              lkg_residual_mean[CURRENT_CAL_PHASES];
-	uint8_t              lkg_valid;
-
-	/* --- policy outcome --- */
-	current_cal_policy_t policy;
-	current_cal_status_t status;         /* final, policy-level status */
-	current_cal_status_t failure_reason; /* last attempt failure; UNCALIBRATED if none */
+	/* --- data state --- */
+	current_cal_state_t  state;
+	current_cal_fail_t   failure_reason;
 	current_cal_source_t source;
-	uint8_t              attempts;       /* attempts consumed so far */
-	uint8_t              foc_allowed;    /* 0 only on STRICT hard fail */
-	uint8_t              degraded;       /* 1 = running, but not on a freshly calibrated set */
-	uint16_t             last_sample_count; /* accepted or rejected most recent attempt */
-	uint8_t              last_moe_on;       /* most recent attempt observed POEN */
+	uint8_t  attempts;         /* attempts consumed this power cycle                        */
+
+	/* --- gate progress, all in dwell ISR cycles (one per PWM period) --- */
+	uint16_t cycles;           /* cycles since this attempt began holding the dwell         */
+	uint16_t stable_count;     /* consecutive cycles satisfying window AND stability        */
+	uint16_t eligible;         /* samples accepted into the estimator                       */
+	uint16_t restarts;         /* collection restarts caused by losing the gate             */
+	uint8_t  timeout_hit;      /* the bounded budget ran out                                */
+	/*
+	 * Positive evidence that the electrical state held for EVERY sample of this attempt, rather
+	 * than something the report infers. FOC-blocked is not a separate field because it is
+	 * structural: the only call site is the dwell branch of the FOC ISR, which is mutually
+	 * exclusive with FOC_calculation().
+	 *   PRODUCER : current_cal_begin_attempt() sets it, current_cal_sample() can only clear it
+	 *   CONSUMER : the 0x602D report
+	 *   RESET    : current_cal_begin_attempt()
+	 *   PURPOSE  : "MOE on and compares neutral, proven, not assumed"
+	 */
+	uint8_t  neutral_ok;
+	uint8_t  seen_sample;      /* a previous sample exists, so a delta can be formed        */
+	int16_t  prev[CURRENT_CAL_PHASES];
+
+	/* --- result of the accepted set (diagnostic evidence, JDR domain) --- */
+	current_cal_acc_t acc[CURRENT_CAL_PHASES];
+	int16_t  mean[CURRENT_CAL_PHASES];
+	uint16_t p2p[CURRENT_CAL_PHASES];
 } current_cal_t;
 
 /*
- * Full reset, including LKG. This is the power-on entry point: after it the state reads
- * UNCALIBRATED / SRC_LEGACY, FOC is allowed, and no software offset is applied - i.e. exactly
- * the pre-FW-118 behaviour, which is the only safe thing to be doing before any measurement.
+ * Power-on. Leaves UNCALIBRATED with no offsets applied and active FOC forbidden, which is the
+ * only honest state before anything has been measured.
  */
-void current_cal_init(current_cal_t *s, current_cal_policy_t policy);
+void current_cal_init(current_cal_t *s);
+
+/* 1 while a calibration is still wanted and the attempt budget allows one. */
+uint8_t current_cal_needs_calibration(const current_cal_t *s);
 
 /*
- * Begin a calibration sequence: clears the attempt counter and the current attempt's result,
- * KEEPS the LKG set and keeps the offsets the ISR is using. Calling this mid-ride therefore
- * never disturbs a running FOC.
+ * A legitimate neutral bridge start has begun and calibration may use it. Called by the
+ * lifecycle BEFORE the dwell can produce its first ISR cycle. Does nothing once VALID.
  */
-void current_cal_begin(current_cal_t *s);
-
-/* 1 while another attempt is both permitted and useful (not yet successful, budget left). */
-uint8_t current_cal_attempt_allowed(const current_cal_t *s);
+void current_cal_begin_attempt(current_cal_t *s);
 
 /*
- * Evaluate one attempt. Returns that attempt's status.
+ * One dwell ISR cycle. `jdr` is the RAW inserted result of phases A/B/C, read before any
+ * software offset, reconstruction or filtering - the same values the FOC ISR consumes.
+ * `bridge_neutral` is the caller's own verification that MOE is on, the compares are neutral
+ * and FOC is blocked; a false here fails the attempt rather than quietly measuring garbage.
  *
- * On OK the runtime offsets are installed and become the new LKG. On any failure NOTHING that
- * FOC or LKG depends on is written - a failed retry cannot degrade a set that already passed.
+ * Returns the state after this cycle.
  */
-current_cal_status_t current_cal_submit(current_cal_t *s, const current_cal_attempt_t *a);
+current_cal_state_t current_cal_sample(current_cal_t *s, const int16_t jdr[CURRENT_CAL_PHASES],
+                                       uint8_t bridge_neutral);
+
+/* 1 while the calibration still needs the existing neutral dwell held open. */
+uint8_t current_cal_wants_dwell(const current_cal_t *s);
 
 /*
- * Apply the start policy once the attempt budget is spent (or an attempt succeeded). Sets
- * status, source, degraded and foc_allowed. Safe to call more than once.
+ * THE gate for active FOC, and nothing else. True only when calibration is VALID.
+ * Never use it to decide whether the neutral bridge state may be entered - that is what the
+ * deadlock above was.
  */
-void current_cal_finalize(current_cal_t *s);
-
-/* 0 only when the policy is STRICT and there is no usable offset set. */
 uint8_t current_cal_foc_allowed(const current_cal_t *s);
 
 #endif /* CURRENT_CAL_H_ */

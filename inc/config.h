@@ -342,8 +342,16 @@
 // After MOE ON, hold neutral PWM for this many real PWM/ISR cycles before releasing FOC.
 // 4 cycles @16kHz PWM = 250 us. Conservative first value; adjust after bench measurement.
 #define START_NEUTRAL_DWELL_CYCLES  4
-// Failsafe: if dwell does not complete within this many ISR cycles, force bridge off.
+// Failsafe: if dwell does not complete within this many main-loop iterations, force bridge off.
 #define START_DWELL_TIMEOUT_CYCLES  100
+// FW-126.7: the SAME failsafe, but for the one start that is also calibrating. A calibration
+// attempt is bounded by CURRENT_CAL_MAX_CYCLES dwell ISR cycles (16 kHz); the main loop runs
+// faster than that ISR, so the budget here must be larger in its own currency or the failsafe
+// would end the start before any attempt could ever finish. Measured on the bike (FW-126.5,
+// log 2026-08-26 15:21): 100 main-loop iterations elapsed in 31 dwell ISR cycles, i.e. ~3.2
+// iterations per cycle. 256 cycles therefore needs ~825; 2000 keeps ~2.4x margin over that and
+// still bounds the whole thing at roughly 40 ms of neutral, zero-torque bridge.
+#define START_CAL_DWELL_TIMEOUT_CYCLES  2000
 
 // --- FW-118: Independent Phase Current Zero Calibration ---
 // Runtime calibration of per-phase ADC offsets (PA2=A, PA3=B, PA5=C).
@@ -373,49 +381,66 @@
 #define CURRENT_HW_OFFSET_B           2028
 #define CURRENT_HW_OFFSET_C           2012
 
-// Validation range: PROVISIONAL — the IOFFx registers above are a first-pass trim, so a residual
-// of a few tens of LSB at zero current is expected; ±300 LSB is a conservative first bound on top
-// of that, not a measured limit. Needs hardware validation (see FW-125 doc, section 9/29).
-#define CURRENT_CAL_RESIDUAL_MAX_DEVIATION   300    // PROVISIONAL, signed residual domain
+// Validation range: |residual JDR| at zero current. FW-126.6 CONFIRMED the semantics this
+// number always claimed to have but never actually tested: the settled neutral-bridge reading
+// is JDR -16 / -5 / +8, i.e. a residual of a few tens of LSB on top of the IOFFx trim above.
+// +-300 keeps its provisional generosity and is NOT widened - it is the gate that rejects both
+// the saturated dark reading (JDR ~ +1850) and the bridge-enable transient (JDR ~ +2050).
+#define CURRENT_CAL_RESIDUAL_MAX_DEVIATION   300    // signed residual domain
 #define CURRENT_CAL_RESIDUAL_MIN             (-CURRENT_CAL_RESIDUAL_MAX_DEVIATION)
 #define CURRENT_CAL_RESIDUAL_MAX             (CURRENT_CAL_RESIDUAL_MAX_DEVIATION)
-// P2P noise limit: PROVISIONAL — same guessed magnitude FW-118 used; record-only in spirit,
-// needs hardware measurement. Domain is now residual LSB, same units as before.
-#define CURRENT_ZERO_MAX_P2P_ADC      200    // PROVISIONAL / NEEDS HARDWARE VALIDATION
-// Calibration sample count. FW-125 samples inside the injected-ADC ISR (PWM rate, 16 kHz per
-// START_NEUTRAL_DWELL_CYCLES' comment above), so 128 samples costs ~8 ms of startup time versus
-// the old 64 — negligible, and doubles the statistical confidence of the mean/P2P.
-#define CURRENT_CAL_SAMPLES           128
-// Calibration loop timeout: main() spins on a plain guard counter waiting for the ISR
-// accumulator to reach CURRENT_CAL_SAMPLES (busy-wait iteration count, not a time unit — same
-// style as the original CURRENT_CAL_TIMEOUT). Sized generously above the worst case so a dead
-// TIMER0/ADC chain cannot hang the start.
-#define CURRENT_CAL_ISR_TIMEOUT       2000000
 
-// --- FW-119: calibration safety policy (retry -> last-known-good -> fallback) ---
-// How many times the startup calibration may be re-run after OUT_OF_RANGE / TOO_NOISY /
-// TIMEOUT. Bounded on purpose: each attempt costs CURRENT_CAL_SAMPLES ADC ticks plus, in the
-// worst case, one CURRENT_CAL_TIMEOUT spin, and the whole sequence runs before the main loop
-// starts. 3 attempts stays well inside the existing startup budget and cannot hang the start
-// even if TIMER1/DMA never runs.
+// Peak-to-peak limit across the ACCEPTED sample set. Still provisional in magnitude, but no
+// longer load-bearing on its own: FW-126.6 proved a saturated amplifier is very quiet (dark
+// spread 10 LSB, dump P2P 17-19), so a small P2P can never be the proof of a good calibration.
+// It is the last check, after the window and the stability gate.
+#define CURRENT_CAL_MAX_P2P           200
+
+// --- FW-126.7 settling / eligibility gate --------------------------------------------------
+// All three are counted in DWELL ISR CYCLES: one injected conversion per PWM period, and
+// TIMER0 is centre-aligned with _T = 3750 at 120 MHz, so 120e6 / (2 * 3750) = 16 kHz, i.e.
+// 62.5 us per cycle. Every number below is derived from the FW-126.5 hardware trace
+// (log 2026-08-26 15:21, DIAG 0.0440), not copied from the "7 cycles" observation.
+//
+// Measured there, per dwell cycle index:
+//     cycle 0  : JDR +2058 / +2049 / +2067   (amplifier still at its rail)
+//     cycle 7  : JDR   -16 /   -5  /   +9    (settled)
+//     cycle 23 : JDR   -16 /   -5  /   +8    (identical to cycle 7 within 1 LSB)
+//
+// STABLE_BAND - the largest cycle-to-cycle change still called steady. Settled noise measured
+// ~10 LSB spread over 16 samples, so ~+-5 LSB peak; 16 gives 3x margin over that. The
+// rail->midpoint ramp covers ~2000 LSB in at most 7 cycles, i.e. >=280 LSB per cycle, so this
+// band rejects the ramp by more than an order of magnitude. Nothing in between was observed.
+#define CURRENT_CAL_STABLE_BAND       16
+// STABLE_CYCLES - consecutive in-window, steady cycles required before ANY sample is eligible.
+// 8 cycles = 0.5 ms, deliberately longer than the entire measured settling (7 cycles), so a
+// collection cannot begin until the transient is provably over.
+#define CURRENT_CAL_STABLE_CYCLES     8
+// COLLECT_SAMPLES - eligible samples averaged into the offset. With sigma ~2 LSB the standard
+// error of the mean at 32 samples is ~0.35 LSB, well under the 1 LSB the offset is stored in;
+// 128 (the old count) would buy nothing measurable and cost 6 ms more of dwell.
+#define CURRENT_CAL_COLLECT_SAMPLES   32
+// MAX_CYCLES - bounded budget for one attempt, from first dwell cycle to verdict. Nominal cost
+// is 7 (settling) + 8 (stability) + 32 (collection) = 47 cycles = 2.9 ms; 256 cycles = 16 ms
+// leaves 5x headroom for restarts and still cannot hang the start.
+#define CURRENT_CAL_MAX_CYCLES        256
+
+// How many neutral-dwell starts may be spent on calibration in one power cycle before the
+// controller stops trying. Each attempt is itself bounded by CURRENT_CAL_MAX_CYCLES, and a new
+// attempt only ever begins on a fresh legitimate start request - there is no retry loop inside
+// a single start.
 #define CURRENT_CAL_MAX_ATTEMPTS      3
 
-// Start policy when calibration produced nothing usable AND there is no last-known-good set:
-//   0 = LEGACY_FALLBACK - run the pre-FW-118 hardware-offset-only path, flagged degraded
-//   1 = STRICT          - inhibit FOC start until calibration succeeds
-//
-// DEFAULT IS 0, AND MUST STAY 0 UNTIL THE FW-118 LIMITS ARE MEASURED. CURRENT_ZERO_MAX_DEVIATION
-// and CURRENT_ZERO_MAX_P2P_ADC above are both marked PROVISIONAL; STRICT on top of an unverified
-// threshold means a guessed number can refuse to let the bike move. Switch to 1 only after the
-// bench measurement in FW-118's HW_PENDING list is done and those limits are real.
-#define CURRENT_CAL_START_POLICY      0
-
 #if (CURRENT_CAL_MAX_ATTEMPTS < 1) || (CURRENT_CAL_MAX_ATTEMPTS > 10)
-#error "CURRENT_CAL_MAX_ATTEMPTS must be between 1 and 10 - the whole sequence runs before the main loop."
+#error "CURRENT_CAL_MAX_ATTEMPTS must be between 1 and 10."
 #endif
-#if (CURRENT_CAL_START_POLICY != 0) && (CURRENT_CAL_START_POLICY != 1)
-#error "CURRENT_CAL_START_POLICY must be 0 (LEGACY_FALLBACK) or 1 (STRICT)."
+#if (CURRENT_CAL_STABLE_CYCLES + CURRENT_CAL_COLLECT_SAMPLES) >= CURRENT_CAL_MAX_CYCLES
+#error "CURRENT_CAL_MAX_CYCLES must exceed the nominal stability + collection cost, or no attempt can ever finish."
 #endif
+#if CURRENT_CAL_STABLE_BAND >= CURRENT_CAL_RESIDUAL_MAX_DEVIATION
+#error "CURRENT_CAL_STABLE_BAND must be far below the residual window, or stability adds nothing."
+#endif
+
 
 // --- Stored torque-threshold sanity range (parser.c). ---
 // Upper end of the pedal-pressure span a stored TQO_threshold may sit in. It no longer shapes

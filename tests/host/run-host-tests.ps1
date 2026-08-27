@@ -365,6 +365,16 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'fw127b_sample_ctx_host.c'
        Modules = @(Join-Path $root 'src\current_sample_ctx.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-127C sampling window from applied geometry (real sample_window.c)'
+       Harness = Join-Path $PSScriptRoot 'fw127c_sample_window_host.c'
+       Modules = @((Join-Path $root 'src\sample_window.c'),
+                   (Join-Path $root 'src\pwm_geometry.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-127C acquisition wiring guard (main.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'fw127c_wiring_host.c'
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
     @{ Name = 'FW-126.7 production current calibration (real current_cal.c)'
        Harness = Join-Path $PSScriptRoot 'fw1267_current_cal_host.c'
        Modules = @(Join-Path $root 'src\current_cal.c')
@@ -376,20 +386,6 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCURRENT_CAL_C_PATH=$currentCalCPathForward") },
-    @{ Name = 'FW-120.1 reconstruction / PWM-period timing (real dyn_adc_state.c)'
-       Harness = Join-Path $PSScriptRoot 'fw120_1_reconstruction_timing_host.c'
-       # The module is driven through a model of the whole acquisition pipeline (switchtime ->
-       # CCR -> counter-top sample -> ISR), including a negative control that replays the
-       # pre-card ordering and MUST fail on every ranking crossing - see the harness header.
-       Modules = @(Join-Path $root 'src\dyn_adc_state.c')
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
-    @{ Name = 'FW-120.1 ISR order wiring guard (main.c source-text check)'
-       Harness = Join-Path $PSScriptRoot 'fw120_1_isr_order_wiring_host.c'
-       # The module test proves which ORDER is correct; only this proves src/main.c uses it.
-       # main.c cannot be linked here - same reasoning as the FW-119 guard above.
-       Modules = @()
-       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
     @{ Name = 'Rolling no-assist diagnostic (real rolling_no_assist_diag.c)'
        Harness = Join-Path $PSScriptRoot 'rolling_no_assist_diag_host.c'
        Modules = @((Join-Path $root 'src\rolling_no_assist_diag.c'),

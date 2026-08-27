@@ -118,7 +118,6 @@ typedef struct
 	int16_t         int_Temperature;
 	int16_t 		KV_detect_flag;
 	uint8_t 		hall_angle_detect_flag;
-	uint8_t 		char_dyn_adc_state;
 	uint8_t 		assist_level;
 	uint8_t 		SOC;
 	int8_t         	system_state;

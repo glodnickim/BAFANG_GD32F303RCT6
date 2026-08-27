@@ -55,7 +55,7 @@ OF SUCH DAMAGE.
 #include "current_cal.h"         /* FW-126.7: calibration in the neutral dwell        */
 #include "pwm_geometry.h"        /* FW-127A: requested -> applied PWM geometry         */
 #include "current_sample_ctx.h"  /* FW-127B: one object per PWM/ADC transaction        */
-#include "dyn_adc_state.h"      /* FW-120.1: 2-of-3 pair selection for the sample in hand */
+#include "sample_window.h"       /* FW-127C: sampling window from APPLIED geometry     */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
@@ -162,7 +162,6 @@ void runPIcontrol(void);
 void autodetect(void);
 int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max);
 void get_standstill_position(void);
-void dyn_adc_trigger_update(void);
 void fmc_program_hall_angles(void);
 void fmc_erase_pages(void);
 void reg_ADC_processing(void);
@@ -589,7 +588,6 @@ uint16_t pwm_applied[3];  /* FW-127A: APPLIED geometry - what the timer actually
 //i.e. a safety path.
 volatile uint16_t ui16_erps=0;
 volatile uint16_t ui16_erps_counter=0;
-char char_dyn_adc_state_old=1;
 int16_t i16_ph1_current=0;
 int16_t i16_ph2_current=0;
 int16_t i16_ph3_current=0;
@@ -3770,17 +3768,14 @@ void ADC0_1_IRQHandler(void)
 	const current_sample_context_t *sample_ctx = current_sample_ctx_consume();
 	(void)sample_ctx;
 
-	/* FW-120.1: decide the trustworthy pair HERE, from the switchtime[] that is still in the
-	 * array at this point in the ISR - those are the CCRs that were live during the PWM period
-	 * these JDR were physically sampled in (this ISR's FOC_calculation() has not run yet, so
-	 * nothing has overwritten them). Before this card the verdict came from dyn_adc_state()
-	 * called in the PREVIOUS ISR, i.e. from the period before the sampled one, so every crossing
-	 * of a duty-ranking boundary reconstructed one Clarke input from the wrong pair. Programming
-	 * CH3 for the NEXT acquisition is a separate job and stays where it was, further down in
-	 * dyn_adc_trigger_update(). */
-	MS.char_dyn_adc_state = dyn_adc_state_select(pwm_applied, MS.char_dyn_adc_state);
-	dyn_adc_state_reconstruct(MS.char_dyn_adc_state,
-	                          &i16_ph1_current, &i16_ph2_current, i16_ph3_current);
+	/*
+	 * FW-127C: the sample in hand is interpreted with ITS OWN context - the one published when
+	 * the geometry it was taken under was written. FW-120.1's property is preserved and made
+	 * explicit: the reconstruction ownership no longer has to be re-derived from whatever
+	 * happens to be in a global right now, it travelled with the transaction.
+	 */
+	sample_window_reconstruct(sample_ctx->sector,
+	                          &i16_ph1_current, &i16_ph2_current, &i16_ph3_current);
 
     //get the recent timer value from the Hall timer
     ui16_tim2_recent = timer_counter_read(TIMER2);
@@ -3807,15 +3802,6 @@ void ADC0_1_IRQHandler(void)
 
     }
 
-	/*
-	 * FW-120.1: prepare the CH3 trigger for the NEXT acquisition (the reconstruction pair for
-	 * the sample already in hand was decided at the top of this ISR).
-	 *
-	 * FW-127B publishes the transaction context at exactly this point - the same place, from the
-	 * same decision, so behaviour is unchanged. FW-127C is what moves BOTH the decision and this
-	 * publish to after SVPWM, where the geometry they describe actually exists.
-	 */
-	dyn_adc_trigger_update();
 
     //q31_rotorposition_absolute=(int16_t)((180.0/75.0)*(float)(1<<31));
     if(ui_8_PWM_ON_Flag){
@@ -3862,13 +3848,31 @@ void ADC0_1_IRQHandler(void)
 			 * PWM sampling-window proof, which is the FW-127 work intentionally not guessed. */
 
 			/* FW-127A: the ONE place a requested geometry becomes an applied one. Everything
-			 * downstream - the compares below, and from FW-127C the sampling decision - uses
-			 * pwm_applied[], never the request. See inc/pwm_geometry.h. */
+			 * downstream uses pwm_applied[], never the request. See inc/pwm_geometry.h. */
 			(void)pwm_geometry_apply(switchtime, pwm_applied, (uint16_t)_T);
 
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,pwm_applied[0]);
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,pwm_applied[1]);
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,pwm_applied[2]);
+			/*
+			 * FW-127C: THE sampling decision, here and only here - after SVPWM, on the geometry
+			 * that is about to be applied. The old code decided this before FOC_calculation()
+			 * had even run, so it described the PREVIOUS period; that is the defect this card
+			 * exists to remove.
+			 *
+			 * The publish and the compare writes happen together, so the context and the
+			 * geometry it describes become real in the same place. Nothing can observe one
+			 * without the other.
+			 */
+			{
+				sample_window_t win;
+				sample_window_decide(pwm_applied, (uint16_t)_T, (uint16_t)TRIGGER_DEFAULT, &win);
+
+				timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,pwm_applied[0]);
+				timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,pwm_applied[1]);
+				timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,pwm_applied[2]);
+				timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,win.trigger_ccr);
+
+				(void)current_sample_ctx_publish(win.sector, win.state,
+				                                 win.direct_mask, win.trigger_ccr);
+			}
 			// STEP 2A: mark first active FOC sample after dwell release
 			if(bridge_lifecycle == BRIDGE_LIFECYCLE_FOC_RELEASE && !first_active_foc_sampled){
 				first_active_foc_sampled = 1;
@@ -3905,74 +3909,14 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 
 
 /*
- * FW-120.1: this used to do two unrelated jobs under one name - decide the reconstruction pair
- * AND program the CH3 compare that fires the injected trigger. The decision moved to the top of
- * the ISR (dyn_adc_state_select(), called on the sample it actually describes); what is left
- * here is only the trigger side, which legitimately looks FORWARD: CH3 programmed now applies to
- * the next acquisition. Its behaviour is byte-for-byte what it always was, including the fact
- * that a tie leaves CH3 untouched.
+ * FW-127C: dyn_adc_trigger_update() was DELETED here.
  *
- * Note for FW-121, not acted on here: DYNAMIC_ADC_THRESHOLD is _T (3750) while the largest CCR
- * the SVPWM can produce at _U_MAX=1920 is about 3633, so the first branch never runs and CH3
- * effectively sits at TRIGGER_DEFAULT forever. That is a sampling-window question, deliberately
- * out of this card's scope.
+ * It ran before FOC_calculation(), so it derived the trigger for transaction N+1 from the
+ * geometry of transaction N, and it had no notion of validity - it always reconstructed the
+ * highest-duty phase and, in the over-modulation regime, programmed a compare that could
+ * never match. Both jobs now belong to sample_window_decide(), called after the clamp on the
+ * geometry that is actually about to be applied. See inc/sample_window.h.
  */
-//assuming, a proper AD conversion takes 350 timer tics, to be confirmed. DT+TR+TS deadtime + noise subsiding + sample time
-void dyn_adc_trigger_update(void){
-	uint16_t highest;
-	uint8_t sector;
-	uint8_t direct_mask;
-
-	sector = dyn_adc_state_select(pwm_applied, DYN_ADC_STATE_UNDECIDED);
-	switch(sector){
-	case DYN_ADC_STATE_C_HIGH: highest = pwm_applied[2]; break;
-	case DYN_ADC_STATE_A_HIGH: highest = pwm_applied[0]; break;
-	case DYN_ADC_STATE_B_HIGH: highest = pwm_applied[1]; break;
-	default:
-		/* No strict maximum: CH3 is left where it is, exactly as before. The transaction is
-		 * still published, because a conversion WILL happen and something has to describe it -
-		 * publishing nothing would leave the next consume orphaned and hide the case. */
-		(void)current_sample_ctx_publish(DYN_ADC_STATE_UNDECIDED,
-			(uint8_t)CURRENT_SAMPLE_PRIMARY,
-			(uint8_t)(CURRENT_SAMPLE_DIRECT_A | CURRENT_SAMPLE_DIRECT_B | CURRENT_SAMPLE_DIRECT_C),
-			(uint16_t)(TIMER_CH3CV(TIMER0) & 0xFFFFU));
-		return;
-	}
-
-	/* Which phases this sector measures DIRECTLY - the same ownership dyn_adc_state_reconstruct()
-	 * applies, stated once here instead of being implicit in a switch elsewhere. The phase whose
-	 * duty is highest is the one whose shunt conducts least, so it is the reconstructed one. */
-	switch(sector){
-	case DYN_ADC_STATE_A_HIGH: direct_mask = CURRENT_SAMPLE_DIRECT_B | CURRENT_SAMPLE_DIRECT_C; break;
-	case DYN_ADC_STATE_B_HIGH: direct_mask = CURRENT_SAMPLE_DIRECT_A | CURRENT_SAMPLE_DIRECT_C; break;
-	default:                   direct_mask = CURRENT_SAMPLE_DIRECT_A | CURRENT_SAMPLE_DIRECT_B; break;
-	}
-
-	/* FW-127A: CH3 legality, enforced here until FW-127C replaces this function outright. The
-	 * pre-audit showed this branch is reachable ONLY when the geometry already exceeded ARR, and
-	 * that it then computed a compare that can never match - losing the next conversion with no
-	 * recovery path while the rotor turns. An illegal trigger is now simply never programmed. */
-	{
-		const int32_t candidate = (int32_t)highest - (int32_t)TRIGGER_OFFSET_ADC;
-		uint16_t trigger;
-		if(highest>DYNAMIC_ADC_THRESHOLD && pwm_geometry_compare_legal(candidate, (uint16_t)_T)){
-			trigger = (uint16_t)candidate;
-		} else {
-			trigger = (uint16_t)TRIGGER_DEFAULT;
-		}
-		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,trigger);
-
-		/* FW-127B: publish sector, direct ownership and the trigger that was ACTUALLY programmed
-		 * as one transaction. seq is assigned inside the module, so one publish is one
-		 * transaction by construction rather than by convention.
-		 *
-		 * The state is PRIMARY here because FW-127B changes no decision - the old code had no
-		 * validity model at all, and inventing one now would be exactly the "layer beside the
-		 * old model" this card forbids. FW-127D is where PRIMARY/ALTERNATE/INVALID gains meaning. */
-		(void)current_sample_ctx_publish(sector, (uint8_t)CURRENT_SAMPLE_PRIMARY,
-		                                 direct_mask, trigger);
-	}
-}
 
 /* --- the real CAN peripheral, wrapped to the shape can_tx_queue expects (FW-110) ---------- */
 /* Unconditional (unlike the diag_can_* pair further down, which only exist in the

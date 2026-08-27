@@ -19,7 +19,10 @@
 #define _T 3750//5625
 #define TRIGGER_OFFSET_ADC 10
 #define TRIGGER_DEFAULT _T-TRIGGER_OFFSET_ADC
-#define DYNAMIC_ADC_THRESHOLD 3750 //to be tested
+// FW-127C: DYNAMIC_ADC_THRESHOLD was REMOVED. It sat at _T, so the branch it guarded was
+// reachable only where the geometry had already exceeded ARR - and there it computed a CH3
+// that could never match. The sampling window is now derived from timing (see
+// inc/sample_window.h) instead of gated by a magic duty threshold.
 #define CAL_BAT_V 17
 #define CAL_BAT_I 37.0
 #define CAL_BAT_I_OFFSET 2035

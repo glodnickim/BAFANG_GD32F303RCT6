@@ -1,6 +1,6 @@
 # FW-127 — spójna akwizycja prądu: A + B + C + D
 
-**Status:** zaimplementowane, testy hosta zielone, **NIE na rowerze**
+**Status:** **ZAMKNIĘTE** — test sprzętowy #2 PASS (2026-08-27, DIAG 0.0446)
 **NORMAL:** 0.0446 · **DIAG:** 0.0446 · **Wejście:** FW-126.7 = `1668b00`
 **Poprzednik:** [FW-127 PRE-AUDIT](FW-127_PRE_AUDIT_SAMPLE_CONTEXT_COHERENCY_PL.md) (werdykt: PARTIAL)
 
@@ -213,6 +213,88 @@ podtestami.
 Sesja pasywnie pomoże w starym objawie (IqRef ~14 → brak momentu): raport koreluje
 PRIMARY/ALTERNATE/INVALID i `sample_age` z tym, co widzi pętla. **Nie modyfikujemy żądania
 momentu, żeby wymusić ten stan** — jeśli wystąpi naturalnie, będzie w logu.
+
+---
+
+## 12. TEST SPRZĘTOWY #2 — PASS (2026-08-27, DIAG 0.0446)
+
+Jedna sesja, jeden obraz, jeden log. Ładunek 0x602F schema 1 zdekodowany kanonicznym specem
+(`protocol/fw127_report_schema.json`, wyprowadzonym z offsetów samego serializera — nie z wartości
+w payloadzie). CRC 0x5B8F/0x5B8F OK, magic AQ v1. **Spec i payload nie są sprzeczne.**
+
+| pole | wartość |
+|---|---|
+| `flags` | 0x03 — snapshot spójny, **nielegalny CH3 nigdy nie zaprogramowany** |
+| `clamp_total` / A / B / C | **0** / 0 / 0 / 0 |
+| `peak_requested` / `min_requested` | 3208 / 542 |
+| `peak_applied` / `min_applied` | 3208 / 542 — **identyczne z żądaniem** |
+| `primary_count` | 985 743 |
+| `alternate_count` | **0** |
+| `invalid_count` | 7 (≈0,0007 %) |
+| `reuse_count` | **0** |
+| `max_sample_age` | **0**, wszystkie kubełki 0 |
+| `starved_count` | 7 |
+| `orphan_count` | 1207 |
+
+### Co te liczby znaczą
+
+**Clamp nigdy nie zadziałał, ale defekt się nie zmienił.** Szczyt żądania 3208 przy środku 1875
+to odchylenie **1333 z dostępnych 1875 — 71 % drogi do clampa**. Reżim przemodulowania został
+więc *zbliżony*, nie osiągnięty. H1 = **nie wystąpiło w tej jeździe**; istnienie defektu jest
+nadal dowiedzione arytmetycznie i testem A4b, a zapas wynosił około 1,4×. Twardsza jazda
+(dłuższy podjazd, niższe napięcie pakietu) ten zapas domyka.
+
+**INVALID = starved = 7, reuse = 0.** Każdy INVALID był „głodny", czyli wystąpił **przed**
+pierwszą dobrą próbką w swoim przebiegu — to dokładnie jeden na start mostka. Siedem INVALID =
+siedem startów. **Podmiana last-valid nie zadziałała ani razu** (`reuse_count` 0,
+`max_sample_age` 0, wszystkie kubełki 0). Zaprojektowana ścieżka zadziałała i natychmiast się
+rozwiązała, zgodnie z przewidywaniem: geometria trzymana w tym stanie JEST zwykłym wypełnieniem,
+więc następna konwersja jest PRIMARY.
+
+**ALTERNATE = 0 — i to jest uczciwe ograniczenie tej sesji.** Szczyt 3208 nie dobił do progu
+mierzalności 3343 (zapas 135 taktów = 1,1 µs), więc rekonstrukcja 2-z-3 **nie została ani razu
+wykonana na sprzęcie**. Pokrywają ją testy hosta, ale nie ta jazda. Z tego samego powodu sesja
+**nie waliduje** przyjętego `T_SETTLE` = 32 takty: nic nie zmusiło tej wartości, żeby miała
+znaczenie.
+
+### `orphan_count` = 1207 — rozliczone, i słabość własnej instrumentacji
+
+`current_sample_ctx_consume()` biegnie na szczycie **każdego** ISR, a publikacja tylko wtedy, gdy
+realnie działa FOC. Każdy ISR z żywym mostkiem i nieaktywnym FOC konsumuje bez publikacji:
+
+```
+miękkie odcięcie   40 ticków @4 kHz = 160 cykli ISR × 7 startów = 1120
+wybieg kalibracyjny (1×)                                       =   41
+wybiegi normalne    (6 × 4)                                    =   24
+pierwsza próbka FOC po każdym starcie (te same, co INVALID)     =    7
+                                                          razem = 1192
+zmierzone                                                       = 1207   (≈2 cykle/start luzu)
+```
+
+Rozliczenie domyka się do ~2 cykli na start ze 172 — to zmienność długości wybiegu, nie usterka.
+
+> **Znane ograniczenie:** ten licznik **łączy przypadek łagodny** (FOC nie działa: wybieg,
+> kalibracja, miękkie odcięcie) **z patologicznym** (pominięta publikacja przy działającym FOC).
+> Sam z siebie ich nie rozróżni. Tę drugą sytuację pokazują `invalid_count` i `starved_count`,
+> a tutaj wszystkie 7 jest w pełni rozliczone jako pierwsza próbka po starcie. Rozdzielenie
+> wymagałoby liczenia sierot tylko przy `PWM_ON && !dwell && !cutoff` — **nie zmieniam tego**,
+> akwizycja FW-127 jest zamrożona i to nie jest regresja.
+
+### Obserwacja jakościowa
+
+Właściciel zgłasza, że **załączanie wspomagania stało się wyraźnie powtarzalne** — teraz włącza
+się praktycznie w tym samym punkcie, w przeciwieństwie do wcześniejszego zachowania.
+
+Najbardziej prawdopodobny mechanizm, podany jako **hipoteza, nie pomiar**: stary kod **zawsze**
+rekonstruował fazę o najwyższym wypełnieniu, więc jedno z dwóch wejść Clarke było zawsze sumą
+obliczoną, dziedziczącą błędy dwóch pozostałych. Przy `alternate_count` = 0 w tej jeździe **obie
+wielkości wejściowe były pomiarami bezpośrednimi przez cały czas**. To różnica działająca na
+każdej próbce i najsilniejsza przy małym prądzie — czyli dokładnie tam, gdzie żyje próg
+załączenia. Związek przyczynowy z odczuciem nie jest zmierzony.
+
+### Werdykt
+
+**PASS.** Kolejny test sprzętowy **nie jest wymagany**.
 
 ---
 

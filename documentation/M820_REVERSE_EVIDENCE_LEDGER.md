@@ -134,3 +134,25 @@ Po usunięciu wszystkich ścieżek awaryjnych (LEGACY_FALLBACK, STRICT, LKG) „
 NORMAL **logicznie implikuje** CAL VALID: bez niej BRAMKA B odmawia zwolnienia FOC i mostek nie
 dochodzi do aktywnego sterowania. Płynna praca przy pierwszych w historii niezerowych offsetach
 (−18/−10/+5) jest dodatkowo zgodna z poprawnym mapowaniem faz A=ADC2 / B=ADC1 / C=ADC0.
+
+### 2026-08-27 — FW-127 akwizycja prądu: spójna, potwierdzona sprzętowo
+
+**CONFIRMED:** po przeniesieniu decyzji o oknie próbkowania za SVPWM i wprowadzeniu clampa
+geometrii, sesja jazdy (DIAG 0.0446) dała `clamp_total` = 0, `peak_requested` =
+`peak_applied` = 3208 przy ARR 3750, i **zero nielegalnych CH3**.
+
+**CONFIRMED:** przy zwykłej jeździe wszystkie trzy boczniki przewodzą przez całą aperturę —
+985 743 próbek PRIMARY, **0 ALTERNATE**. Rekonstrukcja 2-z-3 nie była w tej sesji potrzebna
+ani razu, więc **nie została na sprzęcie zweryfikowana** (pokrywają ją testy hosta).
+
+**CONFIRMED:** przemodulowanie **nie wystąpiło** w tej jeździe. Szczyt odchylenia 1333 z 1875
+dostępnych = 71 % drogi do clampa, zapas ~1,4×. Defekt pozostaje realny (dowód arytmetyczny +
+test A4b) — nie zaobserwowany, nie usunięty.
+
+**CONFIRMED:** podmiana last-valid nie zadziałała ani razu (`reuse_count` 0,
+`max_sample_age` 0). Wszystkie 7 INVALID to pierwsza próbka po każdym z 7 startów,
+natychmiast rozwiązana.
+
+**OBSERWACJA (jakościowa, nie pomiar):** załączanie wspomagania stało się wyraźnie powtarzalne.
+Prawdopodobny mechanizm: stary kod zawsze rekonstruował fazę o najwyższym wypełnieniu, więc jedno
+wejście Clarke było zawsze sumą obliczoną; teraz oba są pomiarami bezpośrednimi.

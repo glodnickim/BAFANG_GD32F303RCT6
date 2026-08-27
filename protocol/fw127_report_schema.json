@@ -1,0 +1,169 @@
+{
+  "_comment": [
+    "FW-127 acquisition report - the 0x602F schema 1 payload, defined ONCE.",
+    "",
+    "Derived from the serializer's own offsets in src/CAN_Display.c",
+    "(fw127_serialize_report). Positions are NEVER inferred from the values in a captured",
+    "payload - that is exactly how a decoder ends up confidently reporting the wrong field.",
+    "",
+    "ORPHANS ARE NOT ERRORS. current_sample_ctx_consume() runs at the top of every ADC ISR,",
+    "but a transaction is only published when FOC actually runs. Every ISR with the bridge",
+    "live and FOC not running - the FW-117 neutral dwell, the calibration hold, and the",
+    "soft-cutoff window - therefore consumes without a publish and counts as an orphan.",
+    "That is expected. This counter cannot by itself distinguish that benign case from a",
+    "genuinely missed publish while FOC was running; invalid_count and starved_count are what",
+    "show the latter."
+  ],
+  "magic": [
+    65,
+    81
+  ],
+  "magic_text": "AQ",
+  "schema": 1,
+  "length": 64,
+  "crc": {
+    "offset": 62,
+    "over": 62,
+    "algorithm": "crc16-ccitt-false"
+  },
+  "fields": [
+    {
+      "name": "magic0",
+      "offset": 0,
+      "type": "u8",
+      "note": "'A'"
+    },
+    {
+      "name": "magic1",
+      "offset": 1,
+      "type": "u8",
+      "note": "'Q'"
+    },
+    {
+      "name": "schema",
+      "offset": 2,
+      "type": "u8",
+      "note": "layout version"
+    },
+    {
+      "name": "flags",
+      "offset": 3,
+      "type": "u8",
+      "note": "bit0 = context snapshot coherent, bit1 = no illegal CH3 was ever programmed"
+    },
+    {
+      "name": "clamp_total",
+      "offset": 4,
+      "type": "i32",
+      "note": "PWM periods in which ANY phase had to be clamped"
+    },
+    {
+      "name": "clamp_phase_A",
+      "offset": 8,
+      "type": "i32",
+      "note": "per-phase clamp hits"
+    },
+    {
+      "name": "clamp_phase_B",
+      "offset": 12,
+      "type": "i32",
+      "note": "per-phase clamp hits"
+    },
+    {
+      "name": "clamp_phase_C",
+      "offset": 16,
+      "type": "i32",
+      "note": "per-phase clamp hits"
+    },
+    {
+      "name": "peak_requested",
+      "offset": 20,
+      "type": "i32",
+      "note": "highest compare SVPWM ever asked for (may exceed ARR)"
+    },
+    {
+      "name": "min_requested",
+      "offset": 24,
+      "type": "i32",
+      "note": "lowest compare SVPWM ever asked for (may be negative)"
+    },
+    {
+      "name": "peak_applied",
+      "offset": 28,
+      "type": "u16",
+      "note": "highest compare actually written to TIMER0"
+    },
+    {
+      "name": "min_applied",
+      "offset": 30,
+      "type": "u16",
+      "note": "lowest compare actually written to TIMER0"
+    },
+    {
+      "name": "primary_count",
+      "offset": 32,
+      "type": "i32",
+      "note": "samples with all three shunts conducting through the aperture"
+    },
+    {
+      "name": "alternate_count",
+      "offset": 36,
+      "type": "i32",
+      "note": "samples where one phase was rebuilt by 2-of-3"
+    },
+    {
+      "name": "invalid_count",
+      "offset": 40,
+      "type": "i32",
+      "note": "samples with no trustworthy sampling window"
+    },
+    {
+      "name": "reuse_count",
+      "offset": 44,
+      "type": "i32",
+      "note": "INVALID samples served from last-valid"
+    },
+    {
+      "name": "max_sample_age",
+      "offset": 48,
+      "type": "u16",
+      "note": "longest run of consecutive INVALID samples"
+    },
+    {
+      "name": "starved_count",
+      "offset": 50,
+      "type": "u16",
+      "note": "INVALID with no last-valid available at all"
+    },
+    {
+      "name": "age_bucket_1",
+      "offset": 52,
+      "type": "u16",
+      "note": "sample_age == 1"
+    },
+    {
+      "name": "age_bucket_2_3",
+      "offset": 54,
+      "type": "u16",
+      "note": "sample_age 2..3"
+    },
+    {
+      "name": "age_bucket_4_7",
+      "offset": 56,
+      "type": "u16",
+      "note": "sample_age 4..7"
+    },
+    {
+      "name": "age_bucket_8up",
+      "offset": 58,
+      "type": "u16",
+      "note": "sample_age >= 8"
+    },
+    {
+      "name": "orphan_count",
+      "offset": 60,
+      "type": "u16",
+      "note": "consumes that found no published context waiting"
+    }
+  ]
+}

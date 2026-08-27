@@ -3,7 +3,7 @@
 Plik statusowy wymagany przez `FW-126_TO_FW-127_AGENT_HANDOFF_PL.md` §20.
 Aktualizowany po każdym etapie. Format wg §20 karty.
 
-**Ostatnia aktualizacja:** 2026-08-27 — FW-127 A+B+C+D ZAIMPLEMENTOWANE (NORMAL+DIAG 0.0446), 5 testow hosta zielonych, baseline bez zmian. Czeka na JEDEN skonsolidowany test sprzetowy #2.
+**Ostatnia aktualizacja:** 2026-08-27 — FW-127 ZAMKNIETE: test sprzetowy #2 PASS. clamp_total 0, ALTERNATE 0, INVALID 7 (= 7 startow), reuse 0. Zalaczanie wspomagania wyraznie powtarzalne. Kolejny test NIE jest wymagany. Nastepne: FW-128 PRE-AUDIT, po raporcie reverse.
 
 ---
 
@@ -12,8 +12,8 @@ MASTER:
 FW-127 Phase Current Acquisition
 
 CURRENT CARD:
-FW-127 A+B+C+D gotowe, czekaja na test sprzetowy #2 (DIAG 0.0446, jedna sesja).
-FW-126.7 = ZAMKNIETE.
+FW-127 = ZAMKNIETE (HW PASS). FW-126 = ZAMKNIETE.
+Nastepne: FW-128 PRE-AUDIT - CZEKA na raport reverse stockowego current-control.
 FW-126.2 = CLOSED (zbocze CH3 zmierzone i zamrożone).
 FW-126.3 = CLOSED (przy MOE off CC3 nie napędza żadnej konwersji).
 FW-126.4 = CLOSED (CASE B — trigger uniewinniony, delta TRGO-SW = 0/0/1).

@@ -3,7 +3,7 @@
 Plik statusowy wymagany przez `FW-126_TO_FW-127_AGENT_HANDOFF_PL.md` §20.
 Aktualizowany po każdym etapie. Format wg §20 karty.
 
-**Ostatnia aktualizacja:** 2026-08-27 — FW-127 ZAMKNIETE: test sprzetowy #2 PASS. clamp_total 0, ALTERNATE 0, INVALID 7 (= 7 startow), reuse 0. Zalaczanie wspomagania wyraznie powtarzalne. Kolejny test NIE jest wymagany. Nastepne: FW-128 PRE-AUDIT, po raporcie reverse.
+**Ostatnia aktualizacja:** 2026-08-27 — FW-128 PRE-AUDIT ZAKONCZONY: werdykt YES. Potwierdzony BUG feedback-domain switching (main.c:3517-3527), brak ochrony nadpradowej osi q, brak anti-windup saturacji. 6 kart A-F zaproponowanych, zero implementacji.
 
 ---
 
@@ -12,9 +12,8 @@ MASTER:
 FW-127 Phase Current Acquisition
 
 CURRENT CARD:
-FW-127 = ZAMKNIETE (HW PASS + dowod statyczny sciezki STARVED). FW-126 = ZAMKNIETE.
-OPEN/LATENT/NON-BLOCKING: selektor rekonstrukcji sieroty (sector=0 vs RECONSTRUCT_NONE).
-Nastepne: FW-128 PRE-AUDIT - CZEKA na raport reverse stockowego current-control.
+FW-128 PRE-AUDIT = ZAKONCZONY (YES). Czeka na przeglad architektury przed implementacja.
+FW-126 i FW-127 = ZAMKNIETE. OPEN/LATENT: selektor rekonstrukcji sieroty.
 FW-126.3 = CLOSED (przy MOE off CC3 nie napędza żadnej konwersji).
 FW-126.4 = CLOSED (CASE B — trigger uniewinniony, delta TRGO-SW = 0/0/1).
 FW-126 overall = OPEN wyłącznie z powodu równoważności ścieżki kalibracji.

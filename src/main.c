@@ -52,7 +52,8 @@ OF SUCH DAMAGE.
 #include "fw112_ab.h"           /* FW-112 A/B */
 #include "fw117_trace.h"        /* FW-117 TEMP: bridge lifecycle trace */
 #include "rolling_no_assist_diag.h" /* rolling no-assist diagnostic */
-#include "current_cal.h"         /* FW-119: calibration retry / LKG / fallback policy */
+#include "current_cal.h"         /* FW-126.7: calibration in the neutral dwell        */
+#include "pwm_geometry.h"        /* FW-127A: requested -> applied PWM geometry         */
 #include "dyn_adc_state.h"      /* FW-120.1: 2-of-3 pair selection for the sample in hand */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
@@ -580,7 +581,8 @@ uint16_t pwm_cutoff_st[3]={0,0,0}; // snapshot switchtime na starcie okna
 int32_t q31_angle_per_tic=0;
 //Rotor angle scaled from degree to q31 for arm_math. -180Ã‚Â°-->-2^31, 0Ã‚Â°-->0, +180Ã‚Â°-->+2^31
 const int32_t deg_30 = 357913941;
-uint16_t switchtime[3];
+int32_t  switchtime[3];   /* FW-127A: REQUESTED SVPWM geometry (signed, may be illegal) */
+uint16_t pwm_applied[3];  /* FW-127A: APPLIED geometry - what the timer actually got     */
 //FW-042: written in TIMER2_IRQHandler (Hall capture), read in the main loop and by Walk
 //Assist. volatile so the compiler cannot cache them — this is the WA "motor stopped" timeout,
 //i.e. a safety path.
@@ -1030,6 +1032,7 @@ int main(void)
      * it is safe because entering the neutral bridge state does NOT require calibration - only
      * leaving it into active FOC does.
      */
+    pwm_geometry_init();   /* FW-127A: clamp evidence counters, one power cycle */
     current_cal_init(&current_cal);
 
 #if CAN_DIAGNOSTICS_ENABLE
@@ -1332,6 +1335,7 @@ int main(void)
             		PI_id.integral_part=0; PI_id.out=0;
             		MS.u_q=0; MS.u_d=0; MS.u_abs=0;
             		switchtime[0]=_T>>1; switchtime[1]=_T>>1; switchtime[2]=_T>>1;
+            		pwm_applied[0]=_T>>1; pwm_applied[1]=_T>>1; pwm_applied[2]=_T>>1;
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
@@ -1431,9 +1435,11 @@ int main(void)
             	bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
             	neutral_dwell_active = 0;
             	foc_release_pending = 0;
-            	pwm_cutoff_st[0]=(uint16_t)switchtime[0];
-            	pwm_cutoff_st[1]=(uint16_t)switchtime[1];
-            	pwm_cutoff_st[2]=(uint16_t)switchtime[2];
+            	/* FW-127A: freeze the APPLIED geometry - the ramp must start from what the
+            	 * bridge was actually doing, not from a request that may have been clamped. */
+            	pwm_cutoff_st[0]=pwm_applied[0];
+            	pwm_cutoff_st[1]=pwm_applied[1];
+            	pwm_cutoff_st[2]=pwm_applied[2];
             	pwm_cutoff_tick=0;
             	pwm_cutoff_active=1;
             }
@@ -3758,7 +3764,7 @@ void ADC0_1_IRQHandler(void)
 	 * of a duty-ranking boundary reconstructed one Clarke input from the wrong pair. Programming
 	 * CH3 for the NEXT acquisition is a separate job and stays where it was, further down in
 	 * dyn_adc_trigger_update(). */
-	MS.char_dyn_adc_state = dyn_adc_state_select(switchtime, MS.char_dyn_adc_state);
+	MS.char_dyn_adc_state = dyn_adc_state_select(pwm_applied, MS.char_dyn_adc_state);
 	dyn_adc_state_reconstruct(MS.char_dyn_adc_state,
 	                          &i16_ph1_current, &i16_ph2_current, i16_ph3_current);
 
@@ -3835,9 +3841,14 @@ void ADC0_1_IRQHandler(void)
 			 * Do not set `valid` here: a completed conversion still has no derived physical
 			 * PWM sampling-window proof, which is the FW-127 work intentionally not guessed. */
 
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,switchtime[0]);
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,switchtime[1]);
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,switchtime[2]);
+			/* FW-127A: the ONE place a requested geometry becomes an applied one. Everything
+			 * downstream - the compares below, and from FW-127C the sampling decision - uses
+			 * pwm_applied[], never the request. See inc/pwm_geometry.h. */
+			(void)pwm_geometry_apply(switchtime, pwm_applied, (uint16_t)_T);
+
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,pwm_applied[0]);
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,pwm_applied[1]);
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,pwm_applied[2]);
 			// STEP 2A: mark first active FOC sample after dwell release
 			if(bridge_lifecycle == BRIDGE_LIFECYCLE_FOC_RELEASE && !first_active_foc_sampled){
 				first_active_foc_sampled = 1;
@@ -3890,15 +3901,25 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 void dyn_adc_trigger_update(void){
 	uint16_t highest;
 
-	switch(dyn_adc_state_select(switchtime, DYN_ADC_STATE_UNDECIDED)){
-	case DYN_ADC_STATE_C_HIGH: highest = switchtime[2]; break;
-	case DYN_ADC_STATE_A_HIGH: highest = switchtime[0]; break;
-	case DYN_ADC_STATE_B_HIGH: highest = switchtime[1]; break;
+	switch(dyn_adc_state_select(pwm_applied, DYN_ADC_STATE_UNDECIDED)){
+	case DYN_ADC_STATE_C_HIGH: highest = pwm_applied[2]; break;
+	case DYN_ADC_STATE_A_HIGH: highest = pwm_applied[0]; break;
+	case DYN_ADC_STATE_B_HIGH: highest = pwm_applied[1]; break;
 	default: return; //no strict maximum: leave CH3 where it is, exactly as before
 	}
 
-	if(highest>DYNAMIC_ADC_THRESHOLD)timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(highest-TRIGGER_OFFSET_ADC));
-	else timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
+	/* FW-127A: CH3 legality, enforced here until FW-127C replaces this function outright. The
+	 * pre-audit showed this branch is reachable ONLY when the geometry already exceeded ARR, and
+	 * that it then computed a compare that can never match - losing the next conversion with no
+	 * recovery path while the rotor turns. An illegal trigger is now simply never programmed. */
+	{
+		const int32_t candidate = (int32_t)highest - (int32_t)TRIGGER_OFFSET_ADC;
+		if(highest>DYNAMIC_ADC_THRESHOLD && pwm_geometry_compare_legal(candidate, (uint16_t)_T)){
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(uint16_t)candidate);
+		} else {
+			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
+		}
+	}
 }
 
 /* --- the real CAN peripheral, wrapped to the shape can_tx_queue expects (FW-110) ---------- */

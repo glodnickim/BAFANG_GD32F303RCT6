@@ -357,6 +357,10 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-127A applied PWM geometry clamp (real pwm_geometry.c)'
+       Harness = Join-Path $PSScriptRoot 'fw127a_pwm_geometry_host.c'
+       Modules = @(Join-Path $root 'src\pwm_geometry.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
     @{ Name = 'FW-126.7 production current calibration (real current_cal.c)'
        Harness = Join-Path $PSScriptRoot 'fw1267_current_cal_host.c'
        Modules = @(Join-Path $root 'src\current_cal.c')

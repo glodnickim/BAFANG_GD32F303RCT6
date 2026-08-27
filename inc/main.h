@@ -69,7 +69,14 @@ void read_virtual_eeprom(void);
  */
 void autodetect(void);
 extern uint16_t slow_loop_counter;
-extern uint16_t switchtime[3];
+/* FW-127A: the REQUESTED SVPWM geometry, signed. svpwm()'s arithmetic can legitimately go
+ * negative and can exceed ARR (see inc/pwm_geometry.h for the proof); storing it unsigned made
+ * both cases invisible. The APPLIED geometry - the only thing the timer and every sampling
+ * decision may use - is pwm_applied[] below. */
+extern int32_t switchtime[3];
+/* FW-127A: the APPLIED geometry. This is what was actually written to TIMER0 CH0/CH1/CH2, and
+ * therefore the only geometry any sampling/reconstruction decision is allowed to describe. */
+extern uint16_t pwm_applied[3];
 extern uint32_t timeout;
 extern uint8_t transmit_mailbox;
 extern can_trasnmit_message_struct transmit_message;

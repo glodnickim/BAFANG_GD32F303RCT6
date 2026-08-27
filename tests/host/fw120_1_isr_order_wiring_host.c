@@ -1,4 +1,8 @@
 /*
+ * FW-127A: the guarded array was renamed switchtime[] -> pwm_applied[]. The property is
+ * unchanged and strictly stronger: pwm_applied[] is what TIMER0 actually received, whereas
+ * switchtime[] is now only the (possibly illegal) request SVPWM made.
+ *
  * FW-120.1 wiring guard: source-text checks on src/main.c, same methodology as
  * fw119_current_cal_wiring_host.c, step2a_neutral_dwell_wiring_host.c and
  * main_startup_wiring_host.c. main.c is the ARM entry point, wired straight to GD32 registers,
@@ -11,11 +15,11 @@
  * WHAT THIS PROVES (W1-W7):
  *   W1: the old inline reconstruction switch is gone - main.c no longer open-codes
  *       "i16_ph1_current = -i16_ph2_current-i16_ph3_current" anywhere.
- *   W2: the pair is selected exactly once, from switchtime[], and reconstruction is applied
+ *   W2: the pair is selected exactly once, from pwm_applied[], and reconstruction is applied
  *       exactly once, to the ISR's own phase-current variables.
  *   W3: THE CARD. Inside ADC0_1_IRQHandler the order is
  *          JDR read -> FW-118/119 offset subtraction -> select -> reconstruct -> FOC_calculation
- *       so the verdict is taken from the switchtime[] that shaped the sampled period, before
+ *       so the verdict is taken from the APPLIED geometry that shaped the sampled period, before
  *       this ISR's FOC overwrites that array.
  *   W4: no second selection happens after FOC_calculation - nothing can re-stamp
  *       MS.char_dyn_adc_state with the period that has not been sampled yet.
@@ -144,10 +148,10 @@ int main(void)
 		"W1b: the inline switch on MS.char_dyn_adc_state is gone");
 
 	/* --- W2: one selection, one reconstruction, on the ISR's own variables --- */
-	const char *select_call = strstr(clean, "dyn_adc_state_select(switchtime, MS.char_dyn_adc_state)");
+	const char *select_call = strstr(clean, "dyn_adc_state_select(pwm_applied, MS.char_dyn_adc_state)");
 	CHECK(select_call != NULL,
-		"W2a: the pair is selected from switchtime[] with the previous state as fallback");
-	CHECK(count_occurrences(clean, "dyn_adc_state_select(switchtime, MS.char_dyn_adc_state)") == 1,
+		"W2a: the pair is selected from pwm_applied[] with the previous state as fallback");
+	CHECK(count_occurrences(clean, "dyn_adc_state_select(pwm_applied, MS.char_dyn_adc_state)") == 1,
 		"W2b: that selection happens in exactly one place");
 
 	const char *recon_call = strstr(clean, "dyn_adc_state_reconstruct(MS.char_dyn_adc_state");
@@ -181,7 +185,7 @@ int main(void)
 			"W3h: reconstruction happens before Clarke sees the currents");
 		CHECK(select_call < foc_call,
 			"W3i: THE FIX - the pair is selected BEFORE this ISR's FOC_calculation overwrites "
-			"switchtime[], so the verdict describes the period the samples came from");
+			"pwm_applied[], so the verdict describes the period the samples came from");
 	}
 
 	/*

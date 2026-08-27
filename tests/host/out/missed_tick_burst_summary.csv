@@ -1,0 +1,5 @@
+category,module,normal_value,burst_value,unit,note
+A_elapsed_time,ride_episode.t_recover_ms,125,150,ms,later_not_wrong_duration_from_anchor_still_correct
+A_elapsed_time,ride_episode.t_latch_ms,25,150,ms,later_not_wrong_edge_bounded_by_call_density
+B_control_update,torque_input.assist_delta_filtered_native,247,86,native,diverges_under_burst
+C_lost_sample,pas_steps_in_400tick_gap,14,2,steps,aliased_not_recoverable

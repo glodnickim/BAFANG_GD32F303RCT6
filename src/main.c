@@ -54,6 +54,7 @@ OF SUCH DAMAGE.
 #include "rolling_no_assist_diag.h" /* rolling no-assist diagnostic */
 #include "current_cal.h"         /* FW-126.7: calibration in the neutral dwell        */
 #include "pwm_geometry.h"        /* FW-127A: requested -> applied PWM geometry         */
+#include "current_sample_ctx.h"  /* FW-127B: one object per PWM/ADC transaction        */
 #include "dyn_adc_state.h"      /* FW-120.1: 2-of-3 pair selection for the sample in hand */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
@@ -1340,6 +1341,10 @@ int main(void)
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
 					// STEP 2A: init neutral dwell BEFORE MOE ON and ui_8_PWM_ON_Flag
+					/* FW-127B: a start begins a fresh transaction chain. No context from a
+					 * previous motor-active session may survive into it - that is what makes
+					 * rolling start deterministic rather than dependent on what was left over. */
+					current_sample_ctx_reset();
 					bridge_lifecycle = BRIDGE_LIFECYCLE_NEUTRAL_COMMIT;
 					neutral_dwell_counter = START_NEUTRAL_DWELL_CYCLES;
 					/* FW-126.7: arm calibration BEFORE the dwell can produce an ISR cycle, so the
@@ -3756,6 +3761,15 @@ void ADC0_1_IRQHandler(void)
         i16_ph3_current -= current_cal.offset[CURRENT_CAL_PHASE_C];
     }
 
+	/*
+	 * FW-127B: take ownership of the context describing THIS conversion, before anything
+	 * interprets the sample. From here on, the sample in hand and the context are one pair.
+	 * (FW-127B does not yet change which sector is used - that is FW-127C. What changes is
+	 * that the sector now travels WITH the transaction instead of in a separate global.)
+	 */
+	const current_sample_context_t *sample_ctx = current_sample_ctx_consume();
+	(void)sample_ctx;
+
 	/* FW-120.1: decide the trustworthy pair HERE, from the switchtime[] that is still in the
 	 * array at this point in the ISR - those are the CCRs that were live during the PWM period
 	 * these JDR were physically sampled in (this ISR's FOC_calculation() has not run yet, so
@@ -3793,8 +3807,14 @@ void ADC0_1_IRQHandler(void)
 
     }
 
-	//FW-120.1: prepare the CH3 trigger for the NEXT acquisition (the reconstruction pair for
-	//the sample already in hand was decided at the top of this ISR)
+	/*
+	 * FW-120.1: prepare the CH3 trigger for the NEXT acquisition (the reconstruction pair for
+	 * the sample already in hand was decided at the top of this ISR).
+	 *
+	 * FW-127B publishes the transaction context at exactly this point - the same place, from the
+	 * same decision, so behaviour is unchanged. FW-127C is what moves BOTH the decision and this
+	 * publish to after SVPWM, where the geometry they describe actually exists.
+	 */
 	dyn_adc_trigger_update();
 
     //q31_rotorposition_absolute=(int16_t)((180.0/75.0)*(float)(1<<31));
@@ -3900,12 +3920,32 @@ int32_t map (int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t
 //assuming, a proper AD conversion takes 350 timer tics, to be confirmed. DT+TR+TS deadtime + noise subsiding + sample time
 void dyn_adc_trigger_update(void){
 	uint16_t highest;
+	uint8_t sector;
+	uint8_t direct_mask;
 
-	switch(dyn_adc_state_select(pwm_applied, DYN_ADC_STATE_UNDECIDED)){
+	sector = dyn_adc_state_select(pwm_applied, DYN_ADC_STATE_UNDECIDED);
+	switch(sector){
 	case DYN_ADC_STATE_C_HIGH: highest = pwm_applied[2]; break;
 	case DYN_ADC_STATE_A_HIGH: highest = pwm_applied[0]; break;
 	case DYN_ADC_STATE_B_HIGH: highest = pwm_applied[1]; break;
-	default: return; //no strict maximum: leave CH3 where it is, exactly as before
+	default:
+		/* No strict maximum: CH3 is left where it is, exactly as before. The transaction is
+		 * still published, because a conversion WILL happen and something has to describe it -
+		 * publishing nothing would leave the next consume orphaned and hide the case. */
+		(void)current_sample_ctx_publish(DYN_ADC_STATE_UNDECIDED,
+			(uint8_t)CURRENT_SAMPLE_PRIMARY,
+			(uint8_t)(CURRENT_SAMPLE_DIRECT_A | CURRENT_SAMPLE_DIRECT_B | CURRENT_SAMPLE_DIRECT_C),
+			(uint16_t)(TIMER_CH3CV(TIMER0) & 0xFFFFU));
+		return;
+	}
+
+	/* Which phases this sector measures DIRECTLY - the same ownership dyn_adc_state_reconstruct()
+	 * applies, stated once here instead of being implicit in a switch elsewhere. The phase whose
+	 * duty is highest is the one whose shunt conducts least, so it is the reconstructed one. */
+	switch(sector){
+	case DYN_ADC_STATE_A_HIGH: direct_mask = CURRENT_SAMPLE_DIRECT_B | CURRENT_SAMPLE_DIRECT_C; break;
+	case DYN_ADC_STATE_B_HIGH: direct_mask = CURRENT_SAMPLE_DIRECT_A | CURRENT_SAMPLE_DIRECT_C; break;
+	default:                   direct_mask = CURRENT_SAMPLE_DIRECT_A | CURRENT_SAMPLE_DIRECT_B; break;
 	}
 
 	/* FW-127A: CH3 legality, enforced here until FW-127C replaces this function outright. The
@@ -3914,11 +3954,23 @@ void dyn_adc_trigger_update(void){
 	 * recovery path while the rotor turns. An illegal trigger is now simply never programmed. */
 	{
 		const int32_t candidate = (int32_t)highest - (int32_t)TRIGGER_OFFSET_ADC;
+		uint16_t trigger;
 		if(highest>DYNAMIC_ADC_THRESHOLD && pwm_geometry_compare_legal(candidate, (uint16_t)_T)){
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,(uint16_t)candidate);
+			trigger = (uint16_t)candidate;
 		} else {
-			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,TRIGGER_DEFAULT);
+			trigger = (uint16_t)TRIGGER_DEFAULT;
 		}
+		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_3,trigger);
+
+		/* FW-127B: publish sector, direct ownership and the trigger that was ACTUALLY programmed
+		 * as one transaction. seq is assigned inside the module, so one publish is one
+		 * transaction by construction rather than by convention.
+		 *
+		 * The state is PRIMARY here because FW-127B changes no decision - the old code had no
+		 * validity model at all, and inventing one now would be exactly the "layer beside the
+		 * old model" this card forbids. FW-127D is where PRIMARY/ALTERNATE/INVALID gains meaning. */
+		(void)current_sample_ctx_publish(sector, (uint8_t)CURRENT_SAMPLE_PRIMARY,
+		                                 direct_mask, trigger);
 	}
 }
 

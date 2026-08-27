@@ -11,6 +11,7 @@ src/can_reply_effects.c
 src/can_tx_queue.c
 src/current_cal.c
 src/pwm_geometry.c
+src/current_sample_ctx.c
 src/dyn_adc_state.c
 src/CAN_Display.c
 src/FOC.c

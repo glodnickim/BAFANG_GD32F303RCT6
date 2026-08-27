@@ -3,7 +3,7 @@
 Plik statusowy wymagany przez `FW-126_TO_FW-127_AGENT_HANDOFF_PL.md` §20.
 Aktualizowany po każdym etapie. Format wg §20 karty.
 
-**Ostatnia aktualizacja:** 2026-08-27 — FW-126.7 **POTWIERDZONE NA SPRZĘCIE** (log 12:05, DIAG 0.0442): state VALID, physical ADC 2002/2018/2017 (środek skali, nie ~3890), przelot B0 odrzucony, 11/11 kryteriów PASS. Pozostaje jazda na NORMAL 0.0442.
+**Ostatnia aktualizacja:** 2026-08-27 — FW-127 A+B+C+D ZAIMPLEMENTOWANE (NORMAL+DIAG 0.0446), 5 testow hosta zielonych, baseline bez zmian. Czeka na JEDEN skonsolidowany test sprzetowy #2.
 
 ---
 
@@ -12,9 +12,8 @@ MASTER:
 FW-127 Phase Current Acquisition
 
 CURRENT CARD:
-FW-126.7 PRODUCTION CURRENT CAL REPLACEMENT - POTWIERDZONE NA SPRZECIE.
-Pozostaje jeden test jazdy na NORMAL 0.0442 (ten sam kod kalibracji).
-
+FW-127 A+B+C+D gotowe, czekaja na test sprzetowy #2 (DIAG 0.0446, jedna sesja).
+FW-126.7 = ZAMKNIETE.
 FW-126.2 = CLOSED (zbocze CH3 zmierzone i zamrożone).
 FW-126.3 = CLOSED (przy MOE off CC3 nie napędza żadnej konwersji).
 FW-126.4 = CLOSED (CASE B — trigger uniewinniony, delta TRGO-SW = 0/0/1).

@@ -129,5 +129,8 @@ liczenie stabilności ruszyło. To rampa szyna→środek odrzucona przez bramkę
 nie w symulacji. Czas kalibracji 41 × 62,5 µs = **2,56 ms**.
 
 `diag_stop=1` — DIAG odmówił zwolnienia FOC, więc po kalibracji nie było momentu.
-**OTWARTE:** jazda na NORMAL 0.0442. Offsety są pierwszy raz niezerowe, więc ISR faktycznie
-zacznie je odejmować — to zmiana zachowania, którą pokaże dopiero jazda.
+**ZAMKNIĘTE jazdą na NORMAL 0.0442 (2026-08-27): silnik rusza, jedzie płynnie, bez szarpania.**
+Po usunięciu wszystkich ścieżek awaryjnych (LEGACY_FALLBACK, STRICT, LKG) „silnik ruszył" na
+NORMAL **logicznie implikuje** CAL VALID: bez niej BRAMKA B odmawia zwolnienia FOC i mostek nie
+dochodzi do aktywnego sterowania. Płynna praca przy pierwszych w historii niezerowych offsetach
+(−18/−10/+5) jest dodatkowo zgodna z poprawnym mapowaniem faz A=ADC2 / B=ADC1 / C=ADC0.

@@ -375,6 +375,10 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-127D current feedback validity (real current_feedback.c)'
+       Harness = Join-Path $PSScriptRoot 'fw127d_current_feedback_host.c'
+       Modules = @(Join-Path $root 'src\current_feedback.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
     @{ Name = 'FW-126.7 production current calibration (real current_cal.c)'
        Harness = Join-Path $PSScriptRoot 'fw1267_current_cal_host.c'
        Modules = @(Join-Path $root 'src\current_cal.c')

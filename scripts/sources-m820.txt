@@ -13,6 +13,7 @@ src/current_cal.c
 src/pwm_geometry.c
 src/current_sample_ctx.c
 src/sample_window.c
+src/current_feedback.c
 src/CAN_Display.c
 src/FOC.c
 src/gd32f307c_eval.c

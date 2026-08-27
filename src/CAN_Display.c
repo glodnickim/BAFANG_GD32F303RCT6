@@ -23,6 +23,9 @@
 #include "parser.h"
 #include "FOC.h"
 #include "current_cal.h"
+#include "pwm_geometry.h"
+#include "current_feedback.h"
+#include "current_sample_ctx.h"
 #include "assist_extended_boost.h"
 #include "assist_modes.h"
 #include "tuning_config.h"
@@ -160,6 +163,62 @@ static uint16_t crc16_ccitt(const uint8_t *data, uint8_t len)
 }
 
 extern uint8_t fw1267_diag_abort_armed;   /* FW-126.7 DIAG post-validation stop */
+
+/*
+ * 0x602F - the FW-127 acquisition report, DIAG only, read-only. Schema 1.
+ *
+ * This is the whole evidence set for the single consolidated hardware session, as compact
+ * counters rather than a recorder: the decisions it has to unlock are all "how often" and
+ * "did it ever", and a counter answers those without costing RAM or perturbing the control path.
+ * Nothing here is read by the control loop, so a lost update can never change behaviour.
+ *
+ * 64-byte payload, CRC16-CCITT over bytes 0..61, little-endian throughout.
+ */
+static void fw127_serialize_report(uint8_t out[64])
+{
+	const pwm_geometry_stats_t *g = pwm_geometry_get_stats();
+	const current_feedback_state_t *f = current_feedback_get();
+	current_sample_context_t ctx;
+	const uint8_t ctx_ok = current_sample_ctx_snapshot(&ctx);
+	uint8_t i;
+
+	for (i = 0U; i < 64U; i++) out[i] = 0U;
+	out[0] = 'A'; out[1] = 'Q'; out[2] = 1U;
+	/* bit0: the snapshot was coherent; bit1: an illegal CH3 was NEVER programmed, which after
+	 * FW-127C is structural - sample_window_decide() returns INVALID instead of computing one. */
+	out[3] = (uint8_t)((ctx_ok ? 0x01U : 0U) | 0x02U);
+
+	/* --- PWM geometry: how far the request really went outside the legal range ------------ */
+	put_i32_le(&out[4],  (int32_t)g->clamp_total);
+	put_i32_le(&out[8],  (int32_t)g->clamp_phase[0]);
+	put_i32_le(&out[12], (int32_t)g->clamp_phase[1]);
+	put_i32_le(&out[16], (int32_t)g->clamp_phase[2]);
+	put_i32_le(&out[20], g->peak_requested);
+	put_i32_le(&out[24], g->min_requested);
+	put_u16_le(&out[28], g->peak_applied);
+	put_u16_le(&out[30], g->min_applied);
+
+	/* --- sampling states: the distribution the window derivation predicted ---------------- */
+	put_i32_le(&out[32], (int32_t)f->primary_count);
+	put_i32_le(&out[36], (int32_t)f->alternate_count);
+	put_i32_le(&out[40], (int32_t)f->invalid_count);
+	put_i32_le(&out[44], (int32_t)f->reuse_count);
+
+	/* --- last-valid behaviour ------------------------------------------------------------- */
+	put_u16_le(&out[48], (uint16_t)((f->max_sample_age > 65535u) ? 65535u : f->max_sample_age));
+	put_u16_le(&out[50], (uint16_t)((f->starved_count > 65535u) ? 65535u : f->starved_count));
+	for (i = 0U; i < CURRENT_FEEDBACK_AGE_BUCKETS; i++) {
+		const uint32_t v = f->age_bucket[i];
+		put_u16_le(&out[52U + 2U * i], (uint16_t)((v > 65535u) ? 65535u : v));
+	}
+
+	/* --- transaction ownership ------------------------------------------------------------- */
+	{
+		const uint32_t orph = current_sample_ctx_orphan_count();
+		put_u16_le(&out[60], (uint16_t)((orph > 65535u) ? 65535u : orph));
+	}
+	put_u16_le(&out[62], crc16_ccitt(out, 62U));
+}
 
 /*
  * 0x602D - the phase-current calibration report, DIAG only, read-only. Schema 2 (FW-126.7).
@@ -959,6 +1018,13 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 				uint8_t cal_dump[66];
 				current_cal_serialize_dump(cal_dump);
 				send_multiframe(Ext_ID_Rx.command, (char*)&cal_dump[0], sizeof(cal_dump));
+			}
+			break;
+		case 0x602F: //FW-127: read-only current-acquisition evidence (Canable diagnostics only)
+			if(Ext_ID_Rx.operation==1 && Ext_ID_Rx.source==5){
+				uint8_t rep[64];
+				fw127_serialize_report(rep);
+				send_multiframe(Ext_ID_Rx.command, (char*)&rep[0], sizeof(rep));
 			}
 			break;
 #endif

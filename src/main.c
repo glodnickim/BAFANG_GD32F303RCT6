@@ -56,6 +56,7 @@ OF SUCH DAMAGE.
 #include "pwm_geometry.h"        /* FW-127A: requested -> applied PWM geometry         */
 #include "current_sample_ctx.h"  /* FW-127B: one object per PWM/ADC transaction        */
 #include "sample_window.h"       /* FW-127C: sampling window from APPLIED geometry     */
+#include "current_feedback.h"    /* FW-127D: validity, last-valid and sample age       */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
@@ -1343,6 +1344,7 @@ int main(void)
 					 * previous motor-active session may survive into it - that is what makes
 					 * rolling start deterministic rather than dependent on what was left over. */
 					current_sample_ctx_reset();
+					current_feedback_reset();   /* FW-127D: a new run may not inherit a current */
 					bridge_lifecycle = BRIDGE_LIFECYCLE_NEUTRAL_COMMIT;
 					neutral_dwell_counter = START_NEUTRAL_DWELL_CYCLES;
 					/* FW-126.7: arm calibration BEFORE the dwell can produce an ISR cycle, so the
@@ -3839,13 +3841,38 @@ void ADC0_1_IRQHandler(void)
     			foc_release_pending = 1;
     		}
     	} else {
-			FOC_calculation(i16_ph1_current, i16_ph2_current,
-						q31_rotorposition_absolute,
-						(((int16_t) MP.reverse * i8_reverse_flag)
-								* MS.i_q_setpoint), &MS, &MP);
-			/* FW-126: the fresh sequence was stamped at ADC1 EOIC before JDR consumption.
-			 * Do not set `valid` here: a completed conversion still has no derived physical
-			 * PWM sampling-window proof, which is the FW-127 work intentionally not guessed. */
+			/*
+			 * FW-127D: decide what the control loop is ALLOWED to believe about this sample.
+			 *
+			 * Until this card the only predicate was "the conversion completed", which proves
+			 * the ADC finished and nothing about whether the shunts were conducting. A sample
+			 * taken outside the conduction window went straight into Clarke, Park and the PI.
+			 * Now an INVALID one is replaced by the last trustworthy reading before it can get
+			 * that far, and the substitution is counted rather than hidden.
+			 */
+			if(current_feedback_update(sample_ctx->state,
+			                           &i16_ph1_current, &i16_ph2_current, &i16_ph3_current)){
+				FOC_calculation(i16_ph1_current, i16_ph2_current,
+							q31_rotorposition_absolute,
+							(((int16_t) MP.reverse * i8_reverse_flag)
+									* MS.i_q_setpoint), &MS, &MP);
+			} else {
+				/*
+				 * Nothing trustworthy has been measured in this run yet AND this sample cannot
+				 * be trusted either - the only situation with no honest substitute. Hold the
+				 * neutral geometry rather than integrating a guess: zero would invite PI
+				 * wind-up and the previous switchtime would be a silent stale command.
+				 *
+				 * This cannot persist: at ordinary duty the window is PRIMARY by a wide margin
+				 * (1875 + 397 = 2272 against a 3740 trigger), and the geometry held here IS
+				 * ordinary duty. The very next conversion therefore resolves it.
+				 */
+				switchtime[0] = _T>>1; switchtime[1] = _T>>1; switchtime[2] = _T>>1;
+			}
+
+			/* Everything below runs on EVERY ISR, usable sample or not: the transaction chain
+			 * must not skip a publish, or the next conversion becomes an orphan and the whole
+			 * N/N+1 ownership goes ambiguous. */
 
 			/* FW-127A: the ONE place a requested geometry becomes an applied one. Everything
 			 * downstream uses pwm_applied[], never the request. See inc/pwm_geometry.h. */

@@ -347,3 +347,150 @@ skonsolidowany z FW-129, PAS/kadencją, timebase prądu baterii i pomiarem `U_LA
 
 Bez zmian: `U_LAUNCH`, PAS, prąd baterii, FOC/PI, kalibracja momentu, format EEPROM,
 geometria banku (255 B) i tuning blobu (32 B), wartości wire trybów.
+
+---
+
+## 14. BUILD REPRODUCIBILITY CLOSURE
+
+**FW-129B BUILD REPRODUCIBILITY: PASS.** Audyt wykonany po commicie `3caca6b`, wyłącznie
+sprawdzający — bez zmian w produkcji, bez nowych testów, bez testu sprzętowego.
+
+### 14.1 Dlaczego w ogóle był potrzebny
+
+W drzewie roboczym stoi **zastana zmiana w `build_firmware.ps1`**, nienależąca do FW-129 ani
+FW-129B i nieobjęta commitem `3caca6b`. Skoro artefakty przeznaczone do pierwszego przejazdu
+powstały w drzewie z tą zmianą, trzeba było rozstrzygnąć, czy mogła ich dotknąć.
+
+### 14.2 Co dokładnie jest zmienione w wrapperze
+
+Zmiana dotyczy **wyłącznie sposobu przekazywania numeru wersji**:
+
+| | HEAD `3caca6b` | drzewo robocze |
+|---|---|---|
+| domyślny `ArtifactName` | `"0.002"` | `""` |
+| `-Version` do silnika | zawsze przekazywany | przekazywany **tylko** gdy `ArtifactName` podano jawnie |
+| bez `ArtifactName` | wymuszona wersja `0.002` | auto-increment kanonicznego buildera |
+
+**Nie dotyka:** compiler flags, defines, source list, linker flags, optimization, firmware
+variant, generated config ani treści kodu firmware. Cały plik to `param()`, dwa `Write-Host`
+z ostrzeżeniem o deprecacji, kontrola istnienia silnika i jedno wywołanie z pięcioma
+argumentami — nie zawiera ani jednej flagi kompilatora, definicji, ścieżki źródeł czy
+wywołania toolchaina.
+
+### 14.3 Ścieżka budowania 0.0454 / 0.0455
+
+Artefakty **nie były budowane przez wrapper**. Powstały bezpośrednio z kanonicznego silnika:
+
+```
+scripts\build-firmware.ps1 -Target M820_BL820 -Profile debug -Variant normal
+scripts\build-firmware.ps1 -Target M820_BL820 -Profile debug -Variant diagnostic
+```
+
+Zależność jest jednokierunkowa (wrapper → silnik); `scripts\build-firmware.ps1` nigdzie nie
+odwołuje się do wrappera. Manifesty potwierdzają ścieżkę kanoniczną:
+
+```
+version_source:      auto_increment
+build_counter:       454 (NORMAL) / 455 (DIAG)
+source_count:        76
+toolchain_version:   13.2.1
+```
+
+### 14.4 Dowód empiryczny — bit-for-bit
+
+Nie wywnioskowany, wykonany: (1) `build_firmware.ps1` przywrócony do stanu HEAD,
+(2) osobna przebudowa obu wariantów, (3) wersje podane **jawnie** jako `0.0454` i `0.0455`
+(numer wersji to jedyna wielkość stampowana do binarki, więc auto-increment dałby inny obraz),
+(4) wyjście skierowane do osobnego katalogu, żeby nie nadpisać dowodu, (5) porównanie SHA256
+oraz binarne `cmp`.
+
+| artefakt | SHA256 oryginału | SHA256 przebudowy | `cmp` | FLASH | RAM |
+|---|---|---|---|---|---|
+| **NORMAL 0.0454** | `8F1B2543…09E6DC` | `8F1B2543…09E6DC` | **BIT-FOR-BIT PASS** | 103 948 B | 12 576 B |
+| **DIAG 0.0455** | `0ED88061…5CC2E3` | `0ED88061…5CC2E3` | **BIT-FOR-BIT PASS** | 150 824 B | 46 352 B |
+
+Pełne sumy:
+`0.0454_M820_BL820.bin` = `8f1b2543c026f991ec3c31b94b428a05c18163cd18ca9ca43d9ae1338409e6dc`
+`0.0455_M820_BL820_DIAG.bin` = `0ed88061ab0fc0d21f3811012da476d159487f6561dafff7c3f16ea7fa5cc2e3`
+
+### 14.5 Rozbieżność `git_commit` w manifeście — wyjaśnienie chronologii
+
+Manifesty 0.0454 / 0.0455 zapisują `git_commit = 13b5c6a`, a zwalidowanym commitem
+FW-129/FW-129B jest `3caca6b`. **To nie jest rozbieżność zawartości firmware.**
+
+Prawdziwa chronologia, zapisana wprost, żeby nikt później nie odczytał tego jako
+„commit istniał już przy pierwszym buildzie":
+
+1. Praca FW-129 + FW-129B leżała w drzewie roboczym; HEAD wskazywał jeszcze `13b5c6a`.
+2. Buildy 0.0454 i 0.0455 powstały **w tym stanie** — stąd `13b5c6a` w manifeście i
+   `worktree_dirty: true`.
+3. Dopiero **potem** ta sama treść źródeł została zacommitowana jako `3caca6b`.
+4. Przebudowa wykonana już na HEAD `3caca6b` daje **te same binarki bit w bit**, co dowodzi,
+   że treść źródeł w kroku 2 i w kroku 3 była identyczna.
+
+Do firmware stampowany jest wyłącznie `EBICS_BUILD_VERSION` — **hash gita nie trafia do
+binarki**, dlatego zmiana HEAD między buildem a commitem nie mogła zmienić obrazu.
+
+```
+validated source commit:      3caca6b
+original manifest git id:     13b5c6a
+source-content equivalence:   CONFIRMED BY BIT-IDENTICAL REBUILD
+```
+
+### 14.6 Regresja końcowa na zacommitowanym drzewie
+
+```
+FW-129 unit domain:        ALL CHECKS PASSED
+FW-129B state hygiene:     ALL CHECKS PASSED
+```
+
+Jedyny czerwony pakiet: `rolling_no_assist_diag_host`, 514 błędów — **identyczny
+known-baseline failure jak na bazie `13b5c6a`**, nie jest regresją FW-129/FW-129B.
+
+`diff` wyników względem bazy zawiera wyłącznie dwa nowe zielone wpisy:
+
+```
+> FW-129 unit domain: ALL CHECKS PASSED
+> FW-129B state hygiene: ALL CHECKS PASSED
+```
+
+Zero zmian w istniejących pakietach.
+
+### 14.7 Stan drzewa roboczego po audycie
+
+Audyt nie pozostawił po sobie żadnych zmian. Drzewo wróciło dokładnie do stanu sprzed audytu:
+
+```
+M build_firmware.ps1     (zastane, nie należy do FW-129/FW-129B)
+D src.zip                (zastane, nie należy do FW-129/FW-129B)
+HEAD: 3caca6b
+```
+
+### 14.8 Werdykt
+
+```
+FW-129B BUILD REPRODUCIBILITY:            PASS
+NORMAL 0.0454:                            VALIDATED / REPRODUCIBLE / BIT-IDENTICAL
+DIAG   0.0455:                            VALIDATED / REPRODUCIBLE / BIT-IDENTICAL
+zmodyfikowany build_firmware.ps1:         NO IMPACT ON VALIDATED BINARIES
+rolling_no_assist_diag_host 514:          NOT A FW-129/FW-129B REGRESSION
+```
+
+**Artefakty 0.0454 i 0.0455 nie wymagają ponownego budowania przed testem sprzętowym.**
+
+### 14.9 Artefakt rekomendowany do pierwszego testu sprzętowego
+
+**DIAG 0.0455**, SHA256 `0ED88061…5CC2E3`.
+
+Powód: wariant diagnostyczny daje obserwowalność potrzebną, by w jednym skonsolidowanym
+przejeździe sprawdzić naraz FW-129/FW-129B, PAS/kadencję, timebase prądu baterii, pomiar
+`U_LAUNCH` oraz Iq request / reference / actual.
+
+**NORMAL 0.0454** pozostaje docelowym wariantem użytkowym po zakończeniu walidacji
+diagnostycznej.
+
+---
+
+## STATUS KARTY
+
+**FW-129B: CLOSED / PASS — HW VALIDATION PENDING AS CONSOLIDATED RIDE.**

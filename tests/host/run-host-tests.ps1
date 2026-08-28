@@ -45,6 +45,7 @@ $focCPathForward = (Join-Path $root 'src\FOC.c') -replace '\\', '/'
 $sampleWindowCPathForward = (Join-Path $root 'src\sample_window.c') -replace '\\', '/'
 $armMathHPathForward = (Join-Path $root 'Firmware\CMSIS\arm_math.h') -replace '\\', '/'
 $configHPathForward = (Join-Path $root 'inc\config.h') -replace '\\', '/'
+$batteryCurrentCPathForward = (Join-Path $root 'src\battery_current.c') -replace '\\', '/'
 
 # Every harness and the module(s) it links. Add new ones here.
 $suites = @(
@@ -399,11 +400,16 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'pre128_pas_timebase_host.c'
        Modules = @((Join-Path $root 'src\pas_sampler.c'), (Join-Path $root 'src\pas_cadence.c'), (Join-Path $root 'src\pas_quadrature.c'))
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-128B1 battery current timebase (real battery_current.c + main.c source guard)'
+       Harness = Join-Path $PSScriptRoot 'fw128b1_battery_timebase_host.c'
+       Modules = @(Join-Path $root 'src\battery_current.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
     @{ Name = 'FW-128B0 battery current scale (model + main.c/config.h source guard)'
        Harness = Join-Path $PSScriptRoot 'fw128b0_battery_scale_host.c'
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCONFIG_H_PATH=$configHPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCONFIG_H_PATH=$configHPathForward", "-DBATTERY_CURRENT_C_PATH=$batteryCurrentCPathForward") },
     @{ Name = 'FW-128C0 physical current scale (numeric model + arm_math/FOC/main source guard)'
        Harness = Join-Path $PSScriptRoot 'fw128c0_current_scale_host.c'
        Modules = @()

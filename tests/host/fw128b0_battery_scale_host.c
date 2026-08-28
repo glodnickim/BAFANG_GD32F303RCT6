@@ -28,6 +28,9 @@
 #ifndef CONFIG_H_PATH
 #error "CONFIG_H_PATH must be defined (see tests/host/run-host-tests.ps1)"
 #endif
+#ifndef BATTERY_CURRENT_C_PATH
+#error "BATTERY_CURRENT_C_PATH must be defined (see tests/host/run-host-tests.ps1)"
+#endif
 #define STRINGIZE_(x) #x
 #define STRINGIZE(x) STRINGIZE_(x)
 
@@ -73,14 +76,17 @@ int main(void)
 	{
 		char *m = read_whole_file(STRINGIZE(MAIN_C_PATH));
 		char *c = read_whole_file(STRINGIZE(CONFIG_H_PATH));
-		CHECK(m && c, "A0. main.c and config.h are readable");
+		char *b = read_whole_file(STRINGIZE(BATTERY_CURRENT_C_PATH));
+		CHECK(m && c && b, "A0. main.c, config.h and battery_current.c are readable");
 
-		CHECK(strstr(m, "battery_current_cumulated-=battery_current_cumulated>>6;") != NULL,
+		/* FW-128B1 moved the filter out of main.c into its own owner. The EQUATION is unchanged,
+		 * so these three assertions are unchanged too - only their address is. */
+		CHECK(strstr(b, "acc -= acc >> 6;") != NULL,
 		      "A1. the accumulator decays by >>6 - a 64-sample exponential");
-		CHECK(strstr(m, "battery_current_cumulated+= (adc_value[0]-bat_current_offset);") != NULL,
-		      "A2. ...and is fed adc_value[0] MINUS an offset - PA0, and an offset, not a gain");
-		CHECK(strstr(m, "MS.Battery_Current=(int32_t)((float)(battery_current_cumulated>>6)*CAL_BAT_I);") != NULL,
-		      "A3. ...and the only multiply in the whole path is CAL_BAT_I, applied once");
+		CHECK(strstr(b, "acc += (int32_t)raw - offset;") != NULL,
+		      "A2. ...and is fed the raw sample MINUS an offset - an offset, not a gain");
+		CHECK(strstr(m, "MS.Battery_Current=(int32_t)((float)battery_current_filtered_adc()*CAL_BAT_I);") != NULL,
+		      "A3. ...and the only multiply in the whole path is CAL_BAT_I, applied once, in main");
 
 		/* PA0 is ADC0 regular rank 0, and the regular group is triggered by TIMER1 CH1 - i.e.
 		 * by hardware at the 4 kHz timer rate, into a circular DMA. That matters for the timing
@@ -99,7 +105,7 @@ int main(void)
 		CHECK(strstr(c, "#define BATTERYCURRENT_MAX 15000") != NULL,
 		      "A9. and the shipped battery limit is 15000 mA");
 
-		free(m); free(c);
+		free(m); free(c); free(b);
 	}
 
 	/* ================= B: units and the filter's own gain ================================== */

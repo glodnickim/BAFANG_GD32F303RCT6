@@ -60,6 +60,7 @@ OF SUCH DAMAGE.
 #include "iq_chain.h"            /* FW-128A: named q-current demand stages             */
 #include "pas_sampler.h"         /* PRE-FW128: PAS sampled in the 4 kHz ISR, not main  */
 #include "pas_cadence.h"         /* PRE-FW128: cadence period, epoch and validity      */
+#include "battery_current.h"     /* FW-128B1: battery-current filter on the sample clock */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
@@ -609,7 +610,8 @@ uint8_t i = 0;
 uint16_t p = 0;
 uint32_t timeout = 0xFFFF;
 uint8_t transmit_mailbox = 0;
-int32_t battery_current_cumulated=0;
+//FW-128B1: battery_current_cumulated moved into src/battery_current.c. The filter state now has
+//exactly ONE owner - the 4 kHz sampling event - so there is no second copy for main to advance.
 //--- SOC / Range runtime globals ---
 int32_t bat_current_offset=CAL_BAT_I_OFFSET; //zero-current ADC offset, calibrated at startup
 float soc_mAs_acc=0;                 //charge accumulator [mA*s] within current 1s window
@@ -871,6 +873,14 @@ int main(void)
      * the anchor the first idle reading must be measured from.
      */
     pas_sampler_init(0U);
+    /*
+     * FW-128B1: UNARMED until the startup zero is known. Same reason as the sampler above - the
+     * next line starts the interrupt that will begin offering samples - but the opposite policy:
+     * PAS has nothing to calibrate and can decode immediately, whereas a battery-current sample
+     * taken against an unknown offset would be in the wrong domain. Refusing them outright means
+     * that state never exists, rather than existing and having to be corrected.
+     */
+    battery_current_init();
     timer1_config(); //trigger regular ADC for testing
     timer2_config(); //for hall sensor handling
 
@@ -1034,6 +1044,13 @@ int main(void)
         }
         acc>>=6;
         if(acc>CAL_BAT_I_OFFSET-200 && acc<CAL_BAT_I_OFFSET+200) bat_current_offset=acc;
+        /*
+         * FW-128B1: ARM the sampler with whatever zero this ride is going to use - the measured
+         * one if it passed the plausibility window above, the compile-time default if it did
+         * not. Either way it is final from here, and every consumer of MS.Battery_Current runs
+         * after this point (soc_init() included).
+         */
+        battery_current_set_offset(bat_current_offset);
     }
 
     /*
@@ -2060,6 +2077,27 @@ void TIMER1_IRQHandler(void) // regular ADC processing and common slow timing ta
             const uint8_t pas_ab = (uint8_t)(((GPIO_ISTAT(GPIOC)&GPIO_PIN_12)?1:0) |
                                              ((GPIO_ISTAT(GPIOD)&GPIO_PIN_2)?2:0));
             pas_sampler_isr_tick(pas_ab, control_time_ticks);
+            /*
+             * FW-128B1: THE battery-current sampling point, one per TIMER1 period.
+             *
+             * The correspondence is structural, not hopeful: TIMER1 CH1 triggers exactly one
+             * regular ADC scan per TIMER1 period, and this update interrupt runs exactly once
+             * per TIMER1 period, so it is 1:1 by construction. The value read here belongs to
+             * the scan triggered 200 us ago (CH1 compare 2000 of 9999), whose rank 0 - PA0, the
+             * FIRST transfer - was written by DMA about 12.6 us later.
+             *
+             * The DMA counter is the hardware's own answer to "did that scan finish": in
+             * circular mode it reloads to 9 at the end of a round, so 9 means the previous scan
+             * completed and nothing is in flight. It is passed as evidence, not as permission -
+             * see the module for why rank 0 is valid either way.
+             *
+             * Read through the CHCNT register macro rather than dma_transfer_number_get(): the
+             * library accessor is a function call that first calls a peripheral/channel
+             * validation helper, and neither belongs in a 4 kHz interrupt to fetch one
+             * constant-address register. This is one load.
+             */
+            battery_current_sample((uint16_t)adc_value[0],
+                                   (uint8_t)(((DMA_CHCNT(DMA0, DMA_CH0) & DMA_CHANNEL_CNT_MASK) == 9U) ? 1U : 0U));
 #if CAN_DIAGNOSTICS_ENABLE
             /*
              * FW-106: the raw PAS line recorder. Still sampled in the ISR, now from the SAME
@@ -2342,9 +2380,16 @@ void reg_ADC_processing(void)
 	}
 	control_prev_processed_tick = control_now;
 
-	battery_current_cumulated-=battery_current_cumulated>>6;
-	battery_current_cumulated+= (adc_value[0]-bat_current_offset);
-	MS.Battery_Current=(int32_t)((float)(battery_current_cumulated>>6)*CAL_BAT_I); //Battery current in mA
+	/*
+	 * FW-128B1: main CONSUMES the battery current, it no longer advances its filter. The IIR is
+	 * stepped once per real ADC sample in TIMER1_IRQHandler, so its time constant is 64 sample
+	 * periods of 250 us whatever this loop is doing - it used to be 64 executions OF THIS LOOP.
+	 *
+	 * The float multiply stays HERE, deliberately outside the interrupt: CAL_BAT_I is the only
+	 * floating-point step in the whole path and there is no reason to pay for it at 4 kHz in an
+	 * ISR when this is the only place the millivolt-domain value is needed.
+	 */
+	MS.Battery_Current=(int32_t)((float)battery_current_filtered_adc()*CAL_BAT_I); //Battery current in mA
 	voltage_raw_cumulated-=voltage_raw_cumulated>>6;
 	voltage_raw_cumulated+=adc_value[3];
 	voltage_raw_filtered=voltage_raw_cumulated>>6;

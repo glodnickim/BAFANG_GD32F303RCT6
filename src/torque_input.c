@@ -6,6 +6,14 @@
 
 static uint16_t span_native = TORQUE_DEFAULT_SPAN_NATIVE;
 static uint8_t calibration_source = TORQUE_CAL_SOURCE_DEFAULT;
+/*
+ * FW-129 D8: set once at boot when a stored calibration was intact but written by the
+ * pre-FW-129 capture, so the tool can tell the rider to recalibrate. Deliberately NOT cleared
+ * by torque_input_init() - the restore happens after init and the flag has to survive to the
+ * first telemetry read. It is cleared by a fresh calibration or a restore-to-default, both of
+ * which resolve the condition it reports.
+ */
+static bool cal_legacy_record_rejected;
 static torque_snapshot_t snapshot;
 static int32_t assist_filter_q;
 /* FW-085: RUN estimator — moving average over a crank-angle window. */
@@ -125,15 +133,39 @@ static uint16_t default_centikg_to_native_delta(uint16_t centikg)
 		TORQUE_SPAN_MAX_NATIVE : (uint16_t)delta;
 }
 
+/*
+ * FW-129 D8: a user load calibration corrects the sensor's GAIN. It does not, and must not,
+ * replace the sensor's SHAPE.
+ *
+ * What it used to do: store span = delta_ref * 6000 / reference_ckg and then read every later
+ * sample off a straight line through that one point. That threw away the measured factory
+ * characteristic (146 native = 6.00 kg, 1580 native = 84.00 kg, piecewise between), which is
+ * NOT a straight line - it has a distinctly steeper first segment. On a sensor that matches the
+ * factory curve EXACTLY, calibrating with a 20 kg weight then moved the reading by +21 % at
+ * light pedal load and -5.8 % at 60 kg. A calibration that should have changed nothing changed
+ * the shape of assist in every mode.
+ *
+ * What it does now: refer the measured delta back to what the DEFAULT sensor would have
+ * produced for the same force (divide by the gain), then read it on the factory characteristic.
+ * The gain is carried by span_native, whose meaning is unchanged - "the native delta this
+ * sensor produces at TORQUE_PUBLIC_FULL_SCALE_CENTIKG" - so the persisted record keeps its
+ * layout and its number. Only the curve BETWEEN zero and that point stops being straightened.
+ *
+ * The calibration capture (torque_input_cal_tick) had to change with it: deriving span from
+ * 6000/reference alone only reproduces the calibration point when the curve is proportional,
+ * which this one is not. See the span computation there.
+ */
 static uint16_t native_delta_to_centikg(uint16_t delta_native)
 {
 	if (calibration_source == TORQUE_CAL_SOURCE_DEFAULT) {
 		return default_native_delta_to_centikg(delta_native);
 	}
-	uint32_t load = ((uint32_t)delta_native *
-		TORQUE_PUBLIC_FULL_SCALE_CENTIKG + span_native / 2U) / span_native;
-	return (load > TORQUE_INPUT_MAX_CENTIKG) ?
-		TORQUE_INPUT_MAX_CENTIKG : (uint16_t)load;
+	uint32_t corrected = ((uint32_t)delta_native * TORQUE_DEFAULT_SPAN_NATIVE +
+		span_native / 2U) / span_native;
+	if (corrected > TORQUE_SPAN_MAX_NATIVE) {
+		corrected = TORQUE_SPAN_MAX_NATIVE;
+	}
+	return default_native_delta_to_centikg((uint16_t)corrected);
 }
 
 static uint16_t centikg_to_native_delta(uint16_t centikg)
@@ -144,9 +176,9 @@ static uint16_t centikg_to_native_delta(uint16_t centikg)
 	if (calibration_source == TORQUE_CAL_SOURCE_DEFAULT) {
 		return default_centikg_to_native_delta(centikg);
 	}
-	uint32_t delta = ((uint32_t)centikg * span_native +
-		TORQUE_PUBLIC_FULL_SCALE_CENTIKG / 2U) /
-		TORQUE_PUBLIC_FULL_SCALE_CENTIKG;
+	uint32_t base = default_centikg_to_native_delta(centikg);
+	uint32_t delta = (base * span_native + TORQUE_DEFAULT_SPAN_NATIVE / 2U) /
+		TORQUE_DEFAULT_SPAN_NATIVE;
 	return (delta > TORQUE_SPAN_MAX_NATIVE) ?
 		TORQUE_SPAN_MAX_NATIVE : (uint16_t)delta;
 }
@@ -672,8 +704,20 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 	snapshot.delta_native = (uint16_t)delta;
 	assist_delta = (delta > (int32_t)TORQUE_ASSIST_DEADBAND_NATIVE) ?
 		(uint16_t)(delta - TORQUE_ASSIST_DEADBAND_NATIVE) : 0U;
-	if (assist_delta > span_native) {
-		assist_delta = span_native;
+	/*
+	 * FW-129: the assist signal saturates at the top of the PUBLIC kilogram scale, not at
+	 * span_native. span_native is the delta at 60.00 kg, so the old clamp was a 60 kg ceiling
+	 * on the assist path - which made ASSIST TORQUE FULL SCALE unreachable above 60 kg, and
+	 * silently discarded the top of a genuinely hard push. The ceiling is now the physical
+	 * TORQUE_INPUT_MAX_CENTIKG, expressed through the active calibration so it stays the same
+	 * force on every sensor. Nothing below 60 kg changes.
+	 */
+	{
+		uint16_t assist_ceiling_native =
+			centikg_to_native_delta(TORQUE_INPUT_MAX_CENTIKG);
+		if (assist_delta > assist_ceiling_native) {
+			assist_delta = assist_ceiling_native;
+		}
 	}
 	snapshot.assist_delta_native = assist_delta;
 	snapshot.assist_delta_filtered_native = update_assist_filter(
@@ -818,6 +862,7 @@ bool torque_input_set_user_span(uint16_t value)
 	}
 	span_native = value;
 	calibration_source = TORQUE_CAL_SOURCE_USER;
+	cal_legacy_record_rejected = false; /* FW-129: a fresh calibration resolves it */
 	return true;
 }
 
@@ -825,6 +870,7 @@ void torque_input_restore_default_span(void)
 {
 	span_native = TORQUE_DEFAULT_SPAN_NATIVE;
 	calibration_source = TORQUE_CAL_SOURCE_DEFAULT;
+	cal_legacy_record_rejected = false; /* FW-129 */
 }
 
 #define CAL_AVG_SHIFT 6U
@@ -1004,8 +1050,26 @@ void torque_input_cal_tick(int16_t torque_corrected_native, bool stationary)
 		cal_fail(TORQUE_CAL_ERR_DELTA_TOO_SMALL);
 		return;
 	}
-	uint32_t span = ((uint32_t)delta_reference *
-		TORQUE_PUBLIC_FULL_SCALE_CENTIKG) / cal_reference_centikg;
+	/*
+	 * FW-129 D8: span is the sensor's GAIN relative to the factory characteristic, not a
+	 * straight line through the calibration point.
+	 *
+	 *   gain = measured delta at the reference weight / delta the DEFAULT sensor would give
+	 *   span = TORQUE_DEFAULT_SPAN_NATIVE * gain
+	 *
+	 * so a sensor that already matches the factory curve calibrates to exactly
+	 * TORQUE_DEFAULT_SPAN_NATIVE with ANY reference weight - the invariance the old
+	 * 6000/reference form could not give. It also puts the calibration point back where it
+	 * belongs: native_delta_to_centikg(delta_reference) now returns cal_reference_centikg.
+	 */
+	uint32_t reference_delta =
+		default_centikg_to_native_delta(cal_reference_centikg);
+	if (reference_delta == 0U) {
+		cal_fail(TORQUE_CAL_ERR_REFERENCE_RANGE);
+		return;
+	}
+	uint32_t span = ((uint32_t)delta_reference * TORQUE_DEFAULT_SPAN_NATIVE +
+		reference_delta / 2U) / reference_delta;
 	if (!span_in_range((uint16_t)span)) {
 		cal_fail(TORQUE_CAL_ERR_SPAN_RANGE);
 		return;
@@ -1016,7 +1080,17 @@ void torque_input_cal_tick(int16_t torque_corrected_native, bool stationary)
 }
 
 #define TORQUE_CAL_PERSIST_MAGIC 0x7C41U
-#define TORQUE_CAL_PERSIST_VERSION 1U
+/*
+ * FW-129 D8: v1 records were written by the OLD capture, which stored
+ * delta_ref * 6000 / reference instead of the sensor gain. The number in a v1 record is not
+ * the same quantity v2 reads, and there is no way to convert it - the reference weight it was
+ * taken with is not part of the record. Rather than reinterpret it (which would silently shift
+ * every reading by a few percent with no way for the rider to know), a v1 record is DROPPED:
+ * the controller falls back to the factory characteristic, which is honest and correct for an
+ * uncalibrated sensor, and raises cal_legacy_record_rejected so the tool can say "recalibrate".
+ */
+#define TORQUE_CAL_PERSIST_VERSION 2U
+#define TORQUE_CAL_PERSIST_VERSION_LEGACY 1U
 
 static uint16_t torque_cal_crc16(uint8_t version, uint16_t span)
 {
@@ -1037,9 +1111,16 @@ bool torque_input_restore_persist(uint16_t magic, uint8_t version,
 	uint16_t span_stored, uint16_t crc)
 {
 	if (magic != TORQUE_CAL_PERSIST_MAGIC ||
-		version != TORQUE_CAL_PERSIST_VERSION ||
 		crc != torque_cal_crc16(version, span_stored) ||
 		!span_in_range(span_stored)) {
+		return false;
+	}
+	if (version == TORQUE_CAL_PERSIST_VERSION_LEGACY) {
+		/* Intact, but written in the pre-FW-129 units - see the version comment. */
+		cal_legacy_record_rejected = true;
+		return false;
+	}
+	if (version != TORQUE_CAL_PERSIST_VERSION) {
 		return false;
 	}
 	span_native = span_stored;
@@ -1075,7 +1156,7 @@ uint16_t torque_input_serialize_telemetry(uint8_t *buffer)
 	buffer[1] = 0x43;  /* 'C' */
 	buffer[2] = 2;     /* FW-061: v2 = v1 layout + coast re-zero diagnostics */
 	buffer[3] = TORQUE_CAP_LOAD_TELEMETRY_V1 | TORQUE_CAP_CALIBRATION_V1 |
-		TORQUE_CAP_COAST_DIAG_V2;
+		TORQUE_CAP_COAST_DIAG_V2 | TORQUE_CAP_GAIN_CALIBRATION_V3;
 	put16(&buffer[4], snapshot.load_centikg);
 	put16(&buffer[6], snapshot.zero_effective_native);
 	put16(&buffer[8], snapshot.delta_native);
@@ -1103,7 +1184,10 @@ uint16_t torque_input_serialize_telemetry(uint8_t *buffer)
 		(coast_last_was_moving ? 0x02U : 0U) |
 		(coast_candidate_stable ? 0x04U : 0U);
 	buffer[32] = coast_last_result;
-	buffer[33] = 0; /* reserved */
+	/* FW-129 D8: was reserved. Bit 0 says a stored calibration was written by the
+	 * pre-FW-129 procedure and had to be dropped - the tool shows "recalibrate". */
+	buffer[33] = cal_legacy_record_rejected ?
+		TORQUE_CAL_FLAG_LEGACY_RECORD_DROPPED : 0U;
 	put16(&buffer[34], coast_windows_started);
 	put16(&buffer[36], coast_windows_completed);
 	put16(&buffer[38], coast_applied_count);

@@ -183,10 +183,12 @@ static void append_record(const fw112_diag_input_t *in, uint32_t now_tick, uint8
 	rec->fwd_run = in->fwd_run;
 	rec->cadence_rpm = in->cadence_rpm;
 	rec->permission_bits = in->permission_bits;
-	/* C0-PROOF: PU_CLAMPED — set here from the diagnostic snapshot. iq_before_pu was captured
-	 * at the EXACT clamp point in finish_power_request() (assist_modes.c, after profile_iq_limit
-	 * but before PU ceiling), so iq_before_pu > iq_request is specifically the P/U ceiling fact,
-	 * not any other limiter. */
+	/* C0-PROOF: PU_CLAMPED — set here from the diagnostic snapshot. FW-129 moved the clamp
+	 * point by exactly one limiter: the P/U conversion is now the REQUEST rather than a
+	 * ceiling on a separately generated one, so iq_before_pu is the blended request BEFORE
+	 * max_iq_pct. iq_before_pu > iq_request therefore now means "the LEVEL's own Iq ceiling
+	 * trimmed it", still one specific limiter and still not any other. The wire bit and its
+	 * position are unchanged; only which limiter it names has moved. */
 	rec->flags2 = in->flags2;
 	if (in->iq_before_pu > in->iq_request) {
 		rec->flags2 |= FW112_FLAG2_PU_CLAMPED;

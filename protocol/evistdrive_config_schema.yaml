@@ -87,7 +87,15 @@ enums:
     power_linear: 1
     power_progressive: 2
     emtb: 3
+    # FW-129 D12: RESERVED / INACTIVE / NOT SELECTABLE. There is no dispatcher for this value
+    # in assist_modes_calculate() and bank_mode_valid() rejects it, so a bank carrying 4
+    # produces no assist. It must NOT be silently mapped onto plain eMTB, and the app must not
+    # offer it, until a real algorithm exists behind it. The wire value stays 4 either way.
     emtb_custom: 4
+    # FW-129 D12: these two have been active in firmware since FW-046 / FW-056 and were simply
+    # missing here - the schema stopped at 4 while assist_modes.h went to 6.
+    torque: 5
+    power_curve: 6
   startup_boost_mode:
     cadence: 0
     speed: 1
@@ -109,7 +117,10 @@ rules:
   - id: inactive_ride_core_modes
     # FW-094: a bank carrying the reserved value 0 yields no assist (assist_modes_calculate
     # reports unsupported). The app must never offer it as a selectable mode.
-    expression: mode_type == reserved_0
+    # FW-129 D12: emtb_custom (4) is in exactly the same position - accepted nowhere, no
+    # algorithm behind it - so it belongs in the same rule rather than looking selectable
+    # just because it has a name.
+    expression: mode_type in [reserved_0, emtb_custom]
   - id: no_rotation_safe_default
     expression: assist_without_rotation == false
   - id: torque_public_scale
@@ -126,8 +137,8 @@ profile_fields:
     since: 1
     access: persistent_rw
     per_level: true
-    value: {type: enum8, enum: mode_type, scale: 1, unit: none, min: 0, max: 4, default: legacy}
-    implementation: power_linear_progressive_available_default_legacy
+    value: {type: enum8, enum: mode_type, scale: 1, unit: none, min: 0, max: 6, default: power_linear}
+    implementation: active_five_modes_1_2_3_5_6
     ui_group: characteristic
 
   - key: support_ratio_pct
@@ -194,6 +205,39 @@ profile_fields:
     legacy_binding: Para1_level_current_slots
     ui_group: limits
 
+  # FW-129 D12: active in firmware since FW-056 and simply missing here. Two gammas x10, one
+  # per half of the support window, used only by mode_type == power_curve.
+  - key: curve_exponent_x10
+    wire_id: null
+    since: 4
+    access: persistent_rw
+    per_level: true
+    value: {type: u8, scale: 0.1, unit: none, min: 0.3, max: 2.5, default: 1.5}
+    implementation: active_power_curve_lower_half_gamma
+    applies_to_modes: [power_curve]
+    ui_group: characteristics
+
+  - key: curve_exponent_high_x10
+    wire_id: null
+    since: 4
+    access: persistent_rw
+    per_level: true
+    value: {type: u8, scale: 0.1, unit: none, min: 0.3, max: 2.5, default: 1.5}
+    implementation: active_power_curve_upper_half_gamma
+    applies_to_modes: [power_curve]
+    ui_group: characteristics
+
+  # FW-129 D12: active in firmware, missing here. 120 = 1.0x; mode_type == torque only.
+  - key: torque_assist_factor
+    wire_id: null
+    since: 1
+    access: persistent_rw
+    per_level: true
+    value: {type: u8, scale: 1, unit: none, min: 0, max: 254, default: null}
+    implementation: active_firmware_defaults_50_80_120_160_200
+    applies_to_modes: [torque]
+    ui_group: characteristics
+
   - key: emtb_parameter
     wire_id: null
     since: 1
@@ -202,6 +246,7 @@ profile_fields:
     value: {type: u8, scale: 1, unit: none, min: 0, max: 250, default: null}
     implementation: active_firmware_defaults_60_100_140_160_180
     reference: emmebrusa_apply_emtb_assist_denominator_510_minus_2x
+    applies_to_modes: [emtb]
     ui_group: characteristics
 
   - key: emtb_based_on_power
@@ -441,6 +486,39 @@ profile_fields:
     implementation: planned_power
     ui_group: speed
 
+# FW-129: whole-bike ride-feel settings that are NOT per level and NOT sensor calibration.
+# They live in the global tuning blob (0x6023 read / 0x6024 write / 0x6022 save), v8, which
+# stays exactly 32 B - both fields fit in u16 slots v6 had already reserved at offsets 24 and
+# 26. Older blobs (v2..v7) migrate to the defaults below, which are the values the firmware
+# behaved as before this card, so migrating changes nothing a rider can feel.
+global_ride_feel_fields:
+  - key: assist_torque_full_scale_kg
+    wire_id: 0x6023_offset_24
+    since: 8
+    access: persistent_rw
+    per_level: false
+    value: {type: u16, scale: 0.01, unit: kilogram_force, min: 20.00, max: 120.00, default: 60.00}
+    implementation: active_tuning_blob_v8
+    applies_to_modes: [emtb, torque]
+    # NOT the torque calibration span, NOT the sensor native maximum, NOT the ADC maximum.
+    # Changing it does not move the measured kilogram reading, the zero, the calibration or
+    # the 0x6025 telemetry; it only decides which pedal load reaches 100 % of the normalized
+    # 0..160 axis eMTB and Torque are defined on.
+    do_not_confuse_with: [torque_full_scale_kg, torque_full_scale_native]
+    ui_group: ride_feel_torque
+
+  - key: crank_length_mm
+    wire_id: 0x6023_offset_26
+    since: 8
+    access: persistent_rw
+    per_level: false
+    value: {type: u16, scale: 1, unit: millimetre, min: 150, max: 190, default: 165}
+    implementation: active_tuning_blob_v8
+    # Part of the rider-power equation: power = pedal force x crank length x crank speed.
+    # Applies to every mode that derives a request from rider power.
+    applies_to_modes: [power_linear, power_progressive, power_curve]
+    ui_group: bike_power_model
+
 torque_fields:
   - key: torque_full_scale_kg
     wire_id: null
@@ -466,8 +544,13 @@ torque_fields:
     since: 1
     access: calibration_operation
     per_level: false
-    value: {type: u16, scale: 0.01, unit: kilogram_force, min: 0.01, max: 60.00, default: null}
-    implementation: planned_capture_and_extrapolate_to_60kg
+    value: {type: u16, scale: 0.01, unit: kilogram_force, min: 5.00, max: 30.00, default: null}
+    # FW-129 D8: the capture derives the sensor GAIN relative to the factory characteristic
+    # (span = TORQUE_DEFAULT_SPAN_NATIVE * measured_delta / default_delta_at_reference), it does
+    # NOT extrapolate a straight line to 60 kg. The old form replaced the measured piecewise
+    # curve with a line through the calibration point, which moved the reading by up to +21 %
+    # at light load on a sensor that already matched the factory curve exactly.
+    implementation: active_gain_correction_over_factory_piecewise
     ui_group: torque_sensor_calibration
 
   - key: torque_full_scale_native

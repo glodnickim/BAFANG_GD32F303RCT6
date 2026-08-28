@@ -7,8 +7,11 @@
  * FW-085: v7 keeps v6's layout byte for byte and only changes the UNIT of the field at
  * offset 20, from milliseconds to crank degrees. v2..v6 are still accepted (see the
  * version table in tuning_config_apply_blob). */
-#define TUNING_VERSION 7U
+/* FW-129: v8 spends two of v6's three reserved u16 (offsets 24 and 26). Length unchanged. */
+#define TUNING_VERSION 8U
 #define TUNING_VERSION_V6 6U
+#define TUNING_VERSION_V7 7U
+#define TUNING_VERSION_V8 8U
 
 /*
  * FW-069: the four ramp values are no longer used by anything - assist_dynamics takes them
@@ -29,6 +32,11 @@ static uint16_t min_iq_pct = 2U;
 
 /* FW-033/085: RUN torque estimator averaging window, in crank degrees. */
 static uint16_t torque_run_window_deg = TUNING_TORQUE_RUN_WINDOW_DEG_DEFAULT;
+
+/* FW-129: ride-feel torque axis + crank arm of the rider-power equation (see the header). */
+static uint16_t assist_torque_full_scale_centikg =
+	TUNING_ASSIST_TORQUE_FULL_SCALE_CENTIKG_DEFAULT;
+static uint16_t crank_length_mm = TUNING_CRANK_LENGTH_MM_DEFAULT;
 
 static uint16_t clamp_max(uint16_t value, uint16_t max)
 {
@@ -81,6 +89,34 @@ uint16_t tuning_config_assist_torque_run_window_deg(void)
 	return torque_run_window_deg;
 }
 
+uint16_t tuning_config_assist_torque_full_scale_centikg(void)
+{
+	return assist_torque_full_scale_centikg;
+}
+
+uint16_t tuning_config_crank_length_mm(void)
+{
+	return crank_length_mm;
+}
+
+/*
+ * FW-129: 0 means "written by tooling that does not know this field" - an older Canable
+ * negotiates down to v7 and never reaches these bytes, but a v8 blob built by something that
+ * left them at their reserved zero must not be read as "0 kg full scale" or "0 mm crank".
+ * Both would be division-by-zero or an instantly saturated assist axis.
+ */
+static uint16_t clamp_or_default(uint16_t value, uint16_t min, uint16_t max,
+	uint16_t fallback)
+{
+	if (value == 0U) {
+		return fallback;
+	}
+	if (value < min) {
+		return min;
+	}
+	return (value > max) ? max : value;
+}
+
 static void put_u16(uint8_t *buffer, uint16_t value)
 {
 	buffer[0] = (uint8_t)(value & 0xFFU);
@@ -124,9 +160,9 @@ uint16_t tuning_config_serialize(uint8_t *buffer)
 	put_u16(&buffer[18], min_iq_pct);
 	put_u16(&buffer[20], torque_run_window_deg); /* FW-085: crank degrees, was ms in v6 */
 	put_u16(&buffer[22], start_steps); /* FW-068 */
-	for (uint8_t i = 24; i < TUNING_BLOB_LEN - 2U; i++) {
-		buffer[i] = 0; /* reserve: 3 more u16 before the length has to change again */
-	}
+	put_u16(&buffer[24], assist_torque_full_scale_centikg); /* FW-129 */
+	put_u16(&buffer[26], crank_length_mm);                  /* FW-129 */
+	put_u16(&buffer[28], 0); /* reserve: the LAST spare u16 in this blob length */
 	put_u16(&buffer[TUNING_BLOB_LEN - 2U],
 		tuning_blob_crc16(buffer, TUNING_BLOB_LEN - 2U));
 	return TUNING_BLOB_LEN;
@@ -158,9 +194,12 @@ bool tuning_config_apply_blob(const uint8_t *buffer, uint16_t length)
 	} else if (version == 3U || version == 4U || version == 5U) {
 		body = 22U;
 		min_length = TUNING_BLOB_LEN_V3;
-	} else if (version == TUNING_VERSION_V6 || version == TUNING_VERSION) {
+	} else if (version == TUNING_VERSION_V6 || version == TUNING_VERSION_V7 ||
+		version == TUNING_VERSION_V8) {
 		/* FW-085: v7 is v6's layout with one field reinterpreted, so both share
-		 * this geometry exactly; only the meaning of offset 20 differs. */
+		 * this geometry exactly; only the meaning of offset 20 differs.
+		 * FW-129: v8 is the same geometry again - it only fills two u16 that v6/v7
+		 * left reserved, so the body, the CRC position and the length are identical. */
 		body = TUNING_BLOB_LEN - 2U;
 		min_length = TUNING_BLOB_LEN;
 	} else {
@@ -203,7 +242,11 @@ bool tuning_config_apply_blob(const uint8_t *buffer, uint16_t length)
 	 * clamp to 360, silently doubling the smoothing. Only the "off" state carries
 	 * over, because 0 means the same thing in both units.
 	 */
-	if (version >= TUNING_VERSION) {
+	/* FW-129: gate on V7, the version that gave offset 20 its CURRENT unit - not on
+	 * TUNING_VERSION. Tied to the latter, bumping the version to 8 would have sent every
+	 * still-valid v7 blob down the millisecond branch and silently reset a configured
+	 * window to the default. Exactly the trap FW-085 documented for start_steps below. */
+	if (version >= TUNING_VERSION_V7) {
 		torque_run_window_deg = clamp_max(get_u16(&buffer[20]),
 			TUNING_TORQUE_RUN_WINDOW_DEG_MAX);
 	} else if (version >= 3U) {
@@ -230,6 +273,24 @@ bool tuning_config_apply_blob(const uint8_t *buffer, uint16_t length)
 		}
 	} else {
 		start_steps = TUNING_START_STEPS_DEFAULT;
+	}
+	/*
+	 * FW-129 §24: v8 introduced these two. Every older blob is migrated to the defaults,
+	 * which are exactly the values the firmware behaved as before this card (60.0 kg full
+	 * scale, 165 mm crank) - so migrating an old profile changes nothing a rider can feel.
+	 */
+	if (version >= TUNING_VERSION_V8) {
+		assist_torque_full_scale_centikg = clamp_or_default(get_u16(&buffer[24]),
+			TUNING_ASSIST_TORQUE_FULL_SCALE_CENTIKG_MIN,
+			TUNING_ASSIST_TORQUE_FULL_SCALE_CENTIKG_MAX,
+			TUNING_ASSIST_TORQUE_FULL_SCALE_CENTIKG_DEFAULT);
+		crank_length_mm = clamp_or_default(get_u16(&buffer[26]),
+			TUNING_CRANK_LENGTH_MM_MIN, TUNING_CRANK_LENGTH_MM_MAX,
+			TUNING_CRANK_LENGTH_MM_DEFAULT);
+	} else {
+		assist_torque_full_scale_centikg =
+			TUNING_ASSIST_TORQUE_FULL_SCALE_CENTIKG_DEFAULT;
+		crank_length_mm = TUNING_CRANK_LENGTH_MM_DEFAULT;
 	}
 	return true;
 }

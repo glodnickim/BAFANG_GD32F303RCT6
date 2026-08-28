@@ -70,6 +70,22 @@ typedef struct {
 	assist_startup_boost_config_t startup_boost;
 	assist_smooth_start_config_t smooth_start;
 	uint16_t release_ms;
+	/*
+	 * FW-129B: INACTIVE. Still stored, still round-tripped, no longer read by control.
+	 *
+	 * These filtered the requested motor POWER. While that power was only a ceiling they were
+	 * harmless; once FW-129 made it the request itself, a lag in the target path proved to be
+	 * two defects at once - falling, it asked for up to 5.6x what the rider's own input was
+	 * worth, for seconds after a release; rising, it delivered 43 of 228 counts 75 ms after
+	 * the rider pressed again, a second soft-start in front of the Iq ramp. Neither is fixable
+	 * while a lag sits on the target: see the block comment in finish_power_request().
+	 *
+	 * The two jobs they were meant to do are owned elsewhere, explicitly and in better
+	 * domains: dead-spot bridging by the RUN estimator over CRANK ANGLE (FW-085/112.4), and
+	 * current slew by the four iq_rise/iq_fall ramps below. They keep their bytes because the
+	 * bank record
+	 * is at its hard 255 B ceiling and moving fields would reinterpret every stored profile.
+	 */
 	uint16_t power_rise_filter_ms;
 	uint16_t power_fall_filter_ms;
 	/* FW-077: direct minimum while already rolling, not an mV reduction the
@@ -88,6 +104,22 @@ typedef struct {
 } assist_level_config_t;
 
 typedef struct {
+	/*
+	 * TWO DIFFERENT RIDER POWERS, and a log is unreadable if they are confused (FW-129 D11):
+	 *
+	 *   human_power_w        from the RAW per-tick pedal load (torque_load_centikg): no assist
+	 *                        deadband, no RUN averaging, no startup boost. It jumps with every
+	 *                        leg push, because that is what the rider is doing right now.
+	 *                        Telemetry only - no decision reads it.
+	 *   assist_basis_power_w from the load the modes ACTUALLY used: RUN-averaged over the
+	 *                        crank-angle window and boosted if the boost is running. This is
+	 *                        the number the support ratio and the request were computed from,
+	 *                        so this is the one to compare a motor power against.
+	 *
+	 * Reading motor_power_w against human_power_w and calling the quotient "support ratio"
+	 * gives a figure that swings by a factor of two within one pedal stroke. Use
+	 * assist_basis_power_w, or applied_support_ratio_pct, which the firmware computes itself.
+	 */
 	uint16_t human_power_w;
 	uint16_t assist_basis_power_w;
 	uint16_t raw_motor_power_w;
@@ -95,13 +127,27 @@ typedef struct {
 	uint16_t applied_support_ratio_pct;
 	uint32_t requested_battery_current_ma;
 	int32_t iq_request;
-	/* C0-PROOF: phase_iq_request BEFORE the P/U ceiling clamp in finish_power_request().
-	 * Measurement-only — nothing reads this to make a decision. Captured at the exact clamp
-	 * point (assist_modes.c finish_power_request, line ~818) so the diagnostic snapshot can
-	 * distinguish "eMTB formula returned ~0" from "P/U ceiling zeroed a positive request". */
+	/* C0-PROOF, redefined by FW-129: the blended phase-current request BEFORE the level's own
+	 * max_iq_pct ceiling. There is no separate P/U ceiling any more - the P/U conversion IS
+	 * the request - so this is now the "pre-limit Iq" the card asks for. Measurement-only;
+	 * nothing reads it to make a decision. */
 	int32_t iq_before_pu;
+	/* FW-129 §15 diagnostics: the two anchors of the conversion and the crossfade between
+	 * them, so a ride log can show which one was carrying the request and prove the handover
+	 * was continuous. launch_blend_permille is the weight of the MEASURED-duty term:
+	 * 0 = pure launch anchor, 1000 = pure measured duty. */
+	int32_t iq_launch_request;
+	int32_t iq_normal_request;
+	uint16_t launch_blend_permille;
+	/* FW-129: the calibrated pedal load the assist was actually computed from (after the
+	 * RUN estimator and the startup boost), and its position on the normalized 0..160 axis
+	 * eMTB/Torque use. Both are physical - neither depends on the sensor calibration. */
+	uint16_t assist_load_centikg;
+	uint16_t assist_torque_x160;
 	uint8_t cadence_for_assist_rpm;
 	bool assist_without_rotation_active;
+	/* Native-unit view of assist_load_centikg, kept because 0x6029 has always reported this
+	 * field in native units. Diagnostics only. */
 	uint16_t torque_for_assist_mv;
 	uint16_t startup_boost_extra_pct;
 	bool startup_boost_active;

@@ -1,6 +1,8 @@
 #include "ride_control.h"
 #include "iq_chain.h"   /* FW-128A: names for the demand stages, no ownership change */
 
+#include <string.h>    /* FW-129B: clearing the diagnostic snapshots in ride_control_init() */
+
 #include "assist_dynamics.h"
 #include "assist_extended_boost.h"
 #include "assist_limits.h"
@@ -250,16 +252,55 @@ uint16_t ride_control_get_assist_hold_ticks(void)
 	return (uint16_t)assist_hold_ticks;
 }
 
+/*
+ * FW-129B: ONE place that returns the whole ride path to a deterministic cold state.
+ *
+ * The audit's rule, applied field by field: DYNAMIC RUNTIME STATE is cleared here; PERSISTENT
+ * CONFIGURATION (profile banks, tuning blob, assist levels) and STATIC CALIBRATION (the torque
+ * sensor's zero and characteristic) are NOT. That is why torque_input_init() is absent and
+ * torque_input_cancel_rolling_rearm() is present: the sensor's calibration belongs to the
+ * sensor's own lifecycle, but the rolling-rearm RECOVERY is ride state that this module opens
+ * and cancels, so it dies here with everything else it belongs to.
+ *
+ * Every one of these was a module static that nothing reset. In production the function runs
+ * once at boot with all of them already zero, which is exactly why it went unnoticed - and why
+ * it is worth fixing rather than arguing about: a lifecycle reset that leaves state behind is
+ * not a lifecycle reset, and the next caller inherits a previous ride.
+ */
 void ride_control_init(void)
 {
+	/* --- ride-feel bookkeeping --- */
 	assist_hold_ticks = 0;
-	ride_session_init();
-	pedal_assist_gate_init();
 	preload_active = false;
 	preload_ticks = 0;
 	walk_was_active = false;
+	/*
+	 * FW-129B: this is the one leaked field that fed a real DECISION rather than a
+	 * diagnostic. Extended Boost holds "whatever normal pedalling was getting" when the
+	 * cranks stop; left behind, a boost could be handed a current from a previous ride.
+	 */
+	last_pedal_iq_while_pedaling = 0;
+
+	/* --- owned automatons and their modules --- */
+	ride_session_init();
+	pedal_assist_gate_init();
 	assist_extended_boost_init();   //FW-084
 	assist_modes_reset();
+	assist_dynamics_reset();        //FW-129: the Iq ramp accumulator and any release fade
+	assist_start_reset();           //smooth-start envelope + startup-boost latch
+	torque_input_cancel_rolling_rearm();
+
+	/* --- diagnostic mirrors. Not decisions, but a stale snapshot is a false report, and a
+	 * false report is what sends the next investigation down the wrong path. --- */
+	debug_flags = 0;
+	arm_pending = false;
+	memset(&arm_snapshot, 0, sizeof(arm_snapshot));
+	memset(&gate_snapshot, 0, sizeof(gate_snapshot));
+#if CAN_DIAGNOSTICS_ENABLE
+	ride_diag_reason = 0;
+	ride_diag_permission_bits = 0;
+	ride_diag_flags2 = 0;
+#endif
 }
 
 void ride_control_update(const ride_control_input_t *input)
@@ -466,7 +507,7 @@ void ride_control_update(const ride_control_input_t *input)
 		 */
 		if (session_out.fast_rearm_this_tick) {
 			torque_input_begin_rolling_rearm();
-		} else if (!session_out.latched) {
+				} else if (!session_out.latched) {
 			cancel_rearm_recovery();
 		}
 

@@ -4,6 +4,7 @@
 #include "config.h"
 #include "power_curve.h"
 #include "torque_input.h"
+#include "tuning_config.h"
 
 #define ASSIST_LEVEL_COUNT 5
 #define ASSIST_MOTOR_POWER_HARD_MAX_W 1500U
@@ -15,14 +16,59 @@
  */
 #define ASSIST_V6_WIRE_MIN_PEDAL_LOAD_MAX_MV 300U
 #define ASSIST_V6_WIRE_START_LOAD_REDUCTION_MAX_MV 100U
+/*
+ * Rider power per (0.01 kg x rpm), in mW, for the REFERENCE crank:
+ * P = m * g * L * 2*pi*n/60, which at L = 165 mm is 1.694 mW. FW-129 makes L configurable
+ * (tuning_config_crank_length_mm), applied as a ratio against this reference.
+ */
 #define HUMAN_POWER_CENTIKG_RPM_NUMERATOR 1694U
 #define HUMAN_POWER_CENTIKG_RPM_DENOMINATOR 1000U
-#define RIDE_CORE_FULL_IQ_SUPPORT_PCT 500U
-#define RIDE_CORE_DEMAND_PERMILLE_MAX 1000U
+#define HUMAN_POWER_REFERENCE_CRANK_MM 165U
 #define MOTOR_VOLTAGE_UTILIZATION_SCALE 2048U
+/*
+ * FW-129 §15 - LOW-DUTY HANDOVER.
+ *
+ * Every mode now produces a REQUESTED MOTOR POWER, and phase current follows from it:
+ *
+ *     Iq = P / (duty * V)          [duty = u_abs / 2048]
+ *
+ * That is the correct physics wherever the motor is actually turning, and it is what makes
+ * the delivered support ratio equal the configured one - the conversion divides by the
+ * MEASURED duty, so it needs no motor constant and cannot be wrong by a fixed factor the way
+ * the old load->Iq map was. It has exactly one blind spot: as the motor slows to a stop, duty
+ * goes to zero and the division stops meaning anything, while the rider's POWER goes to zero
+ * as well even though the force on the pedal does not.
+ *
+ * So the same conversion is evaluated a SECOND time at a fixed reference operating point -
+ * the power the rider would be asking for at ASSIST_LAUNCH_REFERENCE_RPM, converted at the
+ * duty the motor has at that cadence. Because P is proportional to cadence and, on a
+ * mid-drive, duty is proportional to cadence too, that second evaluation is a pure TORQUE
+ * demand: cadence-free, finite at a standstill, and numerically EQUAL to the first one
+ * wherever duty tracks cadence normally.
+ *
+ * The two are crossfaded on u_abs. There is no threshold and no branch: in ordinary riding
+ * both terms carry the same value, so the crossfade is invisible; it only does work when
+ * u_abs has collapsed away from the cadence (launch, stall, a slipping start), which is
+ * precisely where the division is ill-conditioned. Above ASSIST_LAUNCH_BLEND_HI_U_ABS the
+ * launch term has zero weight, so it can never be the dominant generator during ordinary
+ * slow climbing.
+ *
+ * ASSIST_LAUNCH_REFERENCE_U_ABS is the ONE quantity here that is not derived: it is the
+ * motor's volts-per-crank-rpm, which this firmware does not know (FLUX_LINKAGE in config.h is
+ * dead - nothing reads it). 1024 = 50 % duty at 60 rpm is a STARTING HYPOTHESIS and is
+ * NOT CONFIRMED ON THE BIKE. 0x6029 reports u_abs and cadence together so one ride settles
+ * it. Getting it wrong scales the launch term only, and only below 60 rpm; it cannot affect
+ * ordinary riding, where the measured duty is used.
+ */
+#define ASSIST_LAUNCH_REFERENCE_RPM 60U
+#define ASSIST_LAUNCH_REFERENCE_U_ABS 1024U
+#define ASSIST_LAUNCH_BLEND_LO_U_ABS (ASSIST_LAUNCH_REFERENCE_U_ABS / 4U)
+#define ASSIST_LAUNCH_BLEND_HI_U_ABS ASSIST_LAUNCH_REFERENCE_U_ABS
+#define ASSIST_LAUNCH_BLEND_PERMILLE_MAX 1000U
+_Static_assert(ASSIST_LAUNCH_REFERENCE_RPM == START_PHASE_CURVE_RPM,
+	"the launch power reference and the FW-088 start-phase curve reference are the same "
+	"operating point and must not drift apart");
 #define CONTROL_TICKS_PER_MS 4U
-#define POWER_FILTER_MAX_MS 3000U
-#define POWER_FILTER_Q_SHIFT 8U
 #define PROGRESSIVE_REFERENCE_POWER_MIN_W 50U
 #define PROGRESSIVE_REFERENCE_POWER_MAX_W 500U
 #define PROGRESSION_MAX_PCT 100U
@@ -38,10 +84,23 @@
 #define EMTB_FIXED_Q_ONE (1U << EMTB_FIXED_Q_SHIFT)
 
 /*
- * Power ratios follow the reference factors 50/100/160/260,
- * where factor 50 means 1.0x rider power. SPORT+ is the midpoint between
- * SPORT and BOOST. These are the compiled-in defaults, used when no stored
- * bank is available.
+ * These are the compiled-in defaults, used when no stored bank is available.
+ *
+ * SUPPORT RATIOS HALVED (owner decision, 2026-08-28): 100/200/320/420/520 became
+ * 50/100/160/210/260. FW-129 found that the old numbers were never actually delivered - the
+ * pre-FW-129 chain could physically produce only about 46 % of a configured ratio, because the
+ * request came from an unanchored "60 kg at 500 % = full Iq" constant rather than from rider
+ * power (see documentation/FW-129_UNIT_DOMAIN_AUDIT_PL.md, defect D1). Fixing that made every
+ * Power level 2.17x stronger at the same setting. Halving the defaults puts a fresh controller
+ * back within a few percent of the assist the bike actually used to give, so the correction
+ * shows up as "the number now means what it says" rather than as a bike that suddenly pulls
+ * twice as hard.
+ *
+ * Deliberately NOT halved: emtb_parameter and torque_assist_factor. FW-129 did not change the
+ * strength of eMTB or Torque (measured -3..-10 % at light load, unchanged at heavy), so halving
+ * them would make those two modes genuinely weaker than before rather than equivalent.
+ *
+ * The ratio is now a real percentage of rider power: 100 means the motor matches the rider.
  *
  * The last six arguments are the per-level assist dynamics
  * (power_rise, power_fall, iq_rise_slow, iq_rise_fast, iq_fall_slow,
@@ -113,39 +172,39 @@
 
 static const assist_level_config_t default_levels[ASSIST_LEVEL_COUNT + 1] = {
 	DEFAULT_IDLE_LEVEL,
-	/* LEVEL 1 / assist 100% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 100, 60, 50,
+	/* LEVEL 1 / assist 50% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 50, 60, 50,
 		150, 375, 600, 300, 1000, 180),
-	/* LEVEL 2 / assist 200% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 200, 100, 80,
+	/* LEVEL 2 / assist 100% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 100, 100, 80,
 		160, 400, 600, 330, 1000, 210),
-	/* LEVEL 3 / assist 320% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 320, 140, 120,
+	/* LEVEL 3 / assist 160% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 160, 140, 120,
 		190, 450, 650, 380, 1050, 250),
-	/* LEVEL 4 / assist 420% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 420, 160, 160,
+	/* LEVEL 4 / assist 210% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 210, 160, 160,
 		220, 500, 700, 450, 1100, 300),
-	/* LEVEL 5 / assist 520% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 520, 180, 200,
+	/* LEVEL 5 / assist 260% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 260, 180, 200,
 		250, 550, 750, 500, 1200, 350)
 };
 
 static const assist_level_config_t emtb_levels[ASSIST_LEVEL_COUNT + 1] = {
 	DEFAULT_IDLE_LEVEL,
-	/* LEVEL 1 / assist 100% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 100, 60, 50,
+	/* LEVEL 1 / assist 50% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 50, 60, 50,
 		150, 375, 600, 300, 1000, 180),
-	/* LEVEL 2 / assist 200% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 200, 100, 80,
+	/* LEVEL 2 / assist 100% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 100, 100, 80,
 		160, 400, 600, 330, 1000, 210),
-	/* LEVEL 3 / assist 320% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 320, 140, 120,
+	/* LEVEL 3 / assist 160% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 160, 140, 120,
 		190, 450, 650, 380, 1050, 250),
-	/* LEVEL 4 / assist 420% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 420, 160, 160,
+	/* LEVEL 4 / assist 210% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 210, 160, 160,
 		220, 500, 700, 450, 1100, 300),
-	/* LEVEL 5 / assist 520% */
-	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 520, 180, 200,
+	/* LEVEL 5 / assist 260% */
+	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 260, 180, 200,
 		250, 550, 750, 500, 1200, 350)
 };
 
@@ -296,23 +355,15 @@ static uint8_t valid_wa_latch_timeout_s(uint8_t value)
 
 static assist_mode_output_t last_output;
 
-typedef struct {
-	const assist_level_config_t *config_address;
-	uint16_t rise_ms;
-	uint16_t fall_ms;
-	uint32_t filtered_power_q;
-} power_filter_state_t;
 
 typedef struct {
 	uint8_t cadence_for_assist_rpm;
 	uint16_t human_load_centikg;
 	uint16_t assist_load_centikg;
-	uint16_t torque_for_assist_mv;
 	bool without_rotation_active;
 	bool start_phase;
 } prepared_assist_input_t;
 
-static power_filter_state_t power_filter_state;
 
 static void clear_output(assist_mode_output_t *output)
 {
@@ -323,6 +374,12 @@ static void clear_output(assist_mode_output_t *output)
 	output->applied_support_ratio_pct = 0;
 	output->requested_battery_current_ma = 0;
 	output->iq_request = 0;
+	output->iq_before_pu = 0;
+	output->iq_launch_request = 0;
+	output->iq_normal_request = 0;
+	output->launch_blend_permille = 0;
+	output->assist_load_centikg = 0;
+	output->assist_torque_x160 = 0;
 	output->cadence_for_assist_rpm = 0;
 	output->assist_without_rotation_active = false;
 	output->torque_for_assist_mv = 0;
@@ -334,64 +391,6 @@ static void clear_output(assist_mode_output_t *output)
 	output->curve_output_permille = 0;
 	output->cadence_comp_permille = CADENCE_COMP_UNITY_PERMILLE;
 	output->precomp_motor_power_w = 0;
-}
-
-static uint16_t clamp_power_filter_ms(uint16_t filter_ms)
-{
-	return (filter_ms > POWER_FILTER_MAX_MS) ?
-		POWER_FILTER_MAX_MS : filter_ms;
-}
-
-static void stop_power_filter(const assist_level_config_t *config)
-{
-	power_filter_state.config_address = config;
-	power_filter_state.rise_ms = clamp_power_filter_ms(
-		config->power_rise_filter_ms);
-	power_filter_state.fall_ms = clamp_power_filter_ms(
-		config->power_fall_filter_ms);
-	power_filter_state.filtered_power_q = 0;
-}
-
-static uint32_t filter_motor_power(
-	uint32_t raw_motor_power_mw,
-	const assist_level_config_t *config)
-{
-	uint16_t rise_ms = clamp_power_filter_ms(config->power_rise_filter_ms);
-	uint16_t fall_ms = clamp_power_filter_ms(config->power_fall_filter_ms);
-	uint32_t raw_power_q = raw_motor_power_mw << POWER_FILTER_Q_SHIFT;
-
-	if (power_filter_state.config_address != config ||
-		power_filter_state.rise_ms != rise_ms ||
-		power_filter_state.fall_ms != fall_ms) {
-		power_filter_state.config_address = config;
-		power_filter_state.rise_ms = rise_ms;
-		power_filter_state.fall_ms = fall_ms;
-		power_filter_state.filtered_power_q = raw_power_q;
-		return raw_motor_power_mw;
-	}
-
-	uint16_t filter_ms = (raw_power_q > power_filter_state.filtered_power_q) ?
-		rise_ms : fall_ms;
-	if (filter_ms == 0 || raw_power_q == power_filter_state.filtered_power_q) {
-		power_filter_state.filtered_power_q = raw_power_q;
-		return raw_motor_power_mw;
-	}
-
-	uint32_t filter_ticks = (uint32_t)filter_ms * CONTROL_TICKS_PER_MS;
-	if (raw_power_q > power_filter_state.filtered_power_q) {
-		uint32_t delta = raw_power_q - power_filter_state.filtered_power_q;
-		uint32_t step = delta / filter_ticks;
-		if (step == 0) step = 1;
-		power_filter_state.filtered_power_q += step;
-	} else {
-		uint32_t delta = power_filter_state.filtered_power_q - raw_power_q;
-		uint32_t step = delta / filter_ticks;
-		if (step == 0) step = 1;
-		power_filter_state.filtered_power_q -= step;
-	}
-
-	return (power_filter_state.filtered_power_q +
-		(1U << (POWER_FILTER_Q_SHIFT - 1U))) >> POWER_FILTER_Q_SHIFT;
 }
 
 /*
@@ -544,62 +543,125 @@ static uint16_t calculate_support_ratio_pct(
 	}
 }
 
+/*
+ * FW-129 §10: rider power from the PHYSICAL pedal force, the configured crank length and the
+ * crank speed. load_centikg is a force on the pedal, so the arm it acts through belongs in
+ * the equation - a 170 mm crank genuinely produces 3 % more power than a 165 mm one for the
+ * same push, and the assist that follows from it should say so.
+ *
+ * Integer throughout, no 64-bit: the worst case is 120 kg at 255 rpm, so the product is at
+ * most 3.06e6, the 1.694 scaling at most 5.2e6, and the crank ratio at most 5.2e6 * 190 =
+ * 9.9e8 - comfortably inside uint32_t.
+ */
 static uint32_t calculate_human_power_mw(uint16_t load_centikg, uint8_t cadence_rpm)
 {
-	/*
-	 * P = m * g * crank_length * 2*pi*rpm/60. For a 165 mm crank
-	 * this is 1.694 mW per (0.01 kg * rpm). Split 1.694 into 1 + 0.694
-	 * so every intermediate stays in uint32_t at 120 kg and 255 rpm.
-	 */
 	uint32_t product = (uint32_t)load_centikg * cadence_rpm;
-	return product + (product *
+	uint32_t power_mw = product + (product *
 		(HUMAN_POWER_CENTIKG_RPM_NUMERATOR -
 		 HUMAN_POWER_CENTIKG_RPM_DENOMINATOR) +
 		HUMAN_POWER_CENTIKG_RPM_DENOMINATOR / 2U) /
 		HUMAN_POWER_CENTIKG_RPM_DENOMINATOR;
+
+	uint32_t crank_mm = tuning_config_crank_length_mm();
+	if (crank_mm != HUMAN_POWER_REFERENCE_CRANK_MM && crank_mm != 0U) {
+		power_mw = (power_mw * crank_mm + HUMAN_POWER_REFERENCE_CRANK_MM / 2U) /
+			HUMAN_POWER_REFERENCE_CRANK_MM;
+	}
+	return power_mw;
 }
 
-static int32_t calculate_load_iq_request(
-	uint16_t load_centikg,
-	uint16_t support_ratio_pct,
+/*
+ * FW-129 §6/§11/§14: the normalized 0..160 torque axis eMTB and Torque are defined on.
+ *
+ * It is built from CALIBRATED PEDAL LOAD and one ride-feel setting, never from
+ * torque_input_span_native(). That was the whole defect: span_native is a property of the
+ * SENSOR, so recalibrating moved the axis and silently reshaped both modes for the same
+ * physical push. Q8 is kept so small pedal loads survive the squaring in eMTB.
+ */
+static uint32_t assist_torque_x160_q(uint16_t load_centikg)
+{
+	uint32_t full_scale = tuning_config_assist_torque_full_scale_centikg();
+	if (full_scale == 0U) {
+		full_scale = TUNING_ASSIST_TORQUE_FULL_SCALE_CENTIKG_DEFAULT;
+	}
+	uint32_t x160_q = ((uint32_t)load_centikg * EMTB_TORQUE_RANGE * EMTB_FIXED_Q_ONE +
+		full_scale / 2U) / full_scale;
+	uint32_t full_q = EMTB_TORQUE_RANGE * EMTB_FIXED_Q_ONE;
+	return (x160_q > full_q) ? full_q : x160_q;
+}
+
+/*
+ * FW-129 §7/§12/§14: the ONE conversion from a physical power request to phase current.
+ *
+ *   battery current = P / V        phase current = battery current / duty
+ *
+ * Every mode ends here, and nothing else in this file turns a pedal load into an Iq. Passing
+ * ASSIST_LAUNCH_REFERENCE_U_ABS instead of the measured u_abs is what produces the launch
+ * term described at the top of this file - same equation, different anchor.
+ */
+static int32_t power_to_phase_iq(
+	uint32_t power_mw,
+	uint32_t battery_voltage_mv,
+	uint32_t u_abs,
 	int32_t iq_limit)
 {
-	if (iq_limit <= 0 || load_centikg == 0 || support_ratio_pct == 0) {
+	if (power_mw == 0U || battery_voltage_mv == 0U || u_abs == 0U || iq_limit <= 0) {
 		return 0;
 	}
-	if (load_centikg > TORQUE_PUBLIC_FULL_SCALE_CENTIKG) {
-		load_centikg = TORQUE_PUBLIC_FULL_SCALE_CENTIKG;
-	}
-	if (support_ratio_pct > ASSIST_SUPPORT_RATIO_MAX_PCT) {
-		support_ratio_pct = ASSIST_SUPPORT_RATIO_MAX_PCT;
-	}
-	/* 60 kg at 500% support is the conservative full-Iq reference. */
-	uint32_t demand_permille =
-		((uint32_t)load_centikg * support_ratio_pct + 1500U) / 3000U;
-	if (demand_permille > RIDE_CORE_DEMAND_PERMILLE_MAX) {
-		demand_permille = RIDE_CORE_DEMAND_PERMILLE_MAX;
-	}
-	if (demand_permille == 0) {
-		return 0;
-	}
-	return (int32_t)(((uint32_t)iq_limit * demand_permille +
-		RIDE_CORE_DEMAND_PERMILLE_MAX - 1U) /
-		RIDE_CORE_DEMAND_PERMILLE_MAX);
+	uint32_t current_ma = (power_mw * 1000U) / battery_voltage_mv;
+	uint32_t iq = (current_ma * MOTOR_VOLTAGE_UTILIZATION_SCALE) /
+		(u_abs * (uint32_t)CAL_I);
+	return (iq > (uint32_t)iq_limit) ? iq_limit : (int32_t)iq;
 }
 
-static int32_t calculate_target_x160_iq_request(
+/* Weight of the MEASURED-duty term. 0 = pure launch anchor, 1000 = pure measured duty. */
+static uint16_t launch_blend_permille(uint32_t u_abs)
+{
+	if (u_abs >= ASSIST_LAUNCH_BLEND_HI_U_ABS) {
+		return ASSIST_LAUNCH_BLEND_PERMILLE_MAX;
+	}
+	if (u_abs <= ASSIST_LAUNCH_BLEND_LO_U_ABS) {
+		return 0U;
+	}
+	return (uint16_t)(((u_abs - ASSIST_LAUNCH_BLEND_LO_U_ABS) *
+		ASSIST_LAUNCH_BLEND_PERMILLE_MAX) /
+		(ASSIST_LAUNCH_BLEND_HI_U_ABS - ASSIST_LAUNCH_BLEND_LO_U_ABS));
+}
+
+/*
+ * eMTB denominator, from the TSDZ2 algorithm: 510 - 2*sensitivity, reduced by the cadence when
+ * the mode is power based, floored at +10. Extracted because FW-129 evaluates it twice - once
+ * at the live cadence and once at the launch reference - and the two must not drift apart.
+ */
+static uint32_t emtb_denominator(
+	const assist_level_config_t *config,
+	uint32_t parameter,
+	uint32_t cadence_rpm)
+{
+	uint32_t denominator = EMTB_DENOMINATOR_BASE - 2U * parameter;
+	if (config->emtb_based_on_power) {
+		denominator = (denominator > cadence_rpm) ?
+			denominator - cadence_rpm : 0U;
+	}
+	return denominator + EMTB_DENOMINATOR_MIN;
+}
+
+/*
+ * The one explicit conversion out of the eMTB/Torque unit: 0..160 in Q8 -> battery current
+ * (EMTB_UNIT_CURRENT_MA per unit, the TSDZ2 ADC step) -> power at the reference voltage.
+ */
+static uint32_t emtb_target_to_power_mw(
 	uint32_t target_x160_q,
-	int32_t iq_limit)
+	uint32_t reference_voltage_mv)
 {
-	if (iq_limit <= 0 || target_x160_q == 0) {
-		return 0;
-	}
 	uint32_t full_scale_q = EMTB_TORQUE_RANGE * EMTB_FIXED_Q_ONE;
 	if (target_x160_q > full_scale_q) {
 		target_x160_q = full_scale_q;
 	}
-	return (int32_t)((target_x160_q * (uint32_t)iq_limit +
-		full_scale_q - 1U) / full_scale_q);
+	uint32_t target_current_ma =
+		(target_x160_q * EMTB_UNIT_CURRENT_MA +
+		EMTB_FIXED_Q_ONE / 2U) / EMTB_FIXED_Q_ONE;
+	return (target_current_ma * reference_voltage_mv) / 1000U;
 }
 
 static bool prepare_assist_input(
@@ -612,16 +674,20 @@ static bool prepare_assist_input(
 	// FW-033: RUN power/eMTB/torque and the startup boost use the slow RUN estimator
 	// so they no longer amplify each individual leg peak. The without-rotation start
 	// branch below overrides this back to the fast signal (standstill launch).
-	uint16_t torque_for_assist = input->torque_run_filtered;
+	//
+	// FW-129: converted to CALIBRATED PEDAL LOAD right here, at the boundary between the
+	// sensor layer and the assist layer. Nothing past this point sees a native/mV number,
+	// so no assist characteristic can be reshaped by a recalibration ever again.
+	uint16_t load_for_assist_centikg =
+		torque_input_native_delta_to_centikg(input->torque_run_filtered);
 	bool without_rotation_active = false;
 
 	if (config->assist_without_rotation &&
 		cadence_for_assist == 0 &&
 		input->torque_sensor_valid &&
 		input->pas_sensor_valid) {
-		uint16_t corrected_delta_mv = input->torque_assist_filtered;
 		uint16_t corrected_load_centikg =
-			torque_input_native_delta_to_centikg(corrected_delta_mv);
+			torque_input_native_delta_to_centikg(input->torque_assist_filtered);
 		uint16_t threshold_centikg = config->minimum_pedal_load_centikg;
 		if (threshold_centikg > ASSIST_MIN_PEDAL_LOAD_MAX_CENTIKG) {
 			threshold_centikg = ASSIST_MIN_PEDAL_LOAD_MAX_CENTIKG;
@@ -632,14 +698,8 @@ static bool prepare_assist_input(
 			 * flag; the fake 1 rpm existed only to get past the cadence gate below,
 			 * which now asks the flags directly.
 			 */
-			torque_for_assist = corrected_delta_mv;
+			load_for_assist_centikg = corrected_load_centikg;
 			without_rotation_active = true;
-		}
-	}
-	{
-		uint16_t torque_range = torque_input_span_native();
-		if (torque_for_assist > torque_range) {
-			torque_for_assist = torque_range;
 		}
 	}
 
@@ -670,7 +730,10 @@ static bool prepare_assist_input(
 	prepared->start_phase = input->start_phase;
 
 	assist_startup_boost_input_t boost_input = {
-		.torque_input_mv = torque_for_assist,
+		/* FW-129 §16: boost now scales the physical pedal load, so "+27 %" is +27 % of
+		 * the rider's actual push rather than +27 % of an ADC delta that the piecewise
+		 * kg curve then turned into some other percentage. */
+		.load_centikg = load_for_assist_centikg,
 		/* Same cadence the rest of the control path sees - no separate override for
 		 * boost. FW-087: during the start phase that is now a genuine 0 rather than a
 		 * 1 rpm placeholder, which is where the boost curve is meant to sit anyway. */
@@ -683,10 +746,12 @@ static bool prepare_assist_input(
 		&boost_input,
 		&config->startup_boost,
 		&boost_output);
-	prepared->torque_for_assist_mv = boost_output.torque_output_mv;
-	prepared->assist_load_centikg = torque_input_native_delta_to_centikg(
-		boost_output.torque_output_mv);
-	output->torque_for_assist_mv = boost_output.torque_output_mv;
+	prepared->assist_load_centikg = boost_output.load_output_centikg;
+	/* Diagnostics only: 0x6029 has always reported this in native units, so the boosted
+	 * load is converted back for the wire rather than changing what the field means. */
+	output->torque_for_assist_mv = torque_input_centikg_to_native_delta(
+		boost_output.load_output_centikg);
+	output->assist_load_centikg = boost_output.load_output_centikg;
 	output->startup_boost_extra_pct = boost_output.extra_pct;
 	output->startup_boost_active = boost_output.active;
 	return true;
@@ -734,18 +799,29 @@ int32_t assist_modes_profile_iq_ceiling(
 	if (power_limit_w == 0 || power_limit_w > ASSIST_MOTOR_POWER_HARD_MAX_W) {
 		power_limit_w = ASSIST_MOTOR_POWER_HARD_MAX_W;
 	}
-	/* Same exclusion as the mode path: at launch the duty is near zero, so the power
-	 * conversion would produce a meaningless ceiling and the torque-derived request stays
-	 * authoritative. */
-	if (!input->start_phase && input->motor_voltage_utilization > 0U &&
-		battery_voltage_mv > 0U) {
-		uint32_t ceiling_current_ma =
-			(power_limit_w * 1000000U) / battery_voltage_mv;
-		uint32_t power_iq_limit =
-			(ceiling_current_ma * MOTOR_VOLTAGE_UTILIZATION_SCALE) /
-			((uint32_t)input->motor_voltage_utilization * CAL_I);
-		if ((uint32_t)ceiling > power_iq_limit) {
-			ceiling = (int32_t)power_iq_limit;
+	/*
+	 * FW-129: the power half uses the SAME conversion and the SAME launch crossfade the mode
+	 * path uses, so the ceiling a substituted target meets is the ceiling the mode itself
+	 * would have met at this duty. The old start-phase exception is gone with the rest of
+	 * them: the crossfade already handles a near-zero duty, and skipping the ceiling outright
+	 * there meant Extended Boost could be handed the full global limit at a standstill -
+	 * exactly the case this function exists to close.
+	 */
+	if (battery_voltage_mv > 0U) {
+		uint32_t power_limit_mw = power_limit_w * 1000U;
+		uint32_t u_abs = input->motor_voltage_utilization;
+		int32_t normal = power_to_phase_iq(
+			power_limit_mw, battery_voltage_mv, u_abs, iq_limit);
+		int32_t launch = power_to_phase_iq(
+			power_limit_mw, battery_voltage_mv,
+			ASSIST_LAUNCH_REFERENCE_U_ABS, iq_limit);
+		uint16_t blend = launch_blend_permille(u_abs);
+		int32_t power_iq_limit = (int32_t)((
+			(uint32_t)launch * (ASSIST_LAUNCH_BLEND_PERMILLE_MAX - blend) +
+			(uint32_t)normal * blend) /
+			ASSIST_LAUNCH_BLEND_PERMILLE_MAX);
+		if (ceiling > power_iq_limit) {
+			ceiling = power_iq_limit;
 		}
 	}
 	return ceiling;
@@ -760,7 +836,7 @@ static bool finish_power_request(
 	uint32_t assist_basis_power_mw,
 	uint32_t support_ratio_pct,
 	uint32_t motor_power_mw,
-	int32_t phase_iq_request,
+	uint32_t launch_motor_power_mw,
 	assist_mode_output_t *output)
 {
 	/*
@@ -781,13 +857,13 @@ static bool finish_power_request(
 	}
 	uint32_t precomp_motor_power_mw = motor_power_mw;
 	if (cadence_comp_permille != CADENCE_COMP_UNITY_PERMILLE) {
+		/* FW-129 §18: applied ONCE, in the power domain, to both anchors of the same
+		 * request. There is only one conversion to Iq now, downstream of this, so the
+		 * compensation can no longer be applied a second time to a parallel quantity. */
 		motor_power_mw = (motor_power_mw * cadence_comp_permille) /
 			CADENCE_COMP_UNITY_PERMILLE;
-		if (phase_iq_request > 0) {
-			phase_iq_request = (int32_t)
-				(((uint32_t)phase_iq_request * cadence_comp_permille) /
-				CADENCE_COMP_UNITY_PERMILLE);
-		}
+		launch_motor_power_mw = (launch_motor_power_mw * cadence_comp_permille) /
+			CADENCE_COMP_UNITY_PERMILLE;
 	}
 	output->cadence_comp_permille = cadence_comp_permille;
 	uint32_t precomp_motor_power_w = precomp_motor_power_mw / 1000U;
@@ -802,35 +878,103 @@ static bool finish_power_request(
 	if (motor_power_mw > power_limit_mw) {
 		motor_power_mw = power_limit_mw;
 	}
+	/*
+	 * FW-129: the SAME ceiling on the launch anchor. It is not redundant and it is not a
+	 * second limiter: actual electrical power on the launch term is
+	 * Iq * CAL_I * (u_abs/2048) * V <= launch power * u_abs / ASSIST_LAUNCH_REFERENCE_U_ABS,
+	 * and the crossfade has already retired that term by the time u_abs reaches the
+	 * reference - so clamping it here is what makes "max motor power" a true bound at every
+	 * speed, including a standstill, without needing a start-phase exception.
+	 */
+	if (launch_motor_power_mw > power_limit_mw) {
+		launch_motor_power_mw = power_limit_mw;
+	}
+	/*
+	 * FW-129B: THE REQUEST IS COMPUTED FROM THE CURRENT INPUTS. Nothing between the mode's
+	 * answer and the conversion carries history any more.
+	 *
+	 * FW-129 put the power rise/fall filter here, on the theory that its rider-facing text
+	 * ("smooths sudden increases in requested motor power, before this level's current ramp
+	 * even sees it") described filtering the REQUEST. Measured on the shipped chain, that made
+	 * the filter do two things it must never do:
+	 *
+	 *   falling  - the filter outlives the rider. With the pedal load decaying after a
+	 *              release, the filter asked for 313 W where the rider's own input was worth
+	 *              113 W, and 56 W where it was worth 10 W: 2.8x, then 5.6x. For those
+	 *              seconds the filter, not the rider, was the source of the torque.
+	 *   rising   - the filter understates the target. 75 ms after the rider pressed again it
+	 *              produced 43 of the 228 counts the current inputs justified - a second,
+	 *              hidden soft-start in front of the Iq ramp that already owns that job.
+	 *
+	 * Both are inherent to putting a lag in the target path, in either direction; no seeding
+	 * rule or bound removes them. So the demand is now unfiltered, and shaping is left to the
+	 * two mechanisms that own it explicitly and in the right domain:
+	 *
+	 *   dead-spot bridging - the RUN estimator, averaged over CRANK ANGLE (FW-085) with its
+	 *                        own asymmetric rise/fall (FW-112.4). A time-domain copy of that
+	 *                        job here was always redundant, and this is the copy that could
+	 *                        outlive the rider, because crank angle cannot.
+	 *   current slew       - assist_dynamics' per-level Iq ramps, which are the setting the
+	 *                        rider is actually told controls how power builds and fades.
+	 *
+	 * power_rise_filter_ms / power_fall_filter_ms therefore no longer affect control. They
+	 * stay in the bank record (the blob geometry is fixed at 255 B) and are reported as
+	 * inactive by the tool. Re-homing them is a ride-feel decision, not a state-hygiene one.
+	 */
 	uint32_t raw_motor_power_mw = motor_power_mw;
-	motor_power_mw = filter_motor_power(raw_motor_power_mw, config);
+	uint32_t raw_launch_power_mw = launch_motor_power_mw;
 
-	/* P/U is battery current. Convert it to a phase-current ceiling using
-	 * EBICS' measured voltage utilization (duty, scale 0..2048). At launch
-	 * duty is near zero, so the torque-derived Iq request remains authoritative;
-	 * as the motor accelerates the power ceiling becomes effective. */
+	/*
+	 * FW-129 §7/§15: the single conversion from the physical request to phase current, and
+	 * the crossfade between the measured-duty anchor and the launch anchor. See the block
+	 * comment at the top of this file for why the two terms are equal in ordinary riding.
+	 */
 	uint32_t requested_current_ma =
 		(motor_power_mw * 1000U) / battery_voltage_mv;
+	uint32_t u_abs = input->motor_voltage_utilization;
+	int32_t iq_normal = power_to_phase_iq(
+		motor_power_mw, battery_voltage_mv, u_abs, iq_limit);
+	int32_t iq_launch = power_to_phase_iq(
+		launch_motor_power_mw, battery_voltage_mv,
+		ASSIST_LAUNCH_REFERENCE_U_ABS, iq_limit);
+	uint16_t blend_permille = launch_blend_permille(u_abs);
+	int32_t phase_iq_request = (int32_t)((
+		(uint32_t)iq_launch *
+			(ASSIST_LAUNCH_BLEND_PERMILLE_MAX - blend_permille) +
+		(uint32_t)iq_normal * blend_permille) /
+		ASSIST_LAUNCH_BLEND_PERMILLE_MAX);
+	/*
+	 * FW-129: no pedal demand, no current - absolutely, whatever the filter still holds.
+	 *
+	 * The power filter is a smoother, not a source. Now that its output IS the request, a
+	 * decaying fall filter could keep a positive Iq alive for a whole fall time after the
+	 * mode's own demand had genuinely reached zero - the filter would be MANUFACTURING
+	 * assist from a rider input of nothing. Both anchors are tested because they are zero
+	 * for different reasons: the measured-duty one is legitimately zero at a standstill
+	 * (cadence 0 = no rider power), the launch one only when there is really no demand.
+	 */
+	if (raw_motor_power_mw == 0U && raw_launch_power_mw == 0U) {
+		phase_iq_request = 0;
+	}
+
+	output->iq_launch_request = iq_launch;
+	output->iq_normal_request = iq_normal;
+	output->launch_blend_permille = blend_permille;
+	/*
+	 * C0-PROOF, redefined by FW-129: there is no separate P/U ceiling to be "before" any
+	 * more - the P/U conversion IS the request. This is now the blended request BEFORE the
+	 * level's own Iq ceiling, so a difference between it and iq_request means max_iq_pct
+	 * clamped the result and nothing else. Same role for the recorders (fw112_diag,
+	 * rolling_no_assist_diag), same wire position, one limiter earlier.
+	 */
+	output->iq_before_pu = phase_iq_request;
+
 	int32_t profile_iq_limit = profile_iq_pct_limit(config, iq_limit);
 	if (phase_iq_request < 0) {
 		phase_iq_request = 0;
 	}
 	if (phase_iq_request > profile_iq_limit) {
 		phase_iq_request = profile_iq_limit;
-	}
-	/* C0-PROOF: snapshot the phase Iq request AFTER the per-level ceiling and
-	 * the profile Iq limit, but BEFORE the P/U voltage ceiling. This is the
-	 * exact diagnostic boundary — a difference between this and iq_request tells
-	 * the reader "the P/U ceiling clamped the request", not any other limiter. */
-	output->iq_before_pu = phase_iq_request;
-	if (!input->start_phase && requested_current_ma > 0U &&
-		input->motor_voltage_utilization > 0U) {
-		uint32_t power_iq_limit =
-			(requested_current_ma * MOTOR_VOLTAGE_UTILIZATION_SCALE) /
-			((uint32_t)input->motor_voltage_utilization * CAL_I);
-		if ((uint32_t)phase_iq_request > power_iq_limit) {
-			phase_iq_request = (int32_t)power_iq_limit;
-		}
 	}
 
 	uint32_t human_power_w = human_power_mw / 1000U;
@@ -877,7 +1021,6 @@ static bool calculate_power(
 		iq_limit <= 0 ||
 		support_disabled ||
 		config->max_iq_pct == 0) {
-		stop_power_filter(config);
 		return true;
 	}
 
@@ -921,10 +1064,21 @@ static bool calculate_power(
 		output);
 	uint32_t motor_power_mw =
 		(assist_basis_power_mw * support_ratio_pct) / 100U;
-	int32_t phase_iq_request = calculate_load_iq_request(
-		prepared.assist_load_centikg,
-		(uint16_t)support_ratio_pct,
-		iq_limit);
+	/*
+	 * FW-129 §7: THE request now, not a ceiling on something else. The old parallel
+	 * calculate_load_iq_request() - "60 kg at 500 % = full Iq" - is gone: that constant had
+	 * no physical source, knew nothing about the crank, the gearing or the pack voltage, and
+	 * made the delivered support ratio a fixed fraction of the configured one that no
+	 * setting could recover (at 48 V and 60 rpm it would have needed u_abs = 1957 against a
+	 * hardware maximum of 1920, i.e. the configured ratio was unreachable everywhere).
+	 *
+	 * The launch anchor is the same request evaluated at the reference cadence - which is
+	 * what keeps a standing start alive, since rider POWER is ~0 when the cranks are barely
+	 * turning however hard the pedal is pushed.
+	 */
+	uint32_t launch_power_mw = (calculate_human_power_mw(
+		prepared.assist_load_centikg, ASSIST_LAUNCH_REFERENCE_RPM) *
+		support_ratio_pct) / 100U;
 	return finish_power_request(
 		input,
 		config,
@@ -934,7 +1088,7 @@ static bool calculate_power(
 		assist_basis_power_mw,
 		support_ratio_pct,
 		motor_power_mw,
-		phase_iq_request,
+		launch_power_mw,
 		output);
 }
 
@@ -960,7 +1114,6 @@ static bool calculate_emtb(
 		iq_limit <= 0 ||
 		config->emtb_parameter == 0 ||
 		config->max_iq_pct == 0) {
-		stop_power_filter(config);
 		return true;
 	}
 
@@ -976,23 +1129,27 @@ static bool calculate_emtb(
 		reference_voltage_mv = EMTB_REFERENCE_VOLTAGE_MAX_MV;
 	}
 
-	uint32_t torque_range = torque_input_span_native();
-	uint32_t delta_x160_q =
-		((uint32_t)prepared.torque_for_assist_mv * EMTB_TORQUE_RANGE *
-		EMTB_FIXED_Q_ONE +
-		torque_range / 2U) / torque_range;
+	/*
+	 * FW-129 §11: the torque axis comes from CALIBRATED PEDAL LOAD and the rider's own
+	 * ASSIST TORQUE FULL SCALE setting. It used to come from
+	 * torque_for_assist_mv / torque_input_span_native(), i.e. from the sensor calibration -
+	 * so calibrating with a weight moved the whole eMTB curve for the same physical push.
+	 */
+	uint32_t delta_x160_q = assist_torque_x160_q(prepared.assist_load_centikg);
+	output->assist_torque_x160 = (uint16_t)
+		((delta_x160_q + EMTB_FIXED_Q_ONE / 2U) / EMTB_FIXED_Q_ONE);
 
-	uint32_t denominator = EMTB_DENOMINATOR_BASE - 2U * parameter;
-	if (config->emtb_based_on_power) {
-		uint32_t cadence = prepared.start_phase ?
-			0U : prepared.cadence_for_assist_rpm;
-		denominator = (denominator > cadence) ? denominator - cadence : 0U;
-	}
-	denominator += EMTB_DENOMINATOR_MIN;
+	uint32_t denominator = emtb_denominator(config, parameter,
+		prepared.start_phase ? 0U : prepared.cadence_for_assist_rpm);
+	uint32_t launch_denominator = emtb_denominator(config, parameter,
+		ASSIST_LAUNCH_REFERENCE_RPM);
 
 	uint32_t target_x160_q =
 		(delta_x160_q * delta_x160_q) /
 		(denominator * EMTB_FIXED_Q_ONE);
+	uint32_t launch_target_x160_q =
+		(delta_x160_q * delta_x160_q) /
+		(launch_denominator * EMTB_FIXED_Q_ONE);
 
 	uint8_t power_cadence = prepared.start_phase ?
 		0U : prepared.cadence_for_assist_rpm;
@@ -1001,22 +1158,26 @@ static bool calculate_emtb(
 	uint32_t assist_basis_power_mw = calculate_human_power_mw(
 		prepared.assist_load_centikg, power_cadence);
 
-	uint32_t target_for_power_q = target_x160_q;
-	uint32_t target_full_scale_q =
-		EMTB_TORQUE_RANGE * EMTB_FIXED_Q_ONE;
-	if (target_for_power_q > target_full_scale_q) {
-		target_for_power_q = target_full_scale_q;
-	}
-	uint32_t target_current_ma =
-		(target_for_power_q * EMTB_UNIT_CURRENT_MA +
-		EMTB_FIXED_Q_ONE / 2U) / EMTB_FIXED_Q_ONE;
+	/*
+	 * FW-129 §12: the eMTB result keeps its ORIGINAL physical meaning all the way to the one
+	 * explicit conversion. In the algorithm this is ported from (emmebrusa / OpenSourceEBike
+	 * TSDZ2, see protocol/evistdrive_config_schema.yaml) the output of the curve is
+	 * ui8_adc_battery_current_target - BATTERY CURRENT in steps of ~0.16 A, which is exactly
+	 * what EMTB_UNIT_CURRENT_MA reproduces. It is NOT a percentage of the phase-current
+	 * limit, and the removed calculate_target_x160_iq_request() treated it as one purely
+	 * because both ranges happen to end near 160. Those two readings differ by 1/duty.
+	 *
+	 * Reference voltage turns that current into a POWER, so the curve delivers the same
+	 * watts on a 36 V and a 52 V pack instead of the same amps. From here the request is
+	 * ordinary physical power and goes down the shared path with every other mode.
+	 */
 	uint32_t motor_power_mw =
-		(target_current_ma * reference_voltage_mv) / 1000U;
+		emtb_target_to_power_mw(target_x160_q, reference_voltage_mv);
+	uint32_t launch_power_mw =
+		emtb_target_to_power_mw(launch_target_x160_q, reference_voltage_mv);
 	uint32_t support_ratio_pct = (assist_basis_power_mw > 0U) ?
 		(uint32_t)(((uint64_t)motor_power_mw * 100U) /
 		assist_basis_power_mw) : 0U;
-	int32_t phase_iq_request = calculate_target_x160_iq_request(
-		target_x160_q, iq_limit);
 
 	output->emtb_denominator = (uint16_t)denominator;
 	uint32_t target_x160_display =
@@ -1033,7 +1194,7 @@ static bool calculate_emtb(
 		assist_basis_power_mw,
 		support_ratio_pct,
 		motor_power_mw,
-		phase_iq_request,
+		launch_power_mw,
 		output);
 }
 
@@ -1056,7 +1217,6 @@ static bool calculate_torque_assist(
 		iq_limit <= 0 ||
 		config->torque_assist_factor == 0 ||
 		config->max_iq_pct == 0) {
-		stop_power_filter(config);
 		return true;
 	}
 
@@ -1068,11 +1228,11 @@ static bool calculate_torque_assist(
 		reference_voltage_mv = EMTB_REFERENCE_VOLTAGE_MAX_MV;
 	}
 
-	uint32_t torque_range = torque_input_span_native();
-	uint32_t delta_x160_q =
-		((uint32_t)prepared.torque_for_assist_mv * EMTB_TORQUE_RANGE *
-		EMTB_FIXED_Q_ONE +
-		torque_range / 2U) / torque_range;
+	/* FW-129 §14: same physical torque axis as eMTB - calibrated load and the rider's own
+	 * full-scale setting, never the sensor span. */
+	uint32_t delta_x160_q = assist_torque_x160_q(prepared.assist_load_centikg);
+	output->assist_torque_x160 = (uint16_t)
+		((delta_x160_q + EMTB_FIXED_Q_ONE / 2U) / EMTB_FIXED_Q_ONE);
 	uint32_t target_x160_q =
 		(delta_x160_q * config->torque_assist_factor) /
 		TORQUE_ASSIST_FACTOR_DENOMINATOR;
@@ -1084,22 +1244,18 @@ static bool calculate_torque_assist(
 	uint32_t assist_basis_power_mw = calculate_human_power_mw(
 		prepared.assist_load_centikg, power_cadence);
 
-	uint32_t target_for_power_q = target_x160_q;
-	uint32_t target_full_scale_q =
-		EMTB_TORQUE_RANGE * EMTB_FIXED_Q_ONE;
-	if (target_for_power_q > target_full_scale_q) {
-		target_for_power_q = target_full_scale_q;
-	}
-	uint32_t target_current_ma =
-		(target_for_power_q * EMTB_UNIT_CURRENT_MA +
-		EMTB_FIXED_Q_ONE / 2U) / EMTB_FIXED_Q_ONE;
+	/*
+	 * FW-129 §12/§14: same explicit conversion as eMTB - the factor produces a battery
+	 * current in TSDZ2 units, reference voltage turns it into power, and the shared path
+	 * takes it from there. Torque mode has no cadence term at all (cadence gates it, it does
+	 * not scale it), so the launch anchor is the same request: the demand is already a pure
+	 * function of pedal load, which is exactly what a launch needs.
+	 */
 	uint32_t motor_power_mw =
-		(target_current_ma * reference_voltage_mv) / 1000U;
+		emtb_target_to_power_mw(target_x160_q, reference_voltage_mv);
 	uint32_t support_ratio_pct = (assist_basis_power_mw > 0U) ?
 		(uint32_t)(((uint64_t)motor_power_mw * 100U) /
 		assist_basis_power_mw) : 0U;
-	int32_t phase_iq_request = calculate_target_x160_iq_request(
-		target_x160_q, iq_limit);
 
 	uint32_t target_x160_display =
 		(target_x160_q + EMTB_FIXED_Q_ONE - 1U) / EMTB_FIXED_Q_ONE;
@@ -1115,7 +1271,7 @@ static bool calculate_torque_assist(
 		assist_basis_power_mw,
 		support_ratio_pct,
 		motor_power_mw,
-		phase_iq_request,
+		motor_power_mw,
 		output);
 }
 
@@ -1562,10 +1718,19 @@ bool assist_modes_apply_bank_blob(const uint8_t *buffer, uint16_t length)
 	return true;
 }
 
+/*
+ * FW-129B: this module now holds NO demand state between ticks. Every request is computed from
+ * the inputs of the tick it is made on, so there is nothing here for a lifecycle reset to
+ * clear except the published diagnostic snapshot. That is the point - a module with no carried
+ * state cannot leak any.
+ */
 void assist_modes_reset(void)
 {
+	/* assist_start's state has always been cleared from here, and ride_control_init() also
+	 * calls it directly. The duplication is deliberate after FW-129B: ride_control_init()
+	 * enumerates every runtime state it owns, so it can be read as a complete list, and this
+	 * one keeps working for the host harnesses that reset the mode layer on its own. */
 	assist_start_reset();
-	power_filter_state = (power_filter_state_t){0};
 	clear_output(&last_output);
 }
 

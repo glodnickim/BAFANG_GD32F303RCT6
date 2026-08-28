@@ -275,7 +275,15 @@ int main(void)
 				CHECK(mf6029_start != NULL, "setup: case 0x6029: found inside sendCAN_Tx()");
 				CHECK(mf6029_end != NULL, "setup: case 0x6028: found after it, to bound 0x6029's body");
 				if (mf6029_start && mf6029_end) {
-					const char *tracked = strstr(mf6029_start, "send_multiframe_tracked(Ext_ID_Rx.command, (char*)&dg[0], 55, &xfer_id)");
+					/* Length-agnostic on purpose (FW-129 grew the blob from 55 B to 71 B):
+					 * what this guard is about is that the handler REMEMBERS which transfer
+					 * it armed, not how many bytes that transfer carries. Pinning the length
+					 * here made a deliberate, versioned blob extension look like a
+					 * transport-safety regression. */
+					const char *tracked = strstr(mf6029_start, "send_multiframe_tracked(Ext_ID_Rx.command, (char*)&dg[0],");
+					if (tracked != NULL && strstr(tracked, "&xfer_id)") == NULL) {
+						tracked = NULL;
+					}
 					CHECK(tracked != NULL && tracked < mf6029_end,
 						"GUARD: 0x6029's handler arms the snapshot via send_multiframe_tracked( "
 						"with a real transfer id - it must remember WHICH reply, not just 'armed'");

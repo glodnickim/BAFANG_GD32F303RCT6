@@ -45,6 +45,14 @@ static int32_t iq_reference_q;
 static int32_t profile_release_step_q;      /* per-tick step for the active fade */
 #endif
 
+void assist_dynamics_reset(void)
+{
+#if IQ_RAMP_TIME_MODE
+	iq_reference_q = 0;
+	profile_release_step_q = 0;
+#endif
+}
+
 int32_t assist_dynamics_apply(
 	int32_t iq_target,
 	int32_t iq_reference,

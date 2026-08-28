@@ -7,7 +7,13 @@
 
 #define STARTUP_BOOST_CURVE_SIZE 120U
 #define STARTUP_BOOST_STRENGTH_MAX_PCT 300U
-#define STARTUP_BOOST_AUTO_TORQUE_MV 20U
+/*
+ * FW-129 §16: the AUTO threshold is a PEDAL LOAD, not a magic 20 mV. 0.80 kg is what 20
+ * native units read as on the factory characteristic, so AUTO keeps behaving exactly as it
+ * did on the default calibration - it just stops meaning something different on a
+ * calibrated sensor.
+ */
+#define STARTUP_BOOST_AUTO_LOAD_CENTIKG 80U
 #define CONTROL_TICKS_PER_MS 4U
 #define SMOOTH_START_DURATION_MAX_MS 5000U
 #define SMOOTH_START_ENVELOPE_MAX_PERMILLE 1000U
@@ -69,19 +75,23 @@ void assist_start_apply_boost(
 	if (output == 0) {
 		return;
 	}
-	output->torque_output_mv = 0;
+	output->load_output_centikg = 0;
 	output->extra_pct = 0;
 	output->active = false;
 	if (input == 0 || config == 0) {
 		return;
 	}
 
-	uint16_t torque_range = torque_input_span_native();
-	uint16_t torque_input_mv = input->torque_input_mv;
-	if (torque_input_mv > torque_range) {
-		torque_input_mv = torque_range;
+	/*
+	 * FW-129: no sensor-span clamp here any more. The load arrives already limited by the
+	 * public kilogram scale in torque_input.c, and clamping a RIDE-FEEL input to a
+	 * CALIBRATION number is exactly the layer mixing this card removes.
+	 */
+	uint16_t load_centikg = input->load_centikg;
+	if (load_centikg > TORQUE_INPUT_MAX_CENTIKG) {
+		load_centikg = TORQUE_INPUT_MAX_CENTIKG;
 	}
-	output->torque_output_mv = torque_input_mv;
+	output->load_output_centikg = load_centikg;
 
 	if (!config->enabled ||
 		!input->torque_sensor_valid ||
@@ -110,7 +120,7 @@ void assist_start_apply_boost(
 		break;
 	case ASSIST_STARTUP_BOOST_AUTO:
 		boost_enabled = !(
-			torque_input_mv < STARTUP_BOOST_AUTO_TORQUE_MV &&
+			load_centikg < STARTUP_BOOST_AUTO_LOAD_CENTIKG &&
 			input->wheel_speed_x100 > 0);
 		break;
 	default:
@@ -133,19 +143,20 @@ void assist_start_apply_boost(
 	}
 
 	/*
-	 * Deliberately not clamped to torque_range here: this is the "virtual"
-	 * boosted torque, allowed to exceed the raw sensor span. Downstream,
-	 * torque_input_native_delta_to_centikg() clamps to the wider
-	 * TORQUE_SPAN_MAX_NATIVE, and the profile/power/Iq/phase-current/battery/
-	 * thermal limits still apply after that — those are the intended ceiling,
-	 * not the sensor's physical range.
+	 * Deliberately allowed to exceed what the rider is really pushing: this is a "virtual"
+	 * pedal load, and the profile/power/Iq/phase-current/battery/thermal limits downstream
+	 * are the intended ceiling, not the sensor's range. It is capped only at the top of the
+	 * public kilogram scale so nothing further down has to defend against an absurd number.
 	 */
-	uint32_t boosted_torque = torque_input_mv +
-		((uint32_t)torque_input_mv * extra_pct) / 100U;
+	uint32_t boosted_load = load_centikg +
+		((uint32_t)load_centikg * extra_pct) / 100U;
+	if (boosted_load > TORQUE_INPUT_MAX_CENTIKG) {
+		boosted_load = TORQUE_INPUT_MAX_CENTIKG;
+	}
 
-	output->torque_output_mv = (uint16_t)boosted_torque;
+	output->load_output_centikg = (uint16_t)boosted_load;
 	output->extra_pct = extra_pct;
-	output->active = boosted_torque > torque_input_mv;
+	output->active = boosted_load > load_centikg;
 }
 
 int32_t assist_start_apply_smooth(

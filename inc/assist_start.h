@@ -17,15 +17,24 @@ typedef struct {
 	uint8_t end_rpm;
 } assist_startup_boost_config_t;
 
+/*
+ * FW-129 §16: the boost works on CALIBRATED PEDAL LOAD, not on the sensor's native/mV signal.
+ *
+ * It used to multiply the native delta and let the (piecewise, non-linear) kg conversion run
+ * afterwards, so the same configured "+27 %" produced a different increase in kilograms
+ * depending on where on the curve the rider was and on which calibration was active. Boost is
+ * a ride-feel setting; it has no business being shaped by the sensor. Working in centikg makes
+ * "+27 %" mean +27 % of the pedal force, everywhere, on every sensor.
+ */
 typedef struct {
-	uint16_t torque_input_mv;
+	uint16_t load_centikg;
 	uint8_t cadence_for_assist_rpm;
 	uint32_t wheel_speed_x100;
 	bool torque_sensor_valid;
 } assist_startup_boost_input_t;
 
 typedef struct {
-	uint16_t torque_output_mv;
+	uint16_t load_output_centikg;
 	uint16_t extra_pct;
 	bool active;
 } assist_startup_boost_output_t;

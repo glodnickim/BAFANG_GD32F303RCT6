@@ -956,8 +956,8 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 				if(cur_iqr<0)cur_iqr=0;
 				if(cur_iqr>32767)cur_iqr=32767;
 				int32_t cur_iqs = MS->i_q_setpoint; if(cur_iqs<0)cur_iqs=0; if(cur_iqs>32767)cur_iqs=32767;
-				uint8_t dg[56];
-				dg[0]=0x44; dg[1]=0x47; dg[2]=5; //'D''G' ver5 (55 B): FW-084 appended the Extended Boost state
+				uint8_t dg[72];
+				dg[0]=0x44; dg[1]=0x47; dg[2]=6; //'D''G' ver6 (71 B): FW-129 appended the unit-domain block
 				dg[3]=DIAG_ENGINE_ID_RIDE_CORE; //deprecated protocol field, see the define
 				uint32_t bcur = diag_peak_motor_w ? ((uint32_t)diag_peak_motor_w*1000000UL)/(MS->Voltage?MS->Voltage:40000) : 0; if(bcur>65535)bcur=65535;
 				int32_t iqr = diag_peak_iq_req; if(iqr>32767)iqr=32767; else if(iqr<0)iqr=0;
@@ -998,8 +998,33 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 				dg[48]=eb_iq&0xFF; dg[49]=(eb_iq>>8)&0xFF;                               //boost current BEFORE the shared limits
 				dg[50]=eb.remaining_ms&0xFF; dg[51]=(eb.remaining_ms>>8)&0xFF;           //ACTIVE time left [ms]
 				dg[52]=eb.cancel_reason;                                                 //see assist_extended_boost_cancel_t
-				uint16_t c=0xFFFF; for(uint8_t i=0;i<53;i++){c^=(uint16_t)dg[i]<<8; for(uint8_t b=0;b<8;b++)c=(c&0x8000)?((c<<1)^0x1021):(c<<1);}
-				dg[53]=c&0xFF; dg[54]=(c>>8)&0xFF;
+				/*
+				 * FW-129 v6: the unit-domain block. Everything here is LIVE (not peak-held),
+				 * because what it has to answer is "at THIS operating point, which anchor was
+				 * carrying the request and did the handover stay continuous" - a peak-hold
+				 * would mix samples from different duties and make the crossfade unreadable.
+				 * u_abs and cadence appear together on purpose: their ratio is the motor's
+				 * volts-per-rpm, the one constant ASSIST_LAUNCH_REFERENCE_U_ABS is a
+				 * hypothesis about (see assist_modes.c).
+				 */
+				{
+					int32_t v;
+					uint16_t u16_uabs = (MS->u_abs<0) ? 0 :
+						((MS->u_abs>65535) ? 65535 : (uint16_t)MS->u_abs);
+					dg[53]=cur->assist_load_centikg&0xFF; dg[54]=(cur->assist_load_centikg>>8)&0xFF; //calibrated pedal load [centikg]
+					dg[55]=cur->assist_torque_x160&0xFF;  dg[56]=(cur->assist_torque_x160>>8)&0xFF;  //normalized torque 0..160
+					v=cur->iq_launch_request; if(v<0)v=0; if(v>65535)v=65535;
+					dg[57]=v&0xFF; dg[58]=(v>>8)&0xFF;                                              //launch-anchor Iq
+					v=cur->iq_normal_request; if(v<0)v=0; if(v>65535)v=65535;
+					dg[59]=v&0xFF; dg[60]=(v>>8)&0xFF;                                              //measured-duty Iq
+					dg[61]=cur->launch_blend_permille&0xFF; dg[62]=(cur->launch_blend_permille>>8)&0xFF; //0=launch, 1000=measured duty
+					v=cur->iq_before_pu; if(v<0)v=0; if(v>65535)v=65535;
+					dg[63]=v&0xFF; dg[64]=(v>>8)&0xFF;                                              //blended Iq BEFORE max_iq_pct
+					dg[65]=cur->motor_power_w&0xFF; dg[66]=(cur->motor_power_w>>8)&0xFF;            //requested motor power [W], live
+					dg[67]=u16_uabs&0xFF; dg[68]=(u16_uabs>>8)&0xFF;                                //live u_abs, pairs with dg[43] cadence
+				}
+				uint16_t c=0xFFFF; for(uint8_t i=0;i<69;i++){c^=(uint16_t)dg[i]<<8; for(uint8_t b=0;b<8;b++)c=(c&0x8000)?((c<<1)^0x1021):(c<<1);}
+				dg[69]=c&0xFF; dg[70]=(c>>8)&0xFF;
 				//FW-110 v4: diag_peak_reset is NOT set here. send_multiframe() returning true only
 				//proves the snapshot was ARMED; the reset must fire only when this exact transfer
 				//is CONFIRMED delivered end to end (its last fragment reaches CAN_TRANSMIT_OK),
@@ -1007,7 +1032,7 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 				//main.c's loop. The transfer id is remembered here, at arm time.
 				{
 					can_multiframe_id_t xfer_id;
-					if(send_multiframe_tracked(Ext_ID_Rx.command, (char*)&dg[0], 55, &xfer_id)){
+					if(send_multiframe_tracked(Ext_ID_Rx.command, (char*)&dg[0], 71, &xfer_id)){
 						can_reply_effects_6029_armed(xfer_id);
 					}
 				}

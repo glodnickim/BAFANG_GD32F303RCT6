@@ -50,4 +50,15 @@ int32_t assist_dynamics_apply(
 	int32_t iq_reference,
 	const assist_dynamics_input_t *input);
 
+/*
+ * FW-129: drop the ramp accumulator and any release fade in progress.
+ *
+ * The ramp reference is a module static and nothing reset it, so ride_control_init() - which
+ * exists to put the whole ride path back to a known state - left a current reference behind
+ * that the next ride would fade out of. Latent in production, where init runs once at boot
+ * with the accumulator already zero; visible immediately in the host harnesses, where one
+ * scenario's leftover current bled into the next one's "no torque means no current" proof.
+ */
+void assist_dynamics_reset(void);
+
 #endif /* ASSIST_DYNAMICS_H_ */

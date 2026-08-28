@@ -11,7 +11,10 @@
  * weights on this bike (165 mm crank): zero 740 mV, 6 kg at 886 mV and
  * 84 kg at 2320 mV. The default conversion is piecewise-linear through
  * those measured points, so the firmware is usable without load calibration.
- * A user load calibration may replace it with a linear 60 kg span; the zero point
+ * FW-129: a user load calibration corrects the sensor GAIN only - the measured delta is
+ * referred back to the default sensor and then read on the SAME piecewise characteristic,
+ * so calibrating moves where the curve sits without changing its shape. span_native keeps
+ * its meaning either way: the native delta this sensor produces at 60.00 kg. The zero point
  * is always automatic and never writable. The assist deadband is a separate
  * relative offset so the kg scale starts at the true zero. Integer math
  * only. torque_input_cal_fault() reports overall signal plausibility:
@@ -317,6 +320,15 @@ void torque_input_build_persist(uint16_t *magic, uint8_t *version,
 #define TORQUE_CAP_LOAD_TELEMETRY_V1 0x01U
 #define TORQUE_CAP_CALIBRATION_V1    0x02U
 #define TORQUE_CAP_COAST_DIAG_V2     0x04U
+/*
+ * FW-129 D8: this controller applies a user calibration as a GAIN on top of the factory
+ * characteristic instead of replacing that characteristic with a straight line. The blob
+ * layout and length are unchanged - this bit exists so the tool can say which behaviour it is
+ * talking to, and so it knows byte 33 carries TORQUE_CAL_FLAG_* rather than a reserved zero.
+ */
+#define TORQUE_CAP_GAIN_CALIBRATION_V3 0x08U
+/* Byte 33 of the telemetry blob (was reserved). */
+#define TORQUE_CAL_FLAG_LEGACY_RECORD_DROPPED 0x01U
 uint16_t torque_input_serialize_telemetry(uint8_t *buffer);
 
 /* FW-061: outcome of the most recent coast evaluation. Kept deliberately

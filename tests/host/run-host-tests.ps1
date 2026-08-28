@@ -62,6 +62,45 @@ $suites = @(
        Modules = @((Join-Path $root 'src\walk_assist_motor.c'),
                    (Join-Path $root 'src\walk_speed_controller.c'))
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-129 unit domain: calibration invariance, mode equations, low-duty handover'
+       Harness = Join-Path $PSScriptRoot 'fw129_unit_domain_host.c'
+       # The whole assist arithmetic against the shipped modules: sensor calibration ->
+       # kilograms -> mode -> physical power -> one conversion to phase current. The central
+       # check is T2 (calibration invariance): two sensors with different gains, given the
+       # native signals their own hardware would produce for the SAME physical force, must
+       # agree on the kilograms and on the demand in all five active modes.
+       Modules = @((Join-Path $root 'src\torque_input.c'), (Join-Path $root 'src\rider_input.c'),
+                   (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
+                   (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
+                   (Join-Path $root 'src\assist_extended_boost.c'),
+                   (Join-Path $root 'src\tuning_config.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Arguments = @('--quiet')
+       # Same documented tautological-comparison exception the other suites that link
+       # torque_input.c/assist_modes.c already carry.
+       Defines = @('-Wno-type-limits') },
+    @{ Name = 'FW-129B state hygiene: ghost assist, re-entry latency, init state leak'
+       Harness = Join-Path $PSScriptRoot 'fw129b_state_hygiene_host.c'
+       # The three properties FW-129 exposed when the requested motor POWER became the request
+       # rather than a ceiling, pinned against the real ride_control chain: a charged filter is
+       # not a torque source, a returning demand is computed from current inputs, and
+       # ride_control_init() leaves nothing behind. Same module list as the FW-109/FW-112
+       # integration suite, for the same reason - none of this is provable without the real
+       # session/direction automatons underneath.
+       Modules = @((Join-Path $root 'src\torque_input.c'), (Join-Path $root 'src\rider_input.c'),
+                   (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
+                   (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
+                   (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\iq_chain.c'),
+                   (Join-Path $root 'src\pedal_assist_gate.c'),
+                   (Join-Path $root 'src\assist_dynamics.c'),
+                   (Join-Path $root 'src\assist_limits.c'), (Join-Path $root 'src\motor_core.c'),
+                   (Join-Path $root 'src\pas_quadrature.c'), (Join-Path $root 'src\pas_direction.c'),
+                   (Join-Path $PSScriptRoot 'common\map_adapter.c'),
+                   (Join-Path $PSScriptRoot 'common\motor_service_stub.c'))
+       IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScriptRoot 'common'))
+       Defines = @('-Wno-type-limits') },
     @{ Name = 'FW-101 episode recorder'
        Harness = Join-Path $PSScriptRoot 'fw101_episode_host.c'
        Modules = @(Join-Path $root 'src\ride_episode.c') },
@@ -537,7 +576,10 @@ if ($host_cc) {
             Remove-Item -LiteralPath $transportFixture,$transportCsv -Force -ErrorAction SilentlyContinue
             $env:RNA_CAPTURE_FILE = $transportFixture
         }
-        $code = Invoke-Native $exe @()
+        # A suite may pass arguments to its harness. FW-129 uses this to run in --quiet mode
+        # here (checks only) while still printing its BEFORE/AFTER table when run by hand.
+        $harnessArgs = if ($s.ContainsKey('Arguments') -and $s.Arguments) { $s.Arguments } else { @() }
+        $code = Invoke-Native $exe $harnessArgs
         if ($null -ne $transportFixture) { Remove-Item Env:RNA_CAPTURE_FILE -ErrorAction SilentlyContinue }
         Remove-Item $exe -ErrorAction SilentlyContinue
         if ($code -ne 0) {

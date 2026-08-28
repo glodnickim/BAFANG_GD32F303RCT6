@@ -41,6 +41,9 @@ $canDisplayCPathForward = (Join-Path $root 'src\CAN_Display.c') -replace '\\', '
 $currentCalCPathForward = (Join-Path $root 'src\current_cal.c') -replace '\\', '/'
 $rideControlCPathForward = (Join-Path $root 'src\ride_control.c') -replace '\\', '/'
 $rollingNoAssistDiagCPathForward = (Join-Path $root 'src\rolling_no_assist_diag.c') -replace '\\', '/'
+$focCPathForward = (Join-Path $root 'src\FOC.c') -replace '\\', '/'
+$sampleWindowCPathForward = (Join-Path $root 'src\sample_window.c') -replace '\\', '/'
+$armMathHPathForward = (Join-Path $root 'Firmware\CMSIS\arm_math.h') -replace '\\', '/'
 
 # Every harness and the module(s) it links. Add new ones here.
 $suites = @(
@@ -391,6 +394,11 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @(Join-Path $root 'src\iq_chain.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
+    @{ Name = 'FW-128C0 physical current scale (numeric model + arm_math/FOC/main source guard)'
+       Harness = Join-Path $PSScriptRoot 'fw128c0_current_scale_host.c'
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DARM_MATH_H_PATH=$armMathHPathForward", "-DFOC_C_PATH=$focCPathForward", "-DSAMPLE_WINDOW_C_PATH=$sampleWindowCPathForward", "-DMAIN_C_PATH=$mainCPathForward") },
     @{ Name = 'FW-126.7 production current calibration (real current_cal.c)'
        Harness = Join-Path $PSScriptRoot 'fw1267_current_cal_host.c'
        Modules = @(Join-Path $root 'src\current_cal.c')

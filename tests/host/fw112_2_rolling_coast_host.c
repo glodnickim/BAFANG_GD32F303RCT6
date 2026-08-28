@@ -146,13 +146,19 @@ static bool arm_snapshot_fast_rearm(void);
 static int32_t mode_iq_request(void);
 static ride_session_state_t session_state(void);
 
-/* --- the PAS decode + real-stop block, mirroring main.c:2047-2283 ------------------------------ */
+/* --- the PAS decode + real-stop block, mirroring main.c's decoder ------------------------------
+ * PRE-FW128: pas_liveness.c no longer counts. main.c derives the idle time from the 4 kHz
+ * sampler's last-transition tick and hands it in; this harness, one tick per call, mirrors that
+ * with g_liveness_idle (refreshed by ANY edge, unlike g_pas_idle). */
+static uint32_t g_liveness_idle;
+
 static void pas_chain(int event)
 {
 	if (g_pas_idle < 64000) g_pas_idle++;
+	if (g_liveness_idle < 0xFFFFFFFFU) g_liveness_idle++;
 	if (event != EV_NONE) {
 		int8_t decoded_dir = (event == EV_INVALID) ? 0 : (int8_t)event;
-		pas_liveness_transition();
+		g_liveness_idle = 0U;
 		if (decoded_dir > 0) {
 			g_pas_last_period = g_pas_idle;
 			g_pas_idle = 0;
@@ -170,7 +176,7 @@ static void pas_chain(int event)
 		else if (calc > PAS_STOP_TICKS_MAX) calc = PAS_STOP_TICKS_MAX;
 		g_pas_stop_timeout = (uint16_t)calc;
 	}
-	pas_liveness_tick(g_pas_stop_timeout);
+	pas_liveness_update(g_liveness_idle, g_pas_stop_timeout);
 	g_real_stop = pas_liveness_stopped();
 	if (g_real_stop) {
 		pas_direction_on_stop();
@@ -347,7 +353,7 @@ static void reset_all(void)
 	motor_core_init(&MS);
 	ride_control_init();
 	pas_direction_init();
-	pas_liveness_init();
+	pas_liveness_init(); g_liveness_idle = 0U;
 	g_tick = 0;
 	g_last_pulse = 0;
 	g_wheel_rolling = true;

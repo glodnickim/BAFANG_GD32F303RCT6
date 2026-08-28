@@ -58,6 +58,8 @@ OF SUCH DAMAGE.
 #include "sample_window.h"       /* FW-127C: sampling window from APPLIED geometry     */
 #include "current_feedback.h"    /* FW-127D: validity, last-valid and sample age       */
 #include "iq_chain.h"            /* FW-128A: named q-current demand stages             */
+#include "pas_sampler.h"         /* PRE-FW128: PAS sampled in the 4 kHz ISR, not main  */
+#include "pas_cadence.h"         /* PRE-FW128: cadence period, epoch and validity      */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
@@ -335,11 +337,17 @@ uint8_t ui8_hall_case=0;
 uint32_t uint32_tics_filtered=128000;
 uint16_t uint16_cadence_filtered=0;
 //--- Quadrature PAS decoder state ---
-uint8_t pas_qstate=0xFF;     //last quadrature state (0..3), 0xFF=uninit
-int8_t pas_fwd_steps=0;      //net forward steps toward one magnet pulse (PAS_STEPS_PER_PULSE)
-uint16_t pas_cycle_ticks=0;  //ticks since last forward magnet pulse (for cadence)
+//PRE-FW128: pas_qstate moved into src/pas_sampler.c - the ISR owns the line state now, and
+//there is exactly one copy of it. Read it with pas_sampler_state()/pas_sampler_seeded().
+uint16_t pas_cycle_ticks=0;  //PRE-FW128: the LAST MEASURED cadence period in real 4 kHz ticks
+                             //(diagnostic readback). It is no longer counted - see the anchor
+                             //ticks below, which are what the period is actually computed from.
+uint32_t pas_cadence_pulse_tick=0;  //tick of the last cadence pulse -> PAS_counter's origin
+//PRE-FW128: the anchor tick, the epoch flag and the validity live in src/pas_cadence.c - the
+//measurement is a module so the "same cadence at any main-loop rate" property can be tested.
 uint8_t start_phase=0;       //FW-087: 1 = pedalling has begun but no cadence measured yet (was cadence_seeded)
-uint16_t pas_idle_ticks=0;   //ticks since last quadrature transition (for stop detection)
+uint16_t pas_idle_ticks=0;   //PRE-FW128: DERIVED each pass as control_time_ticks minus the
+                             //sampler's last-transition tick. Same name, same meaning, real time.
 uint16_t pas_last_period_ticks=PAS_STOP_TICKS; //ticks between the two most recent forward transitions -> adaptive stop-timeout basis
 uint16_t pas_stop_timeout=PAS_STOP_TICKS; //this tick's adaptive stop threshold, clamp(2*pas_last_period_ticks, PAS_STOP_TICKS, PAS_STOP_TICKS_MAX)
 uint8_t forward_pedaling=0;  //FW-109: 1 = cranks turning forward (cadence>0, not stopped). No
@@ -855,6 +863,14 @@ int main(void)
     gpio_config();
     /* TIMER configuration */
     timer0_config(); // PWM for Mosfet driver
+    /*
+     * PRE-FW128: BEFORE timer1_config(), never after. nvic_config() above has already enabled
+     * TIMER1_IRQn, so the very next line starts the 4 kHz interrupt that samples PAS - and an
+     * init running after that would discard edges the ISR had already queued and reset the
+     * transition clock to a tick that had passed. control_time_ticks is still 0 here, which is
+     * the anchor the first idle reading must be measured from.
+     */
+    pas_sampler_init(0U);
     timer1_config(); //trigger regular ADC for testing
     timer2_config(); //for hall sensor handling
 
@@ -898,6 +914,7 @@ int main(void)
 	                        //on_stop) is called from main.c's own PAS decode block below, so
 	                        //main.c is where its init belongs too, same as the modules above.
 	pas_liveness_init();   //FW-112.1: any-PAS-edge liveness timer - see inc/pas_liveness.h
+	pas_cadence_reset();   //PRE-FW128: cadence period/epoch/validity - see inc/pas_cadence.h
 	crit_can_queue_init(); //FW-110: unconditional (every build) - critical HMI frames go through
 	                        //this queue whether or not CAN_DIAGNOSTICS_ENABLE is set.
 	can_multiframe_init(); //FW-110 v4: clean automaton/counters, no active transfer, no pending id
@@ -2029,19 +2046,28 @@ void TIMER1_IRQHandler(void) // regular ADC processing and common slow timing ta
 
         control_time_ticks++; //FW-103/104: the real 4 kHz timebase; never gated on the main loop
         reg_ADC_flag=1;
-#if CAN_DIAGNOSTICS_ENABLE
         /*
-         * FW-106: the raw PAS line recorder, sampled HERE and nowhere else. The production
-         * decoder in reg_ADC_processing() reads the same two pins from the MAIN LOOP, which is
-         * exactly what the diagnostic CAN traffic was stalling - so it could never be its own
-         * witness. This one cannot be delayed by anything the main loop does, which is the whole
-         * point: the difference between the two IS the measurement. Cost on an unchanged tick is
-         * one compare (see pas_raw_isr_sample), and the whole path is compiled out of the normal
-         * firmware.
+         * PRE-FW128: THE PAS sampling point. The two lines are read once, here, and the same
+         * value is handed to the production sampler and to the FW-106 raw recorder - so the
+         * decoder's view and the raw line view of a tick can no longer disagree by construction,
+         * not merely by intent.
+         *
+         * This used to be a main-loop read gated on a one-bit flag, which is what made both the
+         * cadence period and the quadrature sequence depend on how busy main happened to be.
+         * See inc/pas_sampler.h for the two defects that followed from that.
          */
-        pas_raw_isr_sample((uint8_t)(((GPIO_ISTAT(GPIOC)&GPIO_PIN_12)?1:0) |
-                                     ((GPIO_ISTAT(GPIOD)&GPIO_PIN_2)?2:0)), control_time_ticks);
+        {
+            const uint8_t pas_ab = (uint8_t)(((GPIO_ISTAT(GPIOC)&GPIO_PIN_12)?1:0) |
+                                             ((GPIO_ISTAT(GPIOD)&GPIO_PIN_2)?2:0));
+            pas_sampler_isr_tick(pas_ab, control_time_ticks);
+#if CAN_DIAGNOSTICS_ENABLE
+            /*
+             * FW-106: the raw PAS line recorder. Still sampled in the ISR, now from the SAME
+             * read as the production sampler above rather than a second one of its own.
+             */
+            pas_raw_isr_sample(pas_ab, control_time_ticks);
 #endif
+        }
 //        pulse_counter++;
 //        if(pulse_counter>1000)gpio_bit_set(GPIOB,GPIO_PIN_8);
 //        else gpio_bit_reset(GPIOB,GPIO_PIN_8);
@@ -2333,22 +2359,26 @@ void reg_ADC_processing(void)
 	uint16_t torque_raw_mv=((adc_value[2])*3300)>>12; //map ADC value to mV
 	MS.torque_on_crank=torque_input_correct(torque_raw_mv);
 	if(MS.torque_on_crank>760&&PAS_counter<MP.PAS_timeout)torque_counter=0;//reset counter, if pressure on pedal and pedals rotating
-	//--- Quadrature PAS decoder (PC12=A, PD2=B) @4kHz -> feeds cadence/Backwards/torque/p_human/PAS_counter ---
+	uint8_t pas_transition_this_pass = 0;
+	//--- Quadrature PAS decoder (PC12=A, PD2=B) -> cadence/Backwards/torque/p_human/PAS_counter ---
+	//
+	// PRE-FW128: the lines are no longer read here. They are sampled in TIMER1_IRQHandler at a
+	// guaranteed 4 kHz and queued as timestamped events; this loop drains EVERY event that
+	// occurred since the last pass, in order, and runs exactly the code it always ran - once per
+	// real transition instead of once per main-loop pass. A busy main loop now delays when the
+	// consequences are applied; it can no longer change what happened or when.
 	{
-		uint8_t s = ((GPIO_ISTAT(GPIOC)&GPIO_PIN_12)?1:0) | ((GPIO_ISTAT(GPIOD)&GPIO_PIN_2)?2:0);
-		if(pas_idle_ticks<64000) pas_idle_ticks++;
-		if(pas_cycle_ticks<64000) pas_cycle_ticks++;
-		if(pas_qstate==0xFF){ pas_qstate=s; }
-		else if(s!=pas_qstate){
-			//FW-107: decode table moved to src/pas_quadrature.c (pure, no state) so a host test
-			//can drive the real production logic - see inc/pas_quadrature.h. Same table, same
-			//PAS_DIR_SIGN, same result.
-			int8_t st = pas_quadrature_step(pas_qstate, s); //+1 = forward
-			uint8_t pas_qstate_prev=pas_qstate;   //FW-097 diag: which transition it was
-			pas_qstate=s;
-			pas_liveness_transition();   //FW-112.1: EVERY physical edge (fwd/rev/INVALID) is
-			                             //crank liveness evidence - the direction decoder may
-			                             //refuse it permission, never liveness. See pas_liveness.h.
+		pas_step_event_t ev;
+		while(pas_sampler_pop(&ev)){
+			const uint8_t s = (uint8_t)(ev.states & 0x0FU);
+			const uint8_t pas_qstate_prev = (uint8_t)(ev.states >> 4);   //FW-097 diag: which transition it was
+			//FW-107: the decode table lives in src/pas_quadrature.c and is now called from the
+			//sampler - ONE decoder, one call site. Same table, same PAS_DIR_SIGN, same result.
+			const int8_t st = ev.step;   //+1 = forward, -1 = reverse, 0 = illegal two-bit jump
+			pas_transition_this_pass = 1;
+			//FW-112.1 liveness is refreshed by the sampler's transition clock instead of a call
+			//here: EVERY physical edge (fwd/rev/INVALID) is crank liveness evidence, and the
+			//anchor it is measured from is updated by all three. See pas_liveness.h.
 #if CAN_DIAGNOSTICS_ENABLE
 			/*
 			 * FW-106 — MUST run before anything below that can arm pas_trace/pas_raw.
@@ -2378,7 +2408,7 @@ void reg_ADC_processing(void)
 			 * live snapshots, one tick stale here since ride_control_update() for this tick has
 			 * not run yet - acceptable for a context tag, unlike for a decision.
 			 */
-			uint16_t pt_gap_ticks = pas_idle_ticks;
+			uint16_t pt_gap_ticks = ev.gap;   //PRE-FW128: real ticks since the previous edge
 			{
 				ride_gate_snapshot_t pt_gate;
 				ride_control_get_gate_snapshot(&pt_gate);
@@ -2415,8 +2445,9 @@ void reg_ADC_processing(void)
 #endif
 			}
 			if(st>0){            //forward step
-				pas_last_period_ticks=pas_idle_ticks; //gap since the previous forward transition -> adaptive stop-timeout basis
-				pas_idle_ticks=0;
+				pas_last_period_ticks=ev.gap; //PRE-FW128: REAL ticks since the previous transition -> adaptive stop-timeout basis
+				//pas_idle_ticks is no longer reset here - it is DERIVED below from the sampler's
+				//transition clock, so it stays correct even if this pass runs late.
 				pas_fwd_accum++;            //FW-027 diag: free-running forward-step counter (EMI test)
 				//FW-086: first forward step after a stop (or after a reverse step) begins a NEW
 				//cadence interval. pas_cycle_ticks is reset ONLY when a cadence pulse fires, and
@@ -2431,7 +2462,7 @@ void reg_ADC_processing(void)
 				//reading 4/3 too high. So the step counter is held at 0 for this one step (see the
 				//short-circuit at the pulse test below) and the pulse lands a full interval later.
 				uint8_t cadence_interval_restart = (pas_direction_fwd_run()==0);
-				if(cadence_interval_restart){ pas_cycle_ticks=0; pas_fwd_steps=0; }
+				//PRE-FW128: the anchor, the step count and the epoch belong to pas_cadence.c now.
 				//FW-107: increments fwd_run (jiggle-proof engage). FW-109 v2: also breaks the
 				//reverse run and decays the legacy backpedal latch, internally - see pas_direction.c.
 				pas_direction_on_step(st);
@@ -2468,19 +2499,28 @@ void reg_ADC_processing(void)
 					start_phase=1;
 				}
 #endif
-				//FW-086: the short-circuit keeps pas_fwd_steps at 0 on the restart step, so the
+				//FW-086: the restart step is the interval ORIGIN, not its first count, so the
 				//interval that follows spans a full PAS_STEPS_PER_PULSE and reads a true cadence.
-				if(!cadence_interval_restart && ++pas_fwd_steps>=PAS_STEPS_PER_PULSE){ //one cadence pulse every PAS_STEPS_PER_PULSE forward transitions (see config.h)
-					pas_fwd_steps=0;
-					if(pas_cycle_ticks>70){
-						MS.cadence=10000/pas_cycle_ticks;
-						start_phase=0;                  //FW-087: a real measurement ends the start phase
-						uint16_cadence_filtered-=uint16_cadence_filtered>>3;
-						uint16_cadence_filtered+=MS.cadence;
-						MS.p_human=(uint16_t)((float)(MS.cadence*MS.torque_filtered)*0.00342);
+				//pas_cadence.c enforces that now - see pas_cadence_forward_step().
+				/*
+				 * PRE-FW128: the period and the epoch are pas_cadence.c's; everything that USES
+				 * a fresh measurement stays here, unchanged. The step is stamped with ev.tick -
+				 * the tick the edge really happened on - so the interval is two hardware
+				 * timestamps apart and cannot be shortened by a busy main loop.
+				 */
+				{
+					pas_cadence_step_t cad = pas_cadence_forward_step(ev.tick, cadence_interval_restart);
+					if(cad.pulse){
+						pas_cycle_ticks = cad.period_ticks;   //diagnostic readback, real ticks
+						pas_cadence_pulse_tick = ev.tick;     //PAS_counter's origin, in real ticks
+						if(cad.measured){
+							MS.cadence = cad.rpm;
+							start_phase = 0;                  //FW-087: a real measurement ends the start phase
+							uint16_cadence_filtered -= uint16_cadence_filtered>>3;
+							uint16_cadence_filtered += MS.cadence;
+							MS.p_human = (uint16_t)((float)(MS.cadence*MS.torque_filtered)*0.00342);
+						}
 					}
-					pas_cycle_ticks=0;
-					PAS_counter=0;
 				}
 			}else if(st<0){      //backward step
 				/*
@@ -2497,13 +2537,18 @@ void reg_ADC_processing(void)
 				 */
 				pas_rev_events++;
 				pas_rev_last_trans=(uint8_t)((pas_qstate_prev<<4)|s);
-				pas_rev_last_gap=pas_idle_ticks;
+				pas_rev_last_gap=ev.gap;
 				pas_rev_last_period=pas_last_period_ticks;
 				pas_rev_last_cadence=MS.cadence;
 				pas_rev_last_fwdrun=pas_direction_fwd_run();   //FW-107: read before pas_direction_on_step() resets it below
-				if(pas_idle_ticks<pas_rev_min_gap) pas_rev_min_gap=pas_idle_ticks;
-				pas_idle_ticks=0;
-				pas_fwd_steps=0;
+				if(ev.gap<pas_rev_min_gap) pas_rev_min_gap=ev.gap;
+				/*
+				 * PRE-FW128: the cadence epoch dies here. The crank went backwards, so any
+				 * interval still being assembled would span forward time, reverse time and
+				 * forward time again and report a period the pedals never took. The next RPM
+				 * must come from a clean forward run and nothing else.
+				 */
+				pas_cadence_break_epoch(0);
 				/*
 				 * UNCHANGED, and deliberately so: every reverse step clears the forward run.
 				 * ride_core_pedaling needs fwd_run >= tuning_config_start_steps(), so this
@@ -2553,6 +2598,38 @@ void reg_ADC_processing(void)
 				 */
 				pas_direction_on_step(st);
 				pas_forward_confirmed_this_tick = pas_direction_forward_confirmed_last_call();   //FW-109 (always false here)
+				/*
+				 * PRE-FW128: an illegal jump also kills the cadence epoch, and it must. The
+				 * sequence is either bounce or a genuinely missed step; in both cases the
+				 * forward-step count assembling the current period is now wrong, so a period
+				 * ending after it would be measured over an unknown number of steps. Refusing
+				 * to publish is the only honest answer - there is no substitute value to
+				 * invent. The step count restarts so the next pulse spans a full, known
+				 * interval, exactly as it does after a reverse step.
+				 */
+				pas_cadence_break_epoch(1);
+			}
+		}
+		/*
+		 * PRE-FW128: ordering lost. The queue held 32 unread edges, so the sequence main is
+		 * about to reason about is no longer the sequence the crank produced. The edges were
+		 * still counted for liveness (they physically happened), but nothing may be measured
+		 * across the gap.
+		 */
+		if(pas_sampler_take_overflow()) pas_cadence_break_epoch(2);
+		/*
+		 * PRE-FW128: the two PAS clocks, DERIVED from the sampler's transition timestamp rather
+		 * than counted here. Both keep their old name, type and meaning; what changed is that
+		 * they now measure time instead of main-loop passes.
+		 */
+		{
+			uint32_t idle32 = control_now - pas_sampler_last_transition_tick();
+			if(idle32>64000U) idle32=64000U;
+			pas_idle_ticks=(uint16_t)idle32;
+			{
+				uint32_t pc = control_now - pas_cadence_pulse_tick;
+				if(pc>64000U) pc=64000U;
+				PAS_counter=(uint16_t)pc;
 			}
 		}
 		//FW-0xx: adaptive stop timeout - 2x the last real forward-transition gap, clamped to
@@ -2565,12 +2642,13 @@ void reg_ADC_processing(void)
 			else if(stop_timeout_calc>PAS_STOP_TICKS_MAX) stop_timeout_calc=PAS_STOP_TICKS_MAX;
 			pas_stop_timeout = (uint16_t)stop_timeout_calc;
 		}
-		pas_liveness_tick(pas_stop_timeout);   //FW-112.1: REAL_STOP now answers ONLY "no physical
-		                                       //PAS edge of any direction for the timeout" - see
-		                                       //pas_liveness.h. pas_idle_ticks below stays the
-		                                       //cadence-gap/adaptive basis and diagnostics.
+		pas_liveness_update(pas_idle_ticks, pas_stop_timeout);   //FW-112.1: REAL_STOP answers ONLY
+		                                       //"no physical PAS edge of any direction for the
+		                                       //timeout". PRE-FW128: fed the DERIVED real idle
+		                                       //time, so the verdict no longer depends on how
+		                                       //often this loop runs. See pas_liveness.h.
 		pas_real_stop = pas_liveness_stopped() ? 1 : 0;   //FW-109: computed once, before the stop reset below touches pas_idle_ticks's own consequences
-		if(pas_liveness_stopped()){ MS.cadence=0; start_phase=0; uint16_cadence_filtered=0; pas_fwd_steps=0; pas_direction_on_stop(); } //stop
+		if(pas_liveness_stopped()){ MS.cadence=0; start_phase=0; uint16_cadence_filtered=0; pas_cadence_reset(); pas_direction_on_stop(); } //stop
 		//FW-087: the start phase counts as forward pedalling. The fake 1 rpm used to carry this
 		//implicitly through MS.cadence>0; without saying so explicitly, dropping the fake would
 		//close the assist gate a SECOND way, because forward_pedaling feeds pedaling_active
@@ -2614,7 +2692,11 @@ void reg_ADC_processing(void)
 		//"the counter was reset by a pulse" - and (control_time_ticks-speed_last_tick) is the
 		//same silence-so-far read used by the display decay above.
 		static uint32_t prev_speed_last_tick=0;
-		if(pas_idle_ticks==0) coast_wheel_moved=0;                 //pedalling -> new episode
+		//PRE-FW128: was "pas_idle_ticks==0", which was only ever true because the counter was
+		//reset in this same pass. The derived idle time is 0 only when this pass happens to run
+		//on the very tick of the edge, so the question is asked directly instead: did we process
+		//a transition this pass?
+		if(pas_transition_this_pass) coast_wheel_moved=0;           //pedalling -> new episode
 		if(speed_last_tick!=prev_speed_last_tick ||                //a new pulse was accepted
 		   MS.Speedx100>=TQ_RECAL_MOVING_X100 ||
 		   (control_time_ticks-speed_last_tick)<SPEED_STOP_TICKS) coast_wheel_moved=1; //pulse within the stop window
@@ -2668,7 +2750,7 @@ void reg_ADC_processing(void)
 			.start_phase = start_phase != 0,
 			.torque_sensor_valid = torque_fault == 0 &&
 				!torque_input_calibration_active(),
-			.pas_sensor_valid = pas_qstate != 0xFF
+			.pas_sensor_valid = pas_sampler_seeded() != 0U
 		};
 		rider_input_update(&input);
 		//FW-109: consumed for this tick - must not survive to look like a fresh event next tick.
@@ -2685,7 +2767,10 @@ void reg_ADC_processing(void)
     t3100_counter++;
 #endif
     if(torque_counter<64000)torque_counter++;
-    if(PAS_counter<64000)PAS_counter++;
+    //PRE-FW128: PAS_counter is no longer counted here. It is derived above from the real tick of
+    //the last cadence pulse, so "no cadence pulse for MP.PAS_timeout" means the same amount of
+    //TIME whatever the main loop is doing. torque_counter is NOT part of this card - see the
+    //report's list of remaining main-loop-dependent counters.
     //FW-103/104: control_time_ticks replaces Speed_counter - incremented in TIMER1_IRQHandler itself.
     if(uint16_half_rotation_counter<64000)uint16_half_rotation_counter++;
     if(pwm_cutoff_active && pwm_cutoff_tick<SOFT_CUTOFF_TICKS)pwm_cutoff_tick++; //taktowanie okna miekkiego zwolnienia @4kHz
@@ -3040,8 +3125,8 @@ void reg_ADC_processing(void)
                     int32_t rt_iq = rd_in.iq_setpoint; if (rt_iq < 0) rt_iq = 0;
                     if (rt_iq > 65535) rt_iq = 65535;
                     pas_trace_input_t rt_in = {
-                        .from_state = pas_qstate,
-                        .to_state = pas_qstate,
+                        .from_state = pas_sampler_state(),
+                        .to_state = pas_sampler_state(),
                         .reverse = false,
                         .gap_ticks = pas_idle_ticks,
                         .disc_pos = pas_fwd_accum,
@@ -4121,7 +4206,7 @@ static const diag_can_ops_t diag_can_ops = { diag_can_transmit, diag_can_state }
  * were dropped between the builder and the wire with no error, no counter and nothing in the log.
  * Adding a frame below without bumping this number now fails the build instead.
  */
-#define DIAG_AGGREGATE_FIXED_FRAMES   14U   /* 0x10203..0x1020F, 0x10219, 0x10228 */
+#define DIAG_AGGREGATE_FIXED_FRAMES   16U   /* 0x10203..0x1020F, 0x10219, 0x10228, 0x10229, 0x1022A */
 #define DIAG_AGGREGATE_FRAME_COUNT    (DIAG_AGGREGATE_FIXED_FRAMES)
 _Static_assert(DIAG_AGGREGATE_FRAME_COUNT <= DIAG_AGGREGATE_SNAPSHOT_MAX,
 	"diag_build_aggregate() builds more frames than diag_session can snapshot - the extra ones "
@@ -4478,6 +4563,72 @@ static void diag_build_aggregate(void){
 	transmit_message.tx_data[6] = (wa_hold_ticks)&0xFF;
 	transmit_message.tx_data[7] = 0;
 	DIAG_EMIT();
+
+	/*
+	 * PRE-FW128 diag (ID 0x00010229): IS THE PAS TIMEBASE HEALTHY?
+	 *
+	 * The one question a ride log could not answer before. Every number here is a count, not a
+	 * sample, so the frame costs nothing at 4 kHz and says what happened over the whole ride.
+	 *
+	 *   Data1 = forward transitions   (u16, saturated)  the crank's own step count
+	 *   Data2 = reverse transitions   (u16)             FW-097's 43 false reverses live here
+	 *   Data3 = ILLEGAL transitions   (u16)             two-bit jumps: bounce, or a missed step
+	 *   Data4 = sampler ring overflows(u8)  |  flags(u8)
+	 *
+	 * An overflow count above zero is the direct proof that the main loop stalled long enough to
+	 * lose ORDER - the condition that used to be invisible and silently corrupt the cadence.
+	 */
+	{
+		const pas_sampler_stats_t *ps = pas_sampler_get_stats();
+		uint32_t f = ps->forward_count; if(f>65535U) f=65535U;
+		uint32_t r = ps->reverse_count; if(r>65535U) r=65535U;
+		uint32_t v = ps->invalid_count; if(v>65535U) v=65535U;
+		uint32_t o = ps->overflow_count; if(o>255U) o=255U;
+		transmit_message.tx_efid = 0x00010229;
+		transmit_message.tx_data[0] = (f>>8)&0xFF;
+		transmit_message.tx_data[1] = (f)&0xFF;
+		transmit_message.tx_data[2] = (r>>8)&0xFF;
+		transmit_message.tx_data[3] = (r)&0xFF;
+		transmit_message.tx_data[4] = (v>>8)&0xFF;
+		transmit_message.tx_data[5] = (v)&0xFF;
+		transmit_message.tx_data[6] = (uint8_t)o;
+		transmit_message.tx_data[7] = (uint8_t)((pas_sampler_seeded()?0x01:0) |
+		                                        (pas_liveness_stopped()?0x02:0));
+		DIAG_EMIT();
+	}
+
+	/*
+	 * PRE-FW128 diag (ID 0x0001022A): CADENCE - RAW, FILTERED, AND WHETHER IT IS A MEASUREMENT.
+	 *
+	 * The card asks for these three to stop being the same number wearing different hats.
+	 *
+	 *   Data1 = last measured period  (u16 real 4 kHz ticks)  the timebase, in the raw
+	 *   Data2 hi = cadence_raw_rpm    lo = cadence_filtered_rpm (the >>3 IIR, converted back)
+	 *   Data3 = flags | epochs voided by REVERSE (u8)
+	 *   Data4 = epochs voided by INVALID (u8) | by OVERFLOW (u8)
+	 *
+	 * The three "voided" counters are what tell a noisy sensor from a busy CPU: bounce shows up
+	 * as invalid, real backpedalling as reverse, and a stalled main loop as overflow.
+	 */
+	{
+		const pas_cadence_state_t *pc = pas_cadence_get();
+		uint32_t br = pc->broken_reverse;  if(br>255U) br=255U;
+		uint32_t bi = pc->broken_invalid;  if(bi>255U) bi=255U;
+		uint32_t bo = pc->broken_overflow; if(bo>255U) bo=255U;
+		uint16_t filt = (uint16_t)(uint16_cadence_filtered>>3);
+		transmit_message.tx_efid = 0x0001022A;
+		transmit_message.tx_data[0] = (pc->last_period_ticks>>8)&0xFF;
+		transmit_message.tx_data[1] = (pc->last_period_ticks)&0xFF;
+		transmit_message.tx_data[2] = (uint8_t)((pc->rpm>255U)?255U:pc->rpm);
+		transmit_message.tx_data[3] = (uint8_t)((filt>255U)?255U:filt);
+		transmit_message.tx_data[4] = (uint8_t)((pc->valid?0x01:0) |        /* a real measurement stands */
+		                                        (pc->epoch_valid?0x02:0) |  /* the interval is intact    */
+		                                        (start_phase?0x04:0));      /* "seeded": believed pedalling, not yet measured */
+		transmit_message.tx_data[5] = (uint8_t)br;
+		transmit_message.tx_data[6] = (uint8_t)bi;
+		transmit_message.tx_data[7] = (uint8_t)bo;
+		DIAG_EMIT();
+	}
 }
 
 static bool diag_aggregate_frame(uint16_t index, uint32_t *efid, uint8_t *data)

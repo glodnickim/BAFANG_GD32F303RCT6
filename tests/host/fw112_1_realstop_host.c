@@ -140,16 +140,22 @@ static bool arm_snapshot_fast_rearm(void);
 static int32_t mode_iq_request(void);
 static ride_session_state_t session_state(void);
 
-/* --- the PAS decode + real-stop block, mirroring main.c:2047-2283 ---------------------------------
- * The liveness module is the REAL production one (src/pas_liveness.c) and it is fed exactly the
- * way main.c feeds it: pas_liveness_transition() on EVERY physical edge (forward, reverse and
- * INVALID), pas_liveness_tick(stop_timeout) once per tick after the adaptive timeout is known. */
+/* --- the PAS decode + real-stop block, mirroring main.c's decoder ------------------------------
+ * The liveness module is the REAL production one (src/pas_liveness.c). PRE-FW128 it no longer
+ * keeps a counter: main.c derives the idle time from the 4 kHz sampler's last-transition tick and
+ * hands it in. This harness advances one tick per call, so tracking the same quantity here is an
+ * exact mirror - and it makes the distinction the tests already relied on visible: g_pas_idle is
+ * the CADENCE gap (an INVALID edge does not refresh it), g_liveness_idle is the LIVENESS gap
+ * (an INVALID edge does). */
+static uint32_t g_liveness_idle;
+
 static void pas_chain(int event)
 {
-	if (g_pas_idle < 64000) g_pas_idle++;                       /* main.c:2049 */
+	if (g_pas_idle < 64000) g_pas_idle++;
+	if (g_liveness_idle < 0xFFFFFFFFU) g_liveness_idle++;
 	if (event != EV_NONE) {
 		int8_t decoded_dir = (event == EV_INVALID) ? 0 : (int8_t)event;
-		pas_liveness_transition();                               /* main.c:2059 - EVERY edge */
+		g_liveness_idle = 0U;                                    /* EVERY edge, invalid included */
 		if (decoded_dir > 0) {
 			g_pas_last_period = g_pas_idle;                      /* main.c:2128 */
 			g_pas_idle = 0;                                      /* main.c:2129 */
@@ -169,7 +175,7 @@ static void pas_chain(int event)
 		else if (calc > PAS_STOP_TICKS_MAX) calc = PAS_STOP_TICKS_MAX;
 		g_pas_stop_timeout = (uint16_t)calc;
 	}
-	pas_liveness_tick(g_pas_stop_timeout);                       /* main.c:2278 */
+	pas_liveness_update(g_liveness_idle, g_pas_stop_timeout);    /* main.c: derived real idle */
 	g_real_stop = pas_liveness_stopped();                        /* main.c:2282 */
 	if (g_real_stop) {
 		pas_direction_on_stop();                                 /* main.c:2283 (session-relevant) */
@@ -388,7 +394,7 @@ static void reset_all(void)
 	motor_core_init(&MS);
 	ride_control_init();
 	pas_direction_init();
-	pas_liveness_init();           /* FW-112.1 */
+	pas_liveness_init(); g_liveness_idle = 0U;   /* FW-112.1 */
 	g_tick = 0;
 	g_pas_idle = 0;
 	g_pas_last_period = PAS_STOP_TICKS;
@@ -564,7 +570,11 @@ static void test_s6_forward_stop_boundary(void)
 	step_t s = establish_riding();           /* on return g_pas_idle = FWD_PERIOD, timeout=802 */
 	CHECK(g_pas_idle == FWD_PERIOD, "S6: setup idle counter is exactly the keep-alive gap");
 	CHECK(session_state() == RIDE_SESSION_ACTIVE, "S6: ACTIVE before the stop");
-	hold(&s, TIMEOUT_TICKS - FWD_PERIOD - 1U);   /* idle reaches 802 exactly: NOT > 802 */
+	/* PRE-FW128: idle is now "ticks since the last edge", so the edge tick itself reads 0 and
+	 * not 1 - the same physical gap yields one less than the old self-incrementing counter did.
+	 * Every hold below is one tick longer to reach the SAME peak idle, so the boundary under
+	 * test is unchanged; only the off-by-one in the old counter is gone. */
+	hold(&s, TIMEOUT_TICKS - FWD_PERIOD);        /* idle reaches 802 exactly: NOT > 802 */
 	CHECK(!g_real_stop, "S6: idle == timeout is still NOT a real stop (strict >)");
 	CHECK(session_state() == RIDE_SESSION_ACTIVE, "S6: session still ACTIVE at idle == timeout");
 	hold(&s, 1U);                            /* idle reaches 803 > 802: the real stop */
@@ -737,7 +747,7 @@ static void test_s13_gap_boundary(void)
 
 	/* gap = T-1: the liveness idle peaks at T-1, still <= T -> alive. */
 	rev1(&s);
-	hold(&s, T - 2U);
+	hold(&s, T - 1U);   /* PRE-FW128: one more tick for the same peak idle - see S6 */
 	CHECK(!g_real_stop, "S13: gap=timeout-1 keeps liveness (peak idle == T-1)");
 	CHECK(pas_liveness_idle_ticks() == (uint32_t)(T - 1U), "S13: peak liveness idle is exactly T-1");
 	CHECK(session_state() == RIDE_SESSION_SUSPENDED_BY_DIRECTION, "S13: SUSPENDED at gap=T-1");
@@ -745,7 +755,7 @@ static void test_s13_gap_boundary(void)
 
 	/* gap = T: peak idle == T, and stopped is strict idle > T -> alive. */
 	rev1(&s);
-	hold(&s, T - 1U);
+	hold(&s, T);
 	CHECK(!g_real_stop, "S13: gap=timeout exactly keeps liveness (idle == T is NOT > T)");
 	CHECK(pas_liveness_idle_ticks() == (uint32_t)T, "S13: peak liveness idle is exactly T");
 	CHECK(session_state() == RIDE_SESSION_SUSPENDED_BY_DIRECTION, "S13: SUSPENDED at gap=T");
@@ -755,7 +765,7 @@ static void test_s13_gap_boundary(void)
 	 * not a false stop: a no-edge interval LONGER than the intended stop interval IS a stop, and
 	 * here it fires one tick before the next reverse edge would have arrived. */
 	rev1(&s);
-	hold(&s, T);
+	hold(&s, T + 1U);
 	CHECK(g_real_stop, "S13: gap=timeout+1 fires REAL_STOP (idle reached T+1 > T)");
 	CHECK(pas_liveness_idle_ticks() == (uint32_t)(T + 1U), "S13: peak liveness idle is exactly T+1");
 	CHECK(session_state() == RIDE_SESSION_COLD, "S13: the >interval no-edge gap sent the session to COLD");

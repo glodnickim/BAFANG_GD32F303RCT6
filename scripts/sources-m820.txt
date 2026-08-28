@@ -33,6 +33,8 @@ src/pas_direction.c
 src/pas_liveness.c
 src/pedal_assist_gate.c
 src/pas_quadrature.c
+src/pas_sampler.c
+src/pas_cadence.c
 src/pas_raw.c
 src/pas_trace.c
 src/power_curve.c

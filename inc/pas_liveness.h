@@ -23,13 +23,17 @@
 
 void pas_liveness_init(void);
 
-/* Call once per control tick, AFTER this tick's stop threshold is known. The module counts
- * idle ticks internally and records this tick's REAL_STOP verdict. */
-void pas_liveness_tick(uint16_t stop_timeout_ticks);
-
-/* Call once on every physical PAS transition - forward, reverse and INVALID alike. The crank's
- * encoder lines demonstrably moved; only the direction decoder could not call it safe. */
-void pas_liveness_transition(void);
+/*
+ * Call once per control pass with the REAL idle time - ticks since the last physical PAS edge
+ * of any direction, measured against the 4 kHz sampler clock (pas_sampler_last_transition_tick).
+ *
+ * PRE-FW128: this replaces pas_liveness_tick()/pas_liveness_transition(). The module used to
+ * hold the counter itself and advance it once per call, which made the stop verdict a function
+ * of how often the main loop ran. Handing the elapsed time in makes it a function of the clock,
+ * which is what "the crank has stopped" was always supposed to mean. Refreshed by ANY qualified
+ * edge - forward, reverse and invalid alike - because the anchor it is measured from is.
+ */
+void pas_liveness_update(uint32_t idle_ticks_real, uint16_t stop_timeout_ticks);
 
 /* This tick's verdict: true when no PAS transition has occurred for longer than the stop
  * threshold - the crank has genuinely stopped. */

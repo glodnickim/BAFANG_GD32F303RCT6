@@ -525,6 +525,17 @@
 //Quadrature PAS decoder (PC12=A, PD2=B), polled @4kHz. Confirmed by CAN log: forward = negative raw step.
 #define PAS_DIR_SIGN -1       // sign applied to raw quadrature step so that FORWARD pedalling => +1 (from test)
 #define PAS_STEPS_PER_PULSE 4 // cadence pulse every 4 quadrature transitions -> 24 pulses/rev.
+// PRE-FW128: quadrature state transitions per crank revolution. The repo has always assumed 96
+// (= 24 magnets x 4 states, i.e. 3.75 deg per transition - the figure the torque EMA comment in
+// main.c quotes). It is NOT independently verified: the PAS resolution note records an open
+// ambiguity between 48 and 96 transitions/rev, which is a factor of TWO on the cadence SCALE.
+// That is a scale question and cannot produce jitter, so this card does not change it - but it
+// is written down here rather than left implicit inside a magic number.
+#define PAS_TRANSITIONS_PER_REV 96U
+// rpm = steps_per_pulse * 60 * tick_rate / (transitions_per_rev * period_ticks)
+//     = 4 * 60 * 4000 / 96 / ticks = 10000 / ticks   <- exactly the constant used before.
+#define PAS_CADENCE_RPM_NUMERATOR \
+    (((uint32_t)PAS_STEPS_PER_PULSE * 60UL * (uint32_t)CONTROL_TIMEBASE_HZ) / PAS_TRANSITIONS_PER_REV)
 /*
  * FW-086: RESOLVED - 96 quadrature transitions per crank revolution (3.75 deg each).
  * The old note here left this open, citing a reverse-engineering claim of 48 pulses/rev

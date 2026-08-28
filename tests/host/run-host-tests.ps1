@@ -394,6 +394,10 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @(Join-Path $root 'src\iq_chain.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
+    @{ Name = 'PRE-FW128 PAS timebase (real pas_sampler.c + pas_cadence.c + pas_quadrature.c)'
+       Harness = Join-Path $PSScriptRoot 'pre128_pas_timebase_host.c'
+       Modules = @((Join-Path $root 'src\pas_sampler.c'), (Join-Path $root 'src\pas_cadence.c'), (Join-Path $root 'src\pas_quadrature.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
     @{ Name = 'FW-128C0 physical current scale (numeric model + arm_math/FOC/main source guard)'
        Harness = Join-Path $PSScriptRoot 'fw128c0_current_scale_host.c'
        Modules = @()

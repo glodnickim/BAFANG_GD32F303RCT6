@@ -39,6 +39,7 @@
 #include "can_reply_effects.h"
 #if CAN_DIAGNOSTICS_ENABLE
 #include "rolling_no_assist_dump.h"
+#include "qs_transition_diag.h"
 #include "qs_transition_dump.h"
 #endif
 
@@ -63,6 +64,9 @@ void sendAcknoledge(void);
 //FW-068/076: the result of a config write has to reach the tool. Used by the multiframe
 //blobs and by the short 0x3203 write; a rejected frame must never read as a success.
 void sendWriteResult(uint16_t command, uint8_t applied);
+#if CAN_DIAGNOSTICS_ENABLE
+static void send_qs_transition_status(void);
+#endif
 bool send_multiframe(uint16_t command, char* data, uint8_t length );
 bool send_multiframe_tracked(uint16_t command, char* data, uint8_t length,
                               can_multiframe_id_t *out_id); //FW-110 v4
@@ -345,6 +349,12 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 					                    qs_transition_dump_request()) ? 1U : 0U;
 					sendWriteResult(0x6030, accepted);
 				}
+				else if(Ext_ID_Rx.command==0x6031){
+					/* QS-1R: one-shot request. The ISR owns the actual ring reset. */
+					uint8_t accepted = (Ext_ID_Rx.source == 5U && receive_message.rx_dlen == 0U &&
+					                    !qs_transition_dump_busy() && qs_transition_diag_request_new_capture()) ? 1U : 0U;
+					sendWriteResult(0x6031, accepted);
+				}
 #endif
 				else if(Ext_ID_Rx.command==0x3203){ //FW-076: speed limit + wheel diameter code + circumference
 					/*
@@ -408,10 +418,16 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 #if CAN_DIAGNOSTICS_ENABLE
 				   && Ext_ID_Rx.command!=0x602C
 				   && Ext_ID_Rx.command!=0x6030
+				   && Ext_ID_Rx.command!=0x6031
 #endif
 				  ) sendAcknoledge();
 				break;
 			case READ_CMD:
+				#if CAN_DIAGNOSTICS_ENABLE
+				if(Ext_ID_Rx.command==0x6031 && Ext_ID_Rx.source==5U && receive_message.rx_dlen==0U)
+					send_qs_transition_status();
+				else
+				#endif
 				sendCAN_Tx(MP,MS);
 				break;
 			case NORMAL_ACK:
@@ -658,6 +674,25 @@ void sendWriteResult(uint16_t command, uint8_t applied){
 	uint8_t d[8] = {0};
 	can_tx_queue_enqueue(efid, 0U, d); //FW-110: was a blocking can_message_transmit/can_transmit_states wait
 }
+
+#if CAN_DIAGNOSTICS_ENABLE
+/* QS-1R STATUS, READ 0x6031 -> NORMAL_ACK 0x822A6031, DLC 8:
+ * schema, state(IDLE/ARMED/TRIGGERED/COMPLETE), generation, sample_count,
+ * flags(bit0 export-ready, bit1 export busy), trigger events, trigger index, reserved. */
+static void send_qs_transition_status(void)
+{
+	qs_transition_status_t s;
+	uint8_t d[8] = {1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
+	qs_transition_diag_status(&s);
+	d[1] = (uint8_t)s.state;
+	d[2] = s.generation;
+	d[3] = s.sample_count;
+	d[4] = (uint8_t)((s.export_ready ? 0x01U : 0U) | (qs_transition_dump_busy() ? 0x02U : 0U));
+	d[5] = s.trigger_events;
+	d[6] = s.trigger_index;
+	can_tx_queue_enqueue(0x022A6031U, 8U, d);
+}
+#endif
 
 void sendAcknoledge(void){
 	Ext_ID_Tx.command = Ext_ID_Rx.command;

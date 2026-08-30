@@ -20,6 +20,22 @@ typedef enum {
 	QS_EVT_FAULT_HARD_OFF = 64U
 } qs_transition_event_t;
 
+typedef enum {
+	QS_TRANSITION_IDLE = 0U,
+	QS_TRANSITION_ARMED = 1U,
+	QS_TRANSITION_TRIGGERED = 2U,
+	QS_TRANSITION_COMPLETE = 3U
+} qs_transition_state_t;
+
+typedef struct {
+	qs_transition_state_t state;
+	uint8_t generation;
+	uint8_t sample_count;
+	uint8_t trigger_events;
+	uint8_t trigger_index;
+	bool export_ready;
+} qs_transition_status_t;
+
 typedef struct {
 	uint32_t foc_cycle;
 	int32_t iq_requested;
@@ -60,5 +76,8 @@ bool qs_transition_diag_is_complete(void);
 bool qs_transition_diag_sample_at(uint16_t chronological_index, qs_transition_sample_t *out);
 uint8_t qs_transition_diag_capture_id(void);
 uint16_t qs_transition_diag_trigger_index(void);
+void qs_transition_diag_status(qs_transition_status_t *out);
+/* Request only: the ISR performs the complete reset, so it can never observe a partial ring. */
+bool qs_transition_diag_request_new_capture(void);
 
 #endif

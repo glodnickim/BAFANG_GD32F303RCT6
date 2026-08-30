@@ -8,7 +8,8 @@ enum { QS_ARMED = 0U, QS_CAPTURING = 1U, QS_COMPLETE = 2U };
 static struct {
 	qs_transition_sample_t slots[QS_TRANSITION_DIAG_SAMPLES];
 	uint16_t write_pos, post_count, trigger_index;
-	uint8_t state, capture_id;
+	uint8_t state, generation, trigger_events;
+	bool rearm_pending;
 	bool primed, prev_run, prev_moe, prev_iq_ref_pos, prev_iq_requested_pos, prev_fault;
 } R;
 
@@ -32,11 +33,22 @@ static uint8_t events_for(const qs_transition_input_t *in)
 	return e;
 }
 
-void qs_transition_diag_init(void) { memset(&R, 0, sizeof(R)); }
+void qs_transition_diag_init(void)
+{
+	memset(&R, 0, sizeof(R));
+	/* Generation 1 preserves QS-1's original first-capture id. */
+	R.generation = 1U;
+}
 
 void qs_transition_diag_fast_tick(const qs_transition_input_t *in)
 {
-	if (in == 0 || R.state == QS_COMPLETE) return;
+	if (in == 0) return;
+	if (R.rearm_pending) {
+		uint8_t next = (uint8_t)(R.generation + 1U);
+		memset(&R, 0, sizeof(R));
+		R.generation = next;
+	}
+	if (R.state == QS_COMPLETE) return;
 	if (!R.primed) { R.primed = true; (void)events_for(in); return; }
 	uint8_t events = events_for(in);
 	uint16_t pos = R.write_pos;
@@ -50,7 +62,7 @@ void qs_transition_diag_fast_tick(const qs_transition_input_t *in)
 		(in->angle_static_legal?QS_FLAG_ANGLE_STATIC_LEGAL:0U);
 	R.write_pos=(uint16_t)((pos+1U)%QS_TRANSITION_DIAG_SAMPLES);
 	if (R.state == QS_ARMED && events != QS_EVT_NONE) {
-		R.state=QS_CAPTURING; R.trigger_index=pos; R.post_count=0U; R.capture_id++;
+		R.state=QS_CAPTURING; R.trigger_index=pos; R.post_count=0U; R.trigger_events=events;
 	} else if (R.state == QS_CAPTURING) {
 		R.post_count++;
 		if (R.post_count >= QS_TRANSITION_DIAG_POST_SAMPLES) R.state=QS_COMPLETE;
@@ -63,8 +75,26 @@ bool qs_transition_diag_sample_at(uint16_t i, qs_transition_sample_t *out)
 	if (out == 0 || R.state != QS_COMPLETE || i >= QS_TRANSITION_DIAG_SAMPLES) return false;
 	*out=R.slots[(uint16_t)((R.write_pos+i)%QS_TRANSITION_DIAG_SAMPLES)]; return true;
 }
-uint8_t qs_transition_diag_capture_id(void) { return R.capture_id; }
+uint8_t qs_transition_diag_capture_id(void) { return R.generation; }
 uint16_t qs_transition_diag_trigger_index(void) { return (uint16_t)((R.trigger_index + QS_TRANSITION_DIAG_SAMPLES - R.write_pos) % QS_TRANSITION_DIAG_SAMPLES); }
+void qs_transition_diag_status(qs_transition_status_t *out)
+{
+	if (!out) return;
+	out->state = (R.state == QS_COMPLETE) ? QS_TRANSITION_COMPLETE :
+		(R.state == QS_CAPTURING) ? QS_TRANSITION_TRIGGERED : QS_TRANSITION_ARMED;
+	out->generation = R.generation;
+	out->sample_count = (R.state == QS_COMPLETE) ? QS_TRANSITION_DIAG_SAMPLES :
+		(R.state == QS_CAPTURING) ? (uint8_t)(R.post_count + 1U) : 0U;
+	out->trigger_events = R.trigger_events;
+	out->trigger_index = qs_transition_diag_trigger_index();
+	out->export_ready = R.state == QS_COMPLETE;
+}
+bool qs_transition_diag_request_new_capture(void)
+{
+	if (R.state != QS_COMPLETE || R.rearm_pending) return false;
+	R.rearm_pending = true;
+	return true;
+}
 
 #else
 void qs_transition_diag_init(void) {}
@@ -73,4 +103,6 @@ bool qs_transition_diag_is_complete(void) { return false; }
 bool qs_transition_diag_sample_at(uint16_t i, qs_transition_sample_t *out) { (void)i; (void)out; return false; }
 uint8_t qs_transition_diag_capture_id(void) { return 0U; }
 uint16_t qs_transition_diag_trigger_index(void) { return 0U; }
+void qs_transition_diag_status(qs_transition_status_t *out) { if(out) memset(out, 0, sizeof(*out)); }
+bool qs_transition_diag_request_new_capture(void) { return false; }
 #endif

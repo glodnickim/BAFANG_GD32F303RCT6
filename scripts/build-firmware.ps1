@@ -9,6 +9,9 @@ param(
     [string]$Variant = "normal",
 
     [string]$Version = "",
+    [ValidateSet("Auto", "Reserved", "Repro", "Developer")]
+    [string]$BuildMode = "Auto",
+    [string]$VersionStateRoot = "",
     [string]$OutputDir = ".build",
     [string]$Toolchain = "",
 
@@ -91,75 +94,38 @@ function Get-SymbolAddress {
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 
-$versionSource = "auto_increment"
+$versionSource = "auto_global"
 $buildCounter = -1
 
-if ($Version) {
-    $versionSource = "manual_override"
+Import-Module (Join-Path $PSScriptRoot "build-version-allocator.psm1") -Force
+
+if ($BuildMode -eq "Reserved") {
+    if (-not $Version) { throw "Reserved mode requires the version supplied by build-canonical-pair.ps1." }
+    $versionSource = "auto_global_pair_reserved"
+} elseif ($BuildMode -eq "Developer") {
+    if ($Version) { throw "Developer mode uses DEV-NONCANONICAL; do not supply -Version." }
+    $Version = "DEV-NONCANONICAL"
+    $versionSource = "developer_noncanonical"
+} elseif ($BuildMode -eq "Repro") {
+    if (-not $Version) { throw "Repro mode requires an explicit historical -Version." }
+    $versionSource = "repro_explicit"
     Write-Host ""
-    Write-Host "WARNING: Manual version override: $Version" -ForegroundColor Yellow
-    Write-Host "  version_source will be set to manual_override in manifest." -ForegroundColor Yellow
+    Write-Host "REPRO / NON-NEW-RELEASE version: $Version" -ForegroundColor Yellow
     Write-Host ""
 } else {
-    $counterPath = Join-Path $repoRoot ".local\build-number.txt"
-
-    $initializeCounter = {
-        param([string]$ScanRoot)
-
-        $highest = -1
-        if (Test-Path -LiteralPath $ScanRoot -PathType Container) {
-            $manifests = Get-ChildItem -LiteralPath $ScanRoot -Filter "*.manifest.json" -Recurse -ErrorAction SilentlyContinue
-            foreach ($m in $manifests) {
-                try {
-                    $json = Get-Content -LiteralPath $m.FullName -Raw | ConvertFrom-Json
-                    if ($json.version -match '^0\.(\d{4})$') {
-                        $n = [int]$Matches[1]
-                        if ($n -gt $highest) { $highest = $n }
-                    }
-                } catch { }
-            }
-        }
-        if ($highest -lt 0) {
-            $highest = 408
-            Write-Host "No prior manifests found. Initializing counter with seed $highest."
-        } else {
-            Write-Host "Discovered highest prior version: 0.$($highest.ToString('D4')) (counter=$highest)."
-        }
-        return $highest
-    }
-
-    if (-not (Test-Path -LiteralPath $counterPath)) {
-        $buildDir = Join-Path $repoRoot ".build\M820_BL820"
-        $buildCounter = & $initializeCounter $buildDir
-        $newCounter = $buildCounter + 1
-
-        $localDir = Join-Path $repoRoot ".local"
-        if (-not (Test-Path -LiteralPath $localDir)) {
-            New-Item -ItemType Directory -Force -Path $localDir | Out-Null
-        }
-        $tempPath = "$counterPath.tmp"
-        Set-Content -LiteralPath $tempPath -Value $newCounter.ToString() -Encoding ascii -NoNewline
-        Move-Item -LiteralPath $tempPath -Destination $counterPath -Force
-
-        $Version = "0.{0:D4}" -f $newCounter
-        Write-Host "Initialized build counter: $buildCounter -> $newCounter"
-        Write-Host ""
-    } else {
-        $raw = (Get-Content -LiteralPath $counterPath -Raw).Trim()
-        if ($raw -notmatch '^\d+$') {
-            throw "Build counter file contains non-integer: $counterPath`nExpected a positive integer, got: $raw"
-        }
-        $buildCounter = [int]$raw
-        $newCounter = $buildCounter + 1
-
-        $tempPath = "$counterPath.tmp"
-        Set-Content -LiteralPath $tempPath -Value $newCounter.ToString() -Encoding ascii -NoNewline
-        Move-Item -LiteralPath $tempPath -Destination $counterPath -Force
-
-        $Version = "0.{0:D4}" -f $newCounter
-    }
-
-    Write-Host "Reserved build version: $Version (counter $buildCounter -> $newCounter)"
+    if ($Version) { throw "Auto mode allocates globally; use -BuildMode Repro for an explicit historical version." }
+    $before = Get-EbicsCanonicalHwm $repoRoot $VersionStateRoot
+    $reservation = Reserve-EbicsCanonicalVersion $repoRoot $VersionStateRoot 1
+    $Version = $reservation.Versions[0]
+    $buildCounter = [int]$Version.Substring(2)
+    Write-Host "VERSION PRECHECK"
+    Write-Host "Highest issued canonical version: $before"
+    Write-Host "Allocator source: $($reservation.Root)"
+    Write-Host "Allocator global across worktrees: YES"
+    Write-Host "Atomic reservation: YES"
+    Write-Host "Requested build type: $Variant"
+    Write-Host "Reserved version: $Version"
+    Write-Host "Monotonic candidate: PASS"
     Write-Host ""
 }
 
@@ -443,6 +409,12 @@ try {
     }
     $buildManifest | ConvertTo-Json -Depth 6 |
         Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+    # Post-build identity gate: a reserved number is useful only if every published identity
+    # carries exactly that same value. A failure leaves the reservation consumed.
+    Test-EbicsVersionIdentity -Version $Version -HeaderPath (Join-Path $generatedDir "build_version.h") `
+        -ManifestPath $manifestPath -ArtifactPath $bootloaderBin -Variant $Variant | Out-Null
+    Write-Host "VERSION IDENTITY: PASS"
 
     Write-Host ""
     Write-Host "=================================================="

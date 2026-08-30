@@ -25,14 +25,25 @@ generation 1→2, ISR-owned re-arm, brak przecieku starej próbki i BUSY podczas
 
 ## Status dostarczenia
 
-Panel Canable jest obowiązkową częścią karty, ale jego repozytorium
-`C:\Projekty\bafang_canable_pro` leży poza zapisywalnym zakresem bieżącej sesji. Nie został
-zmieniony. Nie wykonano też canonical build, ponieważ worktree firmware zawiera niezależne,
-niestaged zmiany FW-130A w `main.c`, `config.h` i innych plikach; build w tym stanie nie byłby
-artefaktem wyłącznie QS-1R.
+Firmware QS-1R został zbudowany kanonicznie z czystego, odłączonego worktree commitu
+`7232f9d58c1b5f33f5d424675a5e7a5e3555a71a` (brak zmian lokalnych):
 
-**B. PARTIAL — zaimplementowano bezpieczny control-plane DIAG, ale brak panelu Canable i
-czystego canonical buildu blokuje deklarację gotowości do HW.**
+- NORMAL: eVD `0.0412`, SHA-256
+  `8F88ABFE8C39A2F71BA40D6045213D7313D02C4CEE2222AB327703C0ECBB063B`,
+  FLASH 104252 B, RAM 12576 B.
+- DIAG: eVD `0.0413`, SHA-256
+  `7687F636D935346914C6DDD3AF7DCA81994CA1963C07718FCB0AD9252F2AD308`,
+  FLASH 153492 B, RAM 48496 B.
 
-Nie wolno jeszcze kierować użytkownika do sesji START/STOP/RESTART, dopóki panel nie wykona
-automatycznej walidacji 48/48 oraz nie zostanie zbudowany czysty artefakt DIAG.
+DIAG ma ring 48 × 44 B. Względem udokumentowanego QS-1 (48536 B) jego zużycie RAM jest
+mniejsze o 40 B. Linker rezerwuje niezależnie 1024 B heapu i 2048 B stosu. W NORMAL kod
+recordera kompiluje się do stubów; mapa nie zawiera alokowanego symbolu ringu QS.
+
+`qs_transition_diag_host` oraz pełny `tests/host/run-host-tests.ps1` zakończyły się PASS.
+Nie zmieniono plików FW-130A ani sterowania FOC/PI/MOE/FW-117.
+
+**FIRMWARE SIDE: PASS / USER WORKFLOW: PENDING CANABLE.**
+
+Panel Canable jest obowiązkowy przed testem HW: repozytorium
+`C:\Projekty\bafang_canable_pro` nie zostało w tej karcie zmienione. Do czasu jego
+aktualizacji i walidacji eksportu 48/48 użytkownik nie wykonuje sesji START/STOP/RESTART.

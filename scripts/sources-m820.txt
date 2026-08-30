@@ -29,6 +29,8 @@ src/fw112_diag.c
 src/fw117_trace.c
 src/rolling_no_assist_diag.c
 src/rolling_no_assist_dump.c
+src/qs_transition_diag.c
+src/qs_transition_dump.c
 src/pas_direction.c
 src/pas_liveness.c
 src/pedal_assist_gate.c

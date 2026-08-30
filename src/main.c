@@ -52,6 +52,7 @@ OF SUCH DAMAGE.
 #include "fw112_ab.h"           /* FW-112 A/B */
 #include "fw117_trace.h"        /* FW-117 TEMP: bridge lifecycle trace */
 #include "rolling_no_assist_diag.h" /* rolling no-assist diagnostic */
+#include "qs_transition_diag.h" /* QS-1: passive full-rate transition snapshot */
 #include "current_cal.h"         /* FW-126.7: calibration in the neutral dwell        */
 #include "pwm_geometry.h"        /* FW-127A: requested -> applied PWM geometry         */
 #include "current_sample_ctx.h"  /* FW-127B: one object per PWM/ADC transaction        */
@@ -65,6 +66,7 @@ OF SUCH DAMAGE.
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
 #include "rolling_no_assist_dump.h" /* FW-123: explicit/repeatable FROZEN capture replay */
+#include "qs_transition_dump.h"
 #endif
 #include "can_tx_queue.h"
 #include "can_multiframe.h"
@@ -4077,6 +4079,26 @@ void ADC0_1_IRQHandler(void)
     	// touch each of them individually.
 		foc_current_feedback_invalidate();
     }
+	/* QS-1: single-writer, read-only snapshot.  This is deliberately after the actual
+	 * PWM writes above, never changes their inputs, and never sends CAN from the ISR. */
+	{
+		const iq_chain_t *qs_iq = iq_chain_get();
+		const qs_transition_input_t qs = {
+			.foc_cycle = sample_ctx->seq,
+			.iq_requested = qs_iq->requested, .iq_allowed = qs_iq->allowed,
+			.iq_ref = MS.i_q_setpoint, .iq_measured = MS.i_q,
+			.id_ref = MS.i_d_setpoint, .id_measured = MS.i_d,
+			.theta_e_hi16 = (int16_t)(q31_rotorposition_absolute >> 16),
+			.ccr_a = pwm_applied[0], .ccr_b = pwm_applied[1], .ccr_c = pwm_applied[2],
+			.lifecycle = bridge_lifecycle, .hall = ui8_hall_state, .sample_state = sample_ctx->state,
+			.run_request = qs_iq->requested != 0, .bridge_requested = ui_8_PWM_ON_Flag != 0,
+			.moe = (TIMER_CCHP(TIMER0) & TIMER_CCHP_POEN) != 0U,
+			.fault_hard_off = (MS.error_state != 0U) && (ui_8_PWM_ON_Flag == 0U),
+			/* This is an observational classifier, not a new control validity gate. */
+			.angle_static_legal = (ui8_hall_state >= 1U && ui8_hall_state <= 6U && MS.hall_angle_detect_flag != 0U)
+		};
+		qs_transition_diag_fast_tick(&qs);
+	}
     __enable_irq();
 
 }
@@ -5466,6 +5488,8 @@ static void diag_diagnostics_init(void)
 #endif
 	rolling_no_assist_diag_init(); //rolling no-assist diagnostic
 	rolling_no_assist_dump_init(&diag_can_ops);
+	qs_transition_diag_init();
+	qs_transition_dump_init(&diag_can_ops);
 	diag_session_init(&diag_can_ops, &diag_ops);
 }
 
@@ -5494,10 +5518,11 @@ static void diag_dump_step(void)
 	 */
 	bool allow_new_tx = (can_tx_queue_depth() == 0U) && !can_multiframe_busy();
 	rolling_no_assist_dump_step(control_time_ticks, allow_new_tx, diag_session_is_active());
+	qs_transition_dump_step(control_time_ticks, allow_new_tx, diag_session_is_active());
 	/* A manual replay is one coherent 1792-frame transaction. Do not interleave automatic
 	 * session diagnostics with it: that would make an external Canable capture harder to prove
 	 * complete and offers no benefit while the technician explicitly requested this dump. */
-	if (!rolling_no_assist_dump_busy()) {
+	if (!rolling_no_assist_dump_busy() && !qs_transition_dump_busy()) {
 		diag_session_dump_step(control_time_ticks, allow_new_tx);
 	}
 }

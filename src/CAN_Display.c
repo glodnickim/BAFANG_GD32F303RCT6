@@ -39,6 +39,7 @@
 #include "can_reply_effects.h"
 #if CAN_DIAGNOSTICS_ENABLE
 #include "rolling_no_assist_dump.h"
+#include "qs_transition_dump.h"
 #endif
 
 /* Build version string for the HMI info field (0x6001). The tracked build script
@@ -338,6 +339,12 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 					                    rolling_no_assist_dump_request()) ? 1U : 0U;
 					sendWriteResult(0x602C, accepted);
 				}
+				else if(Ext_ID_Rx.command==0x6030){
+					/* QS-1: explicit replay of a complete, immutable FOC-rate capture. */
+					uint8_t accepted = (Ext_ID_Rx.source == 5U && receive_message.rx_dlen == 0U &&
+					                    qs_transition_dump_request()) ? 1U : 0U;
+					sendWriteResult(0x6030, accepted);
+				}
 #endif
 				else if(Ext_ID_Rx.command==0x3203){ //FW-076: speed limit + wheel diameter code + circumference
 					/*
@@ -400,6 +407,7 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 				   && Ext_ID_Rx.command!=0x3203 && Ext_ID_Rx.command!=0x6200
 #if CAN_DIAGNOSTICS_ENABLE
 				   && Ext_ID_Rx.command!=0x602C
+				   && Ext_ID_Rx.command!=0x6030
 #endif
 				  ) sendAcknoledge();
 				break;

@@ -3,6 +3,13 @@
 
 #include "config.h"  /* CAN_DIAGNOSTICS_ENABLE, FW117_TRACE_ENABLE */
 
+/* QS-1: 48 x 44 B full-rate samples + recorder metadata, measured by sizeof(R). */
+#if CAN_DIAGNOSTICS_ENABLE
+#define DIAG_BUDGET_QS_TRANSITION_BYTES 2240U
+#else
+#define DIAG_BUDGET_QS_TRANSITION_BYTES 0U
+#endif
+
 /*
  * FW-106: the diagnostic RAM budget, checked by the COMPILER rather than by a note in a
  * document or a number measured once by hand.

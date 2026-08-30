@@ -26,6 +26,10 @@
 #include "fw117_trace.h"       /* FW117_TRACE_EFID_*      (FW-117, TEMPORARY) */
 #include "rolling_no_assist_diag.h" /* ROLLING_NO_ASSIST_EFID_* (rolling no-assist diagnostic) */
 
+/* QS-1 explicit FOC-rate transition dump: header plus six raw sample fragments. */
+#define DIAG_EFID_QS_LO           0x00010250U
+#define DIAG_EFID_QS_HI           0x00010256U
+
 /* --- the occupied ranges, inclusive on both ends ------------------------------------------- */
 
 /* FW-111 delayed-rearm recorder: three timing frames, one 4-fragment snapshot, one capture frame */
@@ -64,6 +68,12 @@ _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
 _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
                                   DIAG_EFID_FW117_LO, DIAG_EFID_FW117_HI),
 	"Rolling no-assist diagnostic CAN ids overlap the FW-117 bridge trace's block");
+_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_QS_LO, DIAG_EFID_QS_HI,
+                                  DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI),
+	"QS-1 diagnostic CAN ids overlap rolling no-assist diagnostic block");
+_Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_QS_LO, DIAG_EFID_QS_HI,
+                                  DIAG_EFID_FW117_LO, DIAG_EFID_FW117_HI),
+	"QS-1 diagnostic CAN ids overlap FW-117 block");
 
 /* The pre-existing neighbours must stay disjoint from each other too - otherwise this map would
  * only ever protect the newest arrival, which is precisely how the last collision happened. */

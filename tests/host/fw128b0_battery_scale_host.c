@@ -31,6 +31,9 @@
 #ifndef BATTERY_CURRENT_C_PATH
 #error "BATTERY_CURRENT_C_PATH must be defined (see tests/host/run-host-tests.ps1)"
 #endif
+#ifndef RIDE_CONTROL_C_PATH
+#error "RIDE_CONTROL_C_PATH must be defined (see tests/host/run-host-tests.ps1)"
+#endif
 #define STRINGIZE_(x) #x
 #define STRINGIZE(x) STRINGIZE_(x)
 
@@ -204,20 +207,33 @@ int main(void)
 		      "E2. at one execution per tick it is the intended ~64 samples = ~16 ms");
 	}
 
-	/* ================= F: the legacy limiter compares like with like ======================= */
+	/* ================= F: the battery limiter is an upstream Iq-cap, in the Iq domain ==== */
 	{
 		/*
-		 * Whatever else is wrong with the legacy limiter (FW-128A documents the feedback-domain
-		 * swap), its ENTRY comparison is at least dimensionally sound: measured mA against
-		 * configured mA. That is the one part FW-128B can keep.
+		 * QS-3C: the legacy feedback-domain swap is removed. The battery limiter is now an
+		 * upstream Iq-domain cap (battery_iq_cap.c), applied by ride_control.c BEFORE the one
+		 * final Iq slew. The entry still compares measured mA against configured mA and stays
+		 * dimensionally sound.
 		 */
 		char *m = read_whole_file(STRINGIZE(MAIN_C_PATH));
+		char *r = read_whole_file(STRINGIZE(RIDE_CONTROL_C_PATH));
 		CHECK(m != NULL, "F0. main.c readable");
-		CHECK(strstr(m, "if(MS.Battery_Current>MP.battery_current_max) BC_limit_flag=1;") != NULL,
-		      "F1. entry compares measured mA with configured mA - same units, no conversion");
-		CHECK(strstr(m, "if((MS.i_q_setpoint*CAL_I*MS.u_abs)>>11<(MP.battery_current_max*0.9)) BC_limit_flag=0;") != NULL,
-		      "F2. but the EXIT compares a PREDICTED current derived from the COMMAND, not the "
-		      "measurement - and CAL_I is the very constant FW-128C0 showed is not mA per unit");
+		CHECK(r != NULL, "F0b. ride_control.c readable");
+		/* Entry: the module is fed the measured mA and the configured mA with no conversion. */
+		CHECK(strstr(r, "battery_iq_cap_update(input->battery_current_mA, input->battery_current_max,") != NULL,
+		      "F1. entry feeds measured mA and configured mA - same units, no conversion");
+		/* QS-3C: the legacy exit derived a PREDICTED current from the COMMAND (the exact
+		 * signal this limiter never reduced - a real defect). It is gone; the new limiter
+		 * exits on the MEASURED current with a 90% hysteresis band instead. The cap is applied
+		 * upstream, before assist_dynamics_apply - not as a post-slew PI clamp. */
+		CHECK(strstr(r, "(MP.battery_current_max*0.9)) BC_limit_flag=0") == NULL &&
+		      strstr(r, "battery_iq_cap_update(") != NULL &&
+		      strstr(r, "iq_battery_cap") != NULL &&
+		      strstr(r, "assist_dynamics_apply(") != NULL &&
+		      strstr(m, "PI_iq.setpoint = MP.reverse * i8_reverse_flag * MS.i_q_setpoint;") != NULL,
+		      "F2. QS-3C: no command-predictor exit, no post-slew clamp - the cap is upstream "
+		      "of the single final slew and PI_iq.setpoint comes only from MS.i_q_setpoint");
+		free(r);
 		free(m);
 	}
 

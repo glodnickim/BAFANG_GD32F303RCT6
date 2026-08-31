@@ -338,24 +338,28 @@ static void test_7_and_10_lifecycle_and_wiring(void)
 		CHECK(main_c != NULL && ride_c != NULL && dynamics_c != NULL && motor_c != NULL,
 			"setup: QS-3 production sources sanitize successfully");
 		if (main_c && ride_c && dynamics_c && motor_c) {
-			CHECK(strstr(main_c, "uint32_t control_delta = 1U") != NULL &&
-				strstr(main_c, "control_delta = control_now - control_prev_processed_tick") != NULL &&
-				strstr(main_c, ".elapsed_ticks = control_delta") != NULL,
-				"QS-3 wiring: TIMER1 hardware delta is handed to ride_control");
-			CHECK(strstr(ride_c, ".elapsed_ticks = input->elapsed_ticks") != NULL &&
-				strstr(dynamics_c, "uint32_t elapsed_ticks = (input->elapsed_ticks == 0U) ? 1U") != NULL &&
-				strstr(dynamics_c, "elapsed_step_q") != NULL,
-				"QS-3 wiring: the existing final ramp consumes elapsed hardware periods");
-			CHECK(strstr(ride_c, "profile_release_ms = RIDE_HARD_CUT_RAMP_MS") != NULL &&
-				strstr(ride_c, "if (iq_target == 0 && rider->motor_erps < RIDE_COAST_RELEASE_ERPS)") != NULL,
-				"T9 wiring: hard safety release and coast exact-zero policy remain distinct");
-			CHECK(strstr(main_c, "bridge_lifecycle == BRIDGE_LIFECYCLE_RUN && MS.i_q_setpoint == 0") != NULL &&
-				strstr(main_c, "bridge_lifecycle == BRIDGE_LIFECYCLE_ARMED_ZERO && MS.i_q_setpoint > 0") != NULL,
-				"T8 wiring: normal exact zero still enters persistent ARMED_ZERO");
-			CHECK(strstr(main_c, "get_standstill_position()") != NULL &&
-				strstr(motor_c, "state->i_q_setpoint = command->iq_target") != NULL &&
-				strstr(main_c, "PI_iq.setpoint = MP.reverse*i8_reverse_flag*MS.i_q_setpoint") != NULL,
-				"T10 wiring: cold prepare remains present and final Iq_ref remains the normal pre-PI input");
+		CHECK(strstr(main_c, "uint32_t control_delta = 1U") != NULL &&
+			strstr(main_c, "control_delta = control_now - control_prev_processed_tick") != NULL &&
+			strstr(main_c, ".elapsed_ticks = control_delta") != NULL,
+			"QS-3 wiring: TIMER1 hardware delta is handed to ride_control");
+		CHECK(strstr(ride_c, ".elapsed_ticks = input->elapsed_ticks") != NULL &&
+			strstr(dynamics_c, "uint32_t elapsed_ticks = (input->elapsed_ticks == 0U) ? 1U") != NULL &&
+			strstr(dynamics_c, "elapsed_step_q") != NULL,
+			"QS-3 wiring: the existing final ramp consumes elapsed hardware periods");
+		CHECK(strstr(ride_c, "profile_release_ms = RIDE_HARD_CUT_RAMP_MS") != NULL &&
+			strstr(ride_c, "if (iq_target == 0 && rider->motor_erps < RIDE_COAST_RELEASE_ERPS)") != NULL,
+			"T9 wiring: hard safety release and coast exact-zero policy remain distinct");
+		CHECK(strstr(main_c, "bridge_lifecycle == BRIDGE_LIFECYCLE_RUN && MS.i_q_setpoint == 0") != NULL &&
+			strstr(main_c, "bridge_lifecycle == BRIDGE_LIFECYCLE_ARMED_ZERO && MS.i_q_setpoint > 0") != NULL,
+			"T8 wiring: normal exact zero still enters persistent ARMED_ZERO");
+		CHECK(strstr(main_c, "get_standstill_position()") != NULL &&
+			strstr(motor_c, "state->i_q_setpoint = command->iq_target") != NULL &&
+			strstr(main_c, "PI_iq.setpoint = MP.reverse * i8_reverse_flag * MS.i_q_setpoint;") != NULL &&
+			strstr(main_c, "PI_iq.recent_value = MS.i_q") != NULL &&
+			strstr(ride_c, "battery_iq_cap_update(") != NULL &&
+			strstr(ride_c, "iq_battery_cap") != NULL &&
+			strstr(ride_c, "assist_dynamics_apply(") != NULL,
+			"T10 wiring: PI_iq stays in Iq domain; battery cap is upstream of the final slew");
 		}
 		free(main_c); free(ride_c); free(dynamics_c); free(motor_c);
 	}

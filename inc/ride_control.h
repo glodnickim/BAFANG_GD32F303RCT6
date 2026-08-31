@@ -19,6 +19,20 @@ typedef struct {
 	int32_t iq_scale;
 	int32_t ride_core_iq_limit;
 	int32_t phase_current_max;
+	/*
+	 * QS-3C: the battery-current limiter as an UPSTREAM Iq cap. The ride core computes the
+	 * Iq cap from these inputs BEFORE the single final Iq slew (assist_dynamics_apply), so
+	 * the battery cap participates in the Iq_allowed arbitration upstream of the ONE final
+	 * owner. PI_iq then always sees MS.i_q_setpoint (Iq domain).
+	 *   battery_current_mA  measured battery current (MS.Battery_Current, mA)
+	 *   battery_current_max configured maximum battery current (mA)
+	 *   u_abs               voltage-space-vector magnitude, 2048 = 2^11 (FOC _U_MAX domain)
+	 *   cal_i               phase-current scale (CAL_I)
+	 */
+	int32_t battery_current_mA;
+	int32_t battery_current_max;
+	int32_t u_abs;
+	int32_t cal_i;
 	int32_t current_iq;
 	int32_t current_id;
 	uint16_t voltage_raw;
@@ -101,6 +115,14 @@ uint8_t ride_control_get_flags2(void);
  * when the mode result is 0"). Observation only - nothing reads this to make a decision.
  */
 uint16_t ride_control_get_assist_hold_ticks(void);
+
+/*
+ * QS-3C: is the battery-current limiter currently holding demand down? This is the module's
+ * own latch (battery_iq_cap.c bc_active) exposed so main.c can drive the legacy FW-033
+ * BC_limit_flag diagnostic from the SINGLE source of truth. Observation only — the decision
+ * lives in ride_control.c/battery_iq_cap.c; nothing else acts on this to do limiting.
+ */
+bool ride_control_battery_limit_active(void);
 
 /*
  * FW-109: the ride SESSION automaton's current state (src/ride_session.h's ride_session_state_t,

@@ -1,4 +1,5 @@
 #include "ride_control.h"
+#include "battery_iq_cap.h"   /* QS-3C: battery-current limiter as an upstream Iq cap */
 #include "iq_chain.h"   /* FW-128A: names for the demand stages, no ownership change */
 
 #include <string.h>    /* FW-129B: clearing the diagnostic snapshots in ride_control_init() */
@@ -92,6 +93,16 @@ uint8_t ride_control_get_flags2(void)
 	return ride_diag_flags2;
 }
 #endif
+
+/* QS-3C: single battery-current Iq cap owned by this module (upstream of the final slew).
+ * Zero-initialized: bc_active=false, iq_battery_cap=0. Always compiled (used by
+ * ride_control_update and the battery-limit accessor, independent of CAN diagnostics). */
+static battery_iq_cap_output_t ride_battery_cap;
+
+bool ride_control_battery_limit_active(void)
+{
+	return ride_battery_cap.bc_active;
+}
 
 /*
  * FW-112 v2 TERMINAL CANCEL: one helper for every terminal inhibit that must stop the
@@ -1039,6 +1050,22 @@ void ride_control_update(const ride_control_input_t *input)
 		.coast_release = coast_release,   //FW-048
 		.force_zero_reference = force_zero_reference   //FW-112 v2
 	};
+	/*
+	 * QS-3C: the battery-current limiter is an UPSTREAM Iq-domain cap, applied HERE before
+	 * the single final Iq slew (assist_dynamics_apply below). It min-arbitrates into the
+	 * same Iq_allowed demand as the other limiters (pedal/thermal/throttle already folded
+	 * into iq_target), so battery limiting participates BEFORE the ONE final owner and the
+	 * normal runtime rule stays PI_iq.setpoint = MS.i_q_setpoint (Iq domain, no post-slew
+	 * battery clamp). battery_iq_cap.c is the single owner of the cap; it never writes
+	 * PI_iq.setpoint or PI_iq.recent_value.
+	 */
+	battery_iq_cap_update(input->battery_current_mA, input->battery_current_max,
+		input->phase_current_max, iq_target, input->u_abs, input->cal_i, &ride_battery_cap);
+	/* Inactive cap == phase_current_max >= any demand, so this min is a no-op then and only
+	 * limits Iq when the battery limiter is actually holding demand down. */
+	if (ride_battery_cap.iq_battery_cap < iq_target) {
+		iq_target = ride_battery_cap.iq_battery_cap;
+	}
 	/* FW-128A: Iq_allowed - after every limiter still active in this card, before the ramp.
 	 * The ramp below turns it into Iq_ref, which lives in MS.i_q_setpoint and nowhere else. */
 	iq_chain_note_allowed(iq_target);

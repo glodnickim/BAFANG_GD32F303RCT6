@@ -94,7 +94,7 @@ $suites = @(
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -227,7 +227,7 @@ $suites = @(
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -249,7 +249,7 @@ $suites = @(
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -280,7 +280,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -305,7 +305,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -324,7 +324,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -355,7 +355,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -423,6 +423,11 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward",
                    "-DASSIST_DYNAMICS_C_PATH=$assistDynamicsCPathForward", "-DMOTOR_CORE_C_PATH=$motorCoreCPathForward") },
+    @{ Name = 'QS-3C battery-current limiter upstream ownership (real battery_iq_cap.c + main.c/ride_control.c ownership guard)'
+       Harness = Join-Path $PSScriptRoot 'qs3c_battery_cap_host.c'
+       Modules = @(Join-Path $root 'src\battery_iq_cap.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
     @{ Name = 'FW-127A applied PWM geometry clamp (real pwm_geometry.c)'
        Harness = Join-Path $PSScriptRoot 'fw127a_pwm_geometry_host.c'
        Modules = @(Join-Path $root 'src\pwm_geometry.c')
@@ -463,7 +468,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'fw128b0_battery_scale_host.c'
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCONFIG_H_PATH=$configHPathForward", "-DBATTERY_CURRENT_C_PATH=$batteryCurrentCPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCONFIG_H_PATH=$configHPathForward", "-DBATTERY_CURRENT_C_PATH=$batteryCurrentCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
     @{ Name = 'FW-128C0 physical current scale (numeric model + arm_math/FOC/main source guard)'
        Harness = Join-Path $PSScriptRoot 'fw128c0_current_scale_host.c'
        Modules = @()
@@ -502,7 +507,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),

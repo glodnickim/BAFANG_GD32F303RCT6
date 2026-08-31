@@ -2973,6 +2973,10 @@ void reg_ADC_processing(void)
             .iq_scale = phase_current_max_scaled,
 			.ride_core_iq_limit = ride_core_iq_limit_scaled,
             .phase_current_max = MP.phase_current_max,
+            .battery_current_mA = MS.Battery_Current,   //QS-3C: upstream battery Iq cap
+            .battery_current_max = MP.battery_current_max,
+            .u_abs = MS.u_abs,
+            .cal_i = CAL_I,
             .current_iq = MS.i_q_setpoint,
             .current_id = MS.i_d_setpoint,
 			.voltage_raw = voltage_raw_filtered,
@@ -2993,6 +2997,10 @@ void reg_ADC_processing(void)
 			.elapsed_ticks = control_delta
         };
         ride_control_update(&ride_input);
+        /* QS-3C: the battery-current limiter now lives upstream in ride_control.c (single
+         * owner, battery_iq_cap.c latch). Drive the legacy FW-033 diagnostic flag from that
+         * ONE latch so the CAN bit and the actual cap never disagree. */
+        BC_limit_flag = ride_control_battery_limit_active() ? 1 : 0;
         /*
          * FW-098 success metric, measured AFTER the whole pipeline has run so it counts what
          * actually reached the motor, not what was requested.
@@ -3615,38 +3623,14 @@ int32_t speed_PLL (int32_t ist, int32_t soll, uint8_t speedadapt)
  */
 static void pi_iq_apply_inputs(void)
 {
-	/* ---- LEGACY_BC_OVERRIDE ------------------------------------------------------------
-	 * TODO FW-128B - DELETE LEGACY FEEDBACK-DOMAIN SWITCH
-	 *
-	 * This is the ONLY known violation of the final FW-128 invariant, kept deliberately
-	 * unchanged so FW-128A stays a pure ownership card. What it does, and why it has to go:
-	 *
-	 *   - it swaps PI_iq's FEEDBACK from measured Iq (phase-current domain) to measured
-	 *     battery current (mA >> 6), and its SETPOINT from MS.i_q_setpoint to
-	 *     battery_current_max >> 6. Different physical quantity, different order of magnitude.
-	 *   - PI_iq.integral_part carries straight across that swap. No reset, no bumpless
-	 *     transfer, no back-calculation - so the loop can leave battery-limit mode holding an
-	 *     integrator built for the wrong controlled variable.
-	 *   - the exit test below evaluates a PREDICTED battery current from the COMMANDED
-	 *     MS.i_q_setpoint, which this limiter never reduces. The flag can therefore only clear
-	 *     through MS.u_abs - the output of the very loop whose feedback was swapped.
-	 *
-	 * FW-128B replaces all of it with a battery limiter that acts UPSTREAM on the demand, so
-	 * PI_iq keeps one feedback for its whole life. Do not improve the equations here.
-	 */
-	if(MS.Battery_Current>MP.battery_current_max) BC_limit_flag=1;
-	if((MS.i_q_setpoint*CAL_I*MS.u_abs)>>11<(MP.battery_current_max*0.9)) BC_limit_flag=0; //duty cycle is scaled to 2048 = 2^11
-
-	if(BC_limit_flag){
-		/* LEGACY_BC_OVERRIDE - see above. Verbatim. */
-		PI_iq.recent_value = MP.reverse*i8_reverse_flag*MS.Battery_Current>>6;
-		PI_iq.setpoint = MP.reverse*i8_reverse_flag*(MP.battery_current_max>>6);
-		return;
-	}
-
-	/* Normal mode: the invariant. */
+	/* QS-3C: PI_iq is ALWAYS an Iq-domain current regulator - feedback = measured motor Iq,
+	 * setpoint = motor Iq reference from MS.i_q_setpoint (the single final-slew owner's
+	 * output). The battery-current limiter no longer lives here: it is an upstream Iq cap in
+	 * ride_control.c (before assist_dynamics_apply), so NO post-slew battery clamp exists and
+	 * PI_iq never leaves the Iq domain. Legacy override removed (PI_iq.setpoint =
+	 * battery_current_max>>6 and PI_iq.recent_value = MS.Battery_Current>>6). */
 	PI_iq.recent_value = MS.i_q;                                          /* measured Iq   */
-	PI_iq.setpoint = MP.reverse*i8_reverse_flag*MS.i_q_setpoint;          /* Iq_ref        */
+	PI_iq.setpoint = MP.reverse * i8_reverse_flag * MS.i_q_setpoint;      /* Iq_ref        */
 }
 
 void runPIcontrol(void){

@@ -203,44 +203,54 @@ int main(void)
 		CHECK(lim && alw && lim < alw, "A1g. ...and after the limiters");
 	}
 
-	/* --- A10 + A11: one PI_iq input site, one marked legacy violation -------------------------- */
+	/* --- A10 + A11: one PI_iq input site, battery cap is upstream -------------------------------- */
 	{
 		const char *owner = strstr(m, "static void pi_iq_apply_inputs(void)");
 		const char *runpi = strstr(m, "void runPIcontrol(void){");
 		CHECK(owner != NULL, "A10c. there is one named owner of PI_iq's inputs");
 
-		/* Inside the owner: exactly the two cases, normal and the legacy override. */
-		CHECK(count_between(owner, runpi, "PI_iq.setpoint =") == 2,
-		      "A10a. PI_iq's reference is assigned in exactly two places inside the owner");
-		CHECK(count_between(owner, runpi, "PI_iq.recent_value =") == 2,
+		/* Inside the owner: exactly one setpoint assignment (single Iq-domain path). */
+		CHECK(count_between(owner, runpi, "PI_iq.setpoint =") == 1,
+		      "A10a. PI_iq's reference is assigned in exactly one place inside the owner");
+		/* Inside the owner: exactly one recent_value assignment (always MS.i_q). */
+		CHECK(count_between(owner, runpi, "PI_iq.recent_value =") == 1,
 		      "A10b. ...and its feedback likewise");
 
-		/* Outside it: only the one-time PI setup may mention them, and only as initialisation. */
-		CHECK(count_occurrences(m, "PI_iq.setpoint =") == 3,
+		/* Outside it: only the one-time PI setup may mention setpoint, as initialisation. */
+		CHECK(count_occurrences(m, "PI_iq.setpoint =") == 2,
 		      "A10d. the only other mention in the whole file is the one-time PI setup");
 		CHECK(strstr(m, "PI_iq.setpoint = 0;") != NULL,
 		      "A10e. ...which is an initialisation to zero, not a control-path producer");
-		CHECK(count_occurrences(m, "PI_iq.recent_value =") == 2,
-		      "A10f. the feedback has no site at all outside the owner");
+		/* recent_value has no site at all outside the owner. */
+		CHECK(count_occurrences(m, "PI_iq.recent_value =") == 1,
+		      "A10f. the feedback has no site at all outside the owner — single domain, single writer");
 	}
 	CHECK(strstr(m, "PI_iq.recent_value = MS.i_q;") != NULL,
 	      "A10g. normal-mode feedback is measured Iq, stated literally");
 	{
-		const char *owner = strstr(m, "static void pi_iq_apply_inputs(void)");
-		const char *runpi = strstr(m, "void runPIcontrol(void){");
-		/* Produced in exactly one place - the owner. The remaining file-wide occurrence of
-		 * "=0" is the global definition FlagStatus BC_limit_flag=0;, which is a declaration. */
-		CHECK(count_between(owner, runpi, "BC_limit_flag=1") == 1,
-		      "A11a. the battery flag is raised in exactly one place, inside the owner");
-		CHECK(count_between(owner, runpi, "BC_limit_flag=0") == 1,
-		      "A11b. ...and cleared in exactly one place, inside the owner");
+		/* QS-3C: BC_limit_flag is now driven from the battery_iq_cap.c latch via main's
+		 * single assignment after ride_control_update - one place, one source of truth.
+		 * The global definition is the only other occurrence. */
+		CHECK(count_occurrences(m, "BC_limit_flag = ride_control_battery_limit_active() ? 1 : 0;") == 1,
+		      "A11a. the battery flag is driven from the cap latch in exactly one place");
 		CHECK(count_occurrences(m, "FlagStatus BC_limit_flag=0;") == 1,
 		      "A11d. the only other occurrence is the global definition");
-		CHECK(count_occurrences(m, "BC_limit_flag=1") == 1,
-		      "A11e. the flag is never raised anywhere else in the file");
+		/* Exactly 3 references in main.c: the global definition, the single latch-driven
+		 * write after ride_control_update, and the CAN publish bit. No other write site. */
+		CHECK(count_occurrences(m, "BC_limit_flag") == 3 &&
+		      count_occurrences(m, "BC_limit_flag = ride_control_battery_limit_active() ? 1 : 0;") == 1,
+		      "A11e. BC_limit_flag = definition + one latch-driven write + one CAN bit");
 	}
-	CHECK(strstr(mraw, "TODO FW-128B") != NULL,
-	      "A11c. the legacy override is explicitly marked for removal in FW-128B");
+	/* QS-3C: the legacy domain-switch override is gone. The battery limiter is an Iq-domain
+	 * upstream cap (battery_iq_cap.c) in ride_control.c, before the one final slew, never
+	 * swapping feedback and never living in pi_iq_apply_inputs. */
+	CHECK(strstr(r, "battery_iq_cap_update(") != NULL &&
+	      strstr(r, "iq_battery_cap") != NULL,
+	      "A11c. QS-3C: the battery cap is an Iq-domain value, not a PI-domain switch");
+	CHECK(strstr(m, "PI_iq.recent_value = MS.Battery_Current") == NULL,
+	      "A11f. legacy BC override no longer writes recent_value — PI stays in Iq domain");
+	CHECK(strstr(m, "battery_current_max>>6") == NULL,
+	      "A11g. legacy BC override no longer writes setpoint with battery-current domain");
 
 	/* --- A12: Id untouched -------------------------------------------------------------------- */
 	CHECK(strstr(m, "PI_id.recent_value = MS.i_d;") != NULL, "A12a. Id feedback unchanged");

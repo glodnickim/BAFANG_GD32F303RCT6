@@ -2,6 +2,8 @@
 
 #include "config.h"
 
+#include <limits.h>
+
 #define CONTROL_TICKS_PER_MS 4
 #define PROFILE_RELEASE_MAX_MS 3000
 
@@ -58,6 +60,14 @@ int32_t assist_dynamics_apply(
 	int32_t iq_reference,
 	const assist_dynamics_input_t *input)
 {
+	/*
+	 * QS-3: `reg_ADC_processing()` is reached through a one-bit main-loop flag.  TIMER1
+	 * still records every 4 kHz period in control_time_ticks, and ride_control passes the
+	 * resulting elapsed count here.  Keep the existing single ramp state/step selection,
+	 * but advance it by the physical periods represented by this call.  Older direct
+	 * callers leave this field at 0, which retains the previous one-period behaviour.
+	 */
+	uint32_t elapsed_ticks = (input->elapsed_ticks == 0U) ? 1U : input->elapsed_ticks;
 	/*
 	 * Leaving WA is a dead-man stop. The WA controller has already discarded
 	 * its command; do not feed its last Iq into the normal ride release fade.
@@ -181,12 +191,17 @@ int32_t assist_dynamics_apply(
 		if (step_q < 1) step_q = 1;
 	}
 
+	/* Saturation is defensive: a pathological stalled consumer must never overflow the
+	 * signed accumulator before the existing exact-target clamps can run. */
+	int64_t elapsed_step_q = (int64_t)step_q * (int64_t)elapsed_ticks;
+	if (elapsed_step_q > INT32_MAX) elapsed_step_q = INT32_MAX;
+
 	if (target_q > iq_reference_q) {
 		int32_t d = target_q - iq_reference_q;
-		iq_reference_q += (d > step_q) ? step_q : d;
+		iq_reference_q += (d > elapsed_step_q) ? (int32_t)elapsed_step_q : d;
 	} else if (target_q < iq_reference_q) {
 		int32_t d = iq_reference_q - target_q;
-		iq_reference_q -= (d > step_q) ? step_q : d;
+		iq_reference_q -= (d > elapsed_step_q) ? (int32_t)elapsed_step_q : d;
 	}
 
 	iq_reference = (iq_reference_q + (1 << (IQ_RAMP_Q_SHIFT - 1))) >> IQ_RAMP_Q_SHIFT;
@@ -216,12 +231,17 @@ int32_t assist_dynamics_apply(
 #endif
 
 	// FW-037: safety cuts ramp (see note above), so no immediate snap here either.
+	int64_t elapsed_up_step = (int64_t)up_step * (int64_t)elapsed_ticks;
+	int64_t elapsed_dn_step = (int64_t)dn_step * (int64_t)elapsed_ticks;
+	if (elapsed_up_step > INT32_MAX) elapsed_up_step = INT32_MAX;
+	if (elapsed_dn_step > INT32_MAX) elapsed_dn_step = INT32_MAX;
+
 	if (iq_target > iq_reference) {
 		int32_t d = iq_target - iq_reference;
-		return iq_reference + ((d > up_step) ? up_step : d);
+		return iq_reference + ((d > elapsed_up_step) ? (int32_t)elapsed_up_step : d);
 	}
 
 	int32_t d = iq_reference - iq_target;
-	return iq_reference - ((d > dn_step) ? dn_step : d);
+	return iq_reference - ((d > elapsed_dn_step) ? (int32_t)elapsed_dn_step : d);
 #endif
 }

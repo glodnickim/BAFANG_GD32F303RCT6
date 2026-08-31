@@ -2303,9 +2303,14 @@ void reg_ADC_processing(void)
 	 * different "now"s.
 	 */
 	const uint32_t control_now = control_time_ticks;
+	/*
+	 * QS-3: this is also the elapsed time consumed by the final Iq ramp.  The default
+	 * retains the single-period behaviour during startup, before the loss monitor is armed.
+	 */
+	uint32_t control_delta = 1U;
 
 	if(control_monitor_valid){
-		uint32_t control_delta = control_now - control_prev_processed_tick;
+		control_delta = control_now - control_prev_processed_tick;
 
 		/*
 		 * The elapsed hardware time belongs to whatever was true when the PREVIOUS iteration
@@ -2982,9 +2987,10 @@ void reg_ADC_processing(void)
             .safety_cut_non_direction = non_direction_safety_cut,
             //FW-030: throttle ported to the ride core. map() returns 0 while ADC < throttle_offset,
             //so a disconnected/unused throttle contributes nothing (offset is the natural gate).
-            //Scaled to full phase_current_max (throttle is level-independent, like a real throttle).
+			//Scaled to full phase_current_max (throttle is level-independent, like a real throttle).
             .throttle_iq = (int32_t)map(adc_value[1], MP.throttle_offset, MP.throttle_max, 0, MP.phase_current_max),
-            .start_phase = start_phase != 0
+			.start_phase = start_phase != 0,
+			.elapsed_ticks = control_delta
         };
         ride_control_update(&ride_input);
         /*

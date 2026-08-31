@@ -25,6 +25,12 @@ typedef struct {
 	uint16_t ramp_down_slow_ms;
 	uint16_t ramp_down_fast_ms;
 	/*
+	 * QS-3: hardware 4 kHz periods represented by this invocation.  0 is normalized to 1
+	 * for callers compiled against the prior shape and for simple host callers.  This is a
+	 * timebase input to the one existing final-Iq ramp, not a second ramp owner.
+	 */
+	uint32_t elapsed_ticks;
+	/*
 	 * FW-048: the motor has slowed into the range where the commutation angle switches
 	 * formula (six-step), which makes the angle jump. Finish the fade NOW and let the motor
 	 * coast out on its own inertia, so no current flows while the angle is unreliable.

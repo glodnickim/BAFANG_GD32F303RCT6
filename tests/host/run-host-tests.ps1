@@ -41,6 +41,8 @@ $mainHPathForward = (Join-Path $root 'inc\main.h') -replace '\\', '/'
 $canDisplayCPathForward = (Join-Path $root 'src\CAN_Display.c') -replace '\\', '/'
 $currentCalCPathForward = (Join-Path $root 'src\current_cal.c') -replace '\\', '/'
 $rideControlCPathForward = (Join-Path $root 'src\ride_control.c') -replace '\\', '/'
+$assistDynamicsCPathForward = (Join-Path $root 'src\assist_dynamics.c') -replace '\\', '/'
+$motorCoreCPathForward = (Join-Path $root 'src\motor_core.c') -replace '\\', '/'
 $rollingNoAssistDiagCPathForward = (Join-Path $root 'src\rolling_no_assist_diag.c') -replace '\\', '/'
 $focCPathForward = (Join-Path $root 'src\FOC.c') -replace '\\', '/'
 $sampleWindowCPathForward = (Join-Path $root 'src\sample_window.c') -replace '\\', '/'
@@ -414,6 +416,13 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
+    @{ Name = 'QS-3 final Iq slew parity (real final ramp + lifecycle wiring)'
+       Harness = Join-Path $PSScriptRoot 'qs3_final_iq_slew_host.c'
+       Modules = @((Join-Path $root 'src\assist_dynamics.c'),
+                   (Join-Path $PSScriptRoot 'common\map_adapter.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward",
+                   "-DASSIST_DYNAMICS_C_PATH=$assistDynamicsCPathForward", "-DMOTOR_CORE_C_PATH=$motorCoreCPathForward") },
     @{ Name = 'FW-127A applied PWM geometry clamp (real pwm_geometry.c)'
        Harness = Join-Path $PSScriptRoot 'fw127a_pwm_geometry_host.c'
        Modules = @(Join-Path $root 'src\pwm_geometry.c')

@@ -45,6 +45,13 @@ typedef struct {
 	bool safety_cut_non_direction;
 	int32_t throttle_iq;   // FW-030: throttle current (mapped from ADC in main.c); floor on ride-core output
 	bool start_phase;     // FW-087: pedalling begun but no cadence measured yet
+	/*
+	 * QS-3: elapsed TIMER1 control periods represented by this update.  main.c derives this
+	 * from its free-running hardware clock, so the final Iq ramp does not silently become
+	 * slower when the one-bit main-loop work flag coalesces periods.  A zero from an older
+	 * caller/test means one ordinary period.
+	 */
+	uint32_t elapsed_ticks;
 } ride_control_input_t;
 
 /*

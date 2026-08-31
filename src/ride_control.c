@@ -1035,6 +1035,7 @@ void ride_control_update(const ride_control_input_t *input)
 		.ramp_up_fast_ms = ramp_up_fast_ms,
 		.ramp_down_slow_ms = ramp_down_slow_ms,
 		.ramp_down_fast_ms = ramp_down_fast_ms,
+		.elapsed_ticks = input->elapsed_ticks,
 		.coast_release = coast_release,   //FW-048
 		.force_zero_reference = force_zero_reference   //FW-112 v2
 	};

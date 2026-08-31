@@ -35,9 +35,9 @@
 #define ROLLING_NO_ASSIST_DIAG_CONFIRM_COUNT 8U
 #define ROLLING_NO_ASSIST_DIAG_SAMPLE_HZ     250U
 
-/* FW-122.1: schema v3 reuses the six DATA fragments of v2 unchanged. Two of the four wire
- * padding bytes in DATA 5 become real fields (pwm_cutoff_progress, hall_timeout_progress);
- * the CAN frame count, EFIDs and per-sample payload size are therefore IDENTICAL to v2. */
+/* FW-122.1: schema v3 reused the six DATA fragments of v2 unchanged. The retained
+ * soft-cutoff/Hall-timeout fields remain wire-compatible in v4; normal production
+ * ARMED_ZERO never activates the former cutoff path, so their values stay zero. */
 #define ROLLING_NO_ASSIST_SAMPLE_WIRE_BYTES  48U
 #define ROLLING_NO_ASSIST_DATA_FRAGMENTS     6U
 #define ROLLING_NO_ASSIST_FRAMES_PER_SAMPLE  (1U + ROLLING_NO_ASSIST_DATA_FRAGMENTS)
@@ -52,32 +52,23 @@
 #define ROLLING_NO_ASSIST_EFID_DATA_BASE 0x00010249U
 
 /*
- * SCHEMA v3 WIRE FORMAT
+ * SCHEMA v4 WIRE FORMAT
  * =====================
  *
- * FW-122.1: v3 is additive over v2. It exists to make one fact directly visible on the wire
- * that v2 could only leave implicit: ui_8_PWM_ON_Flag==0 does NOT always mean the hardware
- * bridge is off. During SOFT_CUTOFF (src/main.c), the software flag drops to 0 while
- * hardware MOE (TIMER_CCHP.POEN) stays 1 for up to SOFT_CUTOFF_TICKS control ticks, and CCR
- * is being interpolated open-loop toward neutral. If MS.i_q_setpoint becomes positive again
- * inside that window, the start block sees "!ui_8_PWM_ON_Flag" and re-enters in full - see
- * FW-124 (documentation/FW-124_START_STOP_LIFECYCLE_AUDIT_PL.md) section 6/13 (finding D2).
- * v3 adds the two raw facts needed to see this on a captured trace, at zero extra CAN cost:
+ * FW-122.1's v3 added two raw facts for its then-normal soft-cutoff path. The current
+ * lifecycle makes ui_8_PWM_ON_Flag the hardware-MOE mirror again: normal zero torque enters
+ * ARMED_ZERO with PWM_ON=1 and MOE=1, and positive re-demand returns to ACTIVE without a
+ * cold prepare. The two fields are retained at zero extra CAN cost for wire compatibility:
  *
- *   pwm_cutoff_active     (status_flags bit)         - true while soft-cutoff owns CCR
- *   pwm_cutoff_progress   (u8, DATA 5 byte 4)         - ticks elapsed in the cutoff window
- *   hall_timeout_progress (u8, DATA 5 byte 5)         - progress toward the ~1 s Hall-silence
- *                                                        cutoff trigger (uint16_half_rotation_
- *                                                        counter >> 4, saturated at 255)
+ *   pwm_cutoff_active     (status_flags bit)         - legacy field; false in normal ride
+ *   pwm_cutoff_progress   (u8, DATA 5 byte 4)         - legacy field; zero in normal ride
+ *   hall_timeout_progress (u8, DATA 5 byte 5)         - legacy observation only; it does not
+ *                                                        request a bridge shutdown
  *
  * These are RAW, ALREADY-EXISTING firmware facts, copied the same read-only way every other
- * field in this recorder is copied. Classification (CASE A/B/C, src/rolling_no_assist_diag.c
- * classify_trigger()) is UNCHANGED: a sample with pwm_cutoff_active=1 and final_iq>0 already
- * satisfies CASE B's existing "!pwm_on" condition today, with no code change needed there.
- * "D2" (the quick-re-demand-during-soft-cutoff pattern) is a CASE B *subreason*, derived
- * off-device by the Trace Analyzer from these two raw facts plus final_iq and hardware MOE -
- * see tools/trace_analyzer_lib/core.py. Nothing in this module computes or stores a "D2"
- * verdict; it only makes the evidence visible.
+ * field in this recorder is copied. Classification (CASE A/B/C,
+ * src/rolling_no_assist_diag.c classify_trigger()) is unchanged. Historic captures may still
+ * carry the old cutoff fields, which is why the wire layout is not repurposed.
  *
  * The HEADER is metadata. It is NOT part of rolling_no_assist_sample_t.
  * One logical 48-byte sample is serialized as SIX 8-byte DATA fragments (unchanged from v2).
@@ -137,9 +128,8 @@
 #define RNA_STATUS_HARDWARE_MOE            0x01U
 #define RNA_STATUS_CURRENT_CAL_FOC_ALLOWED 0x02U
 #define RNA_STATUS_NEUTRAL_DWELL_ACTIVE    0x04U
-/* FW-122.1: true while src/main.c's soft-cutoff owns CCR (pwm_cutoff_active). Legal alongside
- * hardware MOE=1 and software PWM=0 - see FW-124 section 4 for the full legal-combination
- * table. NOT itself a fault indicator. */
+/* Retained wire bit for historic soft-cutoff captures. Normal ARMED_ZERO leaves it clear;
+ * PWM_ON and hardware MOE remain coherently set. */
 #define RNA_STATUS_PWM_CUTOFF_ACTIVE       0x08U
 /* FW-126: an Iq value with this bit clear is deliberately not a current-feedback measurement;
  * the recorder must never classify it as a current-tracking observation. */
@@ -213,10 +203,9 @@ typedef struct {
 	bool     load_met;
 	bool     rider_latched;
 	uint8_t  debug_flags;
-	/* FW-122.1: raw soft-cutoff/Hall-timeout facts, copied as-is - see the schema v3 comment
-	 * above for why these exist. pwm_cutoff_active/pwm_cutoff_tick are written exclusively
-	 * from main-loop-context code (main()'s lifecycle block and reg_ADC_processing(), never
-	 * from a real ISR) and are read outside IRQ protection in main.c, same as the other
+	/* Retained raw legacy fields. Normal ARMED_ZERO does not set pwm_cutoff_active, and
+	 * half_rotation_counter is observation only. pwm_cutoff_active/pwm_cutoff_tick are
+	 * main-loop-owned and are read outside IRQ protection in main.c, same as the other
 	 * main-loop-owned RNA inputs. half_rotation_counter also has an ISR writer
 	 * (TIMER2_IRQHandler resets it on two Hall transitions per electrical revolution - see
 	 * FW-124 section 5/13 for the exact case-13/case-23 xrefs), so main.c copies it inside the

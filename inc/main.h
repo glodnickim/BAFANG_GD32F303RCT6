@@ -45,6 +45,28 @@ OF SUCH DAMAGE.
 #include <stdlib.h>
 #include <stdbool.h>
 
+/*
+ * Power-stage lifecycle. `ui_8_PWM_ON_Flag` mirrors TIMER0 MOE/POEN: it is
+ * set after MOE is enabled and cleared whenever a production path disables
+ * MOE. It is not a torque-demand or FOC-write permission flag; ARMED_ZERO
+ * keeps both MOE and the FOC ISR alive.
+ *
+ * PREPARE is the NEUTRAL_COMMIT -> FOC_RELEASE sequence. ARMED_ZERO is the
+ * persistent normal no-torque state between ACTIVE runs. FAULT is terminal.
+ */
+#define BRIDGE_LIFECYCLE_DISABLED        0U
+#define BRIDGE_LIFECYCLE_IDLE            BRIDGE_LIFECYCLE_DISABLED /* legacy name */
+#define BRIDGE_LIFECYCLE_NEUTRAL_COMMIT  1U
+#define BRIDGE_LIFECYCLE_MOE_ON          2U
+#define BRIDGE_LIFECYCLE_NEUTRAL_DWELL   3U
+#define BRIDGE_LIFECYCLE_FOC_RELEASE     4U
+#define BRIDGE_LIFECYCLE_RUN             5U /* ACTIVE */
+#define BRIDGE_LIFECYCLE_ARMED_ZERO      6U
+#define BRIDGE_LIFECYCLE_FAULT           7U
+
+extern uint8_t ui_8_PWM_ON_Flag;
+extern uint8_t bridge_lifecycle;
+
 
 /* led spark function */
 void led_spark(void);

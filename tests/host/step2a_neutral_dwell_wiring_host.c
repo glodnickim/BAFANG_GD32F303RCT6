@@ -15,8 +15,8 @@
  *       `foc_release_pending = 1` is set when the counter reaches 0.
  *   T4: `neutral_dwell_active = 0` is set in the main-loop lifecycle progression
  *       (the FOC_RELEASE transition), proving dwell is cleared after the configured count.
- *   T5: Lifecycle reset (`bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE`) exists in the soft
- *       cutoff path (SOFT_CUTOFF_ENABLE), proving the lifecycle is cleaned up on stop.
+ *   T5: Normal zero torque enters persistent ARMED_ZERO and the old Hall-silence
+ *       POWER_STAGE_STOP_TICKS cutoff no longer exists in main.c control flow.
  *   T6: Lifecycle reset exists in the power_off_controller() path, proving cleanup on
  *       power-off.
  *
@@ -163,30 +163,51 @@ int main(void)
 	}
 
 	/* --- T4: neutral_dwell_active cleared in lifecycle progression --- */
-	const char *dwell_active_zero = strstr(clean, "neutral_dwell_active = 0");
-	CHECK(dwell_active_zero != NULL,
-		"T4a: neutral_dwell_active = 0 found (dwell cleared after completion)");
-
-	const char *foc_release_transition = strstr(clean, "BRIDGE_LIFECYCLE_FOC_RELEASE");
+	const char *foc_release_transition = strstr(clean,
+		"bridge_lifecycle = BRIDGE_LIFECYCLE_FOC_RELEASE;");
 	CHECK(foc_release_transition != NULL,
-		"T4b: BRIDGE_LIFECYCLE_FOC_RELEASE lifecycle state found");
+		"T4a: BRIDGE_LIFECYCLE_FOC_RELEASE assignment found in lifecycle progression");
+
+	const char *dwell_active_zero = foc_release_transition ?
+		strstr(foc_release_transition, "neutral_dwell_active = 0") : NULL;
+	CHECK(dwell_active_zero != NULL,
+		"T4b: neutral_dwell_active = 0 found after FOC_RELEASE assignment");
 
 	if (dwell_active_zero && foc_release_transition) {
 		CHECK(dwell_active_zero > foc_release_transition,
-			"T4c: neutral_dwell_active = 0 comes AFTER BRIDGE_LIFECYCLE_FOC_RELEASE (cleared in FOC_RELEASE transition)");
+			"T4c: neutral dwell is cleared in the FOC_RELEASE transition");
 	}
 
-	/* --- T5: lifecycle reset on soft cutoff --- */
-	const char *soft_cutoff_enable = strstr(clean, "#if SOFT_CUTOFF_ENABLE");
-	CHECK(soft_cutoff_enable != NULL,
-		"T5a: #if SOFT_CUTOFF_ENABLE block found");
+	/* --- T5: persistent normal ARMED_ZERO; no Hall-silence bridge cutoff --- */
+	const char *armed_zero = strstr(clean,
+		"bridge_lifecycle = BRIDGE_LIFECYCLE_ARMED_ZERO");
+	CHECK(armed_zero != NULL,
+		"T5a: normal ACTIVE zero-reference transition assigns BRIDGE_LIFECYCLE_ARMED_ZERO");
 
-	const char *idle_after_soft = NULL;
-	if (soft_cutoff_enable) {
-		idle_after_soft = strstr(soft_cutoff_enable, "bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE");
+	const char *armed_resume = strstr(clean,
+		"bridge_lifecycle == BRIDGE_LIFECYCLE_ARMED_ZERO && MS.i_q_setpoint > 0");
+	CHECK(armed_resume != NULL,
+		"T5b: positive final Iq resumes from BRIDGE_LIFECYCLE_ARMED_ZERO");
+
+	if (armed_resume) {
+		const char *resume_end = strchr(armed_resume, '}');
+		CHECK(resume_end != NULL,
+			"T5c: ARMED_ZERO re-demand transition has a bounded block");
+		if (resume_end) {
+			const char *moe = strstr(armed_resume, "timer_primary_output_config(TIMER0,ENABLE)");
+			const char *seed = strstr(armed_resume, "get_standstill_position()");
+			const char *dwell = strstr(armed_resume, "neutral_dwell_active = 1");
+			CHECK(moe == NULL || moe > resume_end,
+				"T5d: ARMED_ZERO re-demand does not enable MOE");
+			CHECK(seed == NULL || seed > resume_end,
+				"T5e: ARMED_ZERO re-demand does not reseed standstill theta");
+			CHECK(dwell == NULL || dwell > resume_end,
+				"T5f: ARMED_ZERO re-demand does not rearm neutral dwell");
+		}
 	}
-	CHECK(idle_after_soft != NULL,
-		"T5b: bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE found inside SOFT_CUTOFF_ENABLE block - lifecycle reset on soft cutoff");
+
+	CHECK(strstr(clean, "POWER_STAGE_STOP_TICKS") == NULL,
+		"T5g: main.c has no normal Hall-silence power-stage cutoff");
 
 	/* --- T6: lifecycle reset on power_off --- */
 	const char *power_off_def = strstr(clean, "void power_off_controller(void){");
@@ -206,7 +227,7 @@ int main(void)
 	free(clean);
 
 	if (host_test_failures == 0) {
-		printf("STEP 2A neutral-dwell wiring guard passed - all 6 structural checks verified.\n");
+		printf("STEP 2A neutral-dwell/ARMED_ZERO wiring guard passed - all structural checks verified.\n");
 		return 0;
 	}
 	printf("\n%d STEP 2A check(s) FAILED.\n", host_test_failures);

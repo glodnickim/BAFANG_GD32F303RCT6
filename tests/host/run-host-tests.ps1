@@ -37,6 +37,7 @@ $inc = Join-Path $root 'inc'
 # Forward slashes so this can go straight into a -D value with no embedded quoting/escaping -
 # see main_startup_wiring_host.c's own STRINGIZE() comment for why that matters here.
 $mainCPathForward = (Join-Path $root 'src\main.c') -replace '\\', '/'
+$mainHPathForward = (Join-Path $root 'inc\main.h') -replace '\\', '/'
 $canDisplayCPathForward = (Join-Path $root 'src\CAN_Display.c') -replace '\\', '/'
 $currentCalCPathForward = (Join-Path $root 'src\current_cal.c') -replace '\\', '/'
 $rideControlCPathForward = (Join-Path $root 'src\ride_control.c') -replace '\\', '/'
@@ -408,6 +409,11 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'Persistent ARMED_ZERO lifecycle (host model + production wiring guards)'
+       Harness = Join-Path $PSScriptRoot 'armed_zero_lifecycle_host.c'
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
     @{ Name = 'FW-127A applied PWM geometry clamp (real pwm_geometry.c)'
        Harness = Join-Path $PSScriptRoot 'fw127a_pwm_geometry_host.c'
        Modules = @(Join-Path $root 'src\pwm_geometry.c')

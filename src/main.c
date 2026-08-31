@@ -575,22 +575,21 @@ uint8_t ui_8_PLL_counter=0;
 uint8_t shutoffcounter=0;
 //FW-050: offroadcode / offroadcounter removed — the gesture no longer builds a decimal number.
 uint16_t pulse_counter=0;
+/* Hardware bridge state mirror: 1 exactly while TIMER0 MOE/POEN is enabled in a
+ * running production path. It also gates the FOC ISR; normal zero torque keeps
+ * it set so feedback, theta and PI regulation remain live. */
 uint8_t ui_8_PWM_ON_Flag=0;
-// STEP 2A: bridge lifecycle states for explicit neutral dwell
-#define BRIDGE_LIFECYCLE_IDLE            0U
-#define BRIDGE_LIFECYCLE_NEUTRAL_COMMIT  1U
-#define BRIDGE_LIFECYCLE_MOE_ON          2U
-#define BRIDGE_LIFECYCLE_NEUTRAL_DWELL   3U
-#define BRIDGE_LIFECYCLE_FOC_RELEASE     4U
-#define BRIDGE_LIFECYCLE_RUN             5U
+/* See main.h for the shared lifecycle values. RUN is ACTIVE; ARMED_ZERO is
+ * the persistent normal no-torque state with MOE and FOC still enabled. */
 uint8_t  bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
 uint8_t  neutral_dwell_counter = 0;
 uint8_t  neutral_dwell_active = 0;  // 1 = ISR must write neutral CCR, not FOC
 uint8_t  foc_release_pending = 0;   // 1 = dwell complete, first ISR after this transitions to RUN
 uint8_t  first_active_foc_sampled = 0; // DIAG: first FOC sample after release
-uint8_t  pwm_cutoff_active=0;    // trwa miekkie zwolnienie stopnia mocy przed DISABLE
-uint16_t pwm_cutoff_tick=0;      // licznik cykli okna zwolnienia
-uint16_t pwm_cutoff_st[3]={0,0,0}; // snapshot switchtime na starcie okna
+/* Retained diagnostic wire fields. The former normal soft-cutoff path is removed;
+ * normal ARMED_ZERO never asserts these or takes ownership of CCR. */
+uint8_t  pwm_cutoff_active=0;
+uint16_t pwm_cutoff_tick=0;
 int32_t q31_angle_per_tic=0;
 //Rotor angle scaled from degree to q31 for arm_math. -180Ã‚Â°-->-2^31, 0Ã‚Â°-->0, +180Ã‚Â°-->+2^31
 const int32_t deg_30 = 357913941;
@@ -1355,7 +1354,7 @@ int main(void)
              */
             if(MS.i_q_setpoint > 0){
             	if(!ui_8_PWM_ON_Flag){
-            		pwm_cutoff_active=0;        //przerwij ewentualne miekkie zwolnienie - wracamy do FOC
+				pwm_cutoff_active=0;        //clear retained legacy diagnostic state
 			get_standstill_position();
 			// FW-126: a fresh run must not blend its first real sample into the PREVIOUS
 			// run's stale filtered Iq/Id - see the doc comment on foc_current_feedback_reset()
@@ -1439,8 +1438,21 @@ int main(void)
             if(bridge_lifecycle == BRIDGE_LIFECYCLE_FOC_RELEASE){
             	// First main-loop iteration after dwell: ISR has already run one FOC cycle
             	// with PI outputs still at 0 from PREPARE. Safe to enter RUN.
-            	bridge_lifecycle = BRIDGE_LIFECYCLE_RUN;
-            }
+				bridge_lifecycle = BRIDGE_LIFECYCLE_RUN;
+			}
+			/*
+			 * Normal ride stop/restart lifecycle. The final reference is
+			 * MS.i_q_setpoint, the single output of the existing assist_dynamics
+			 * ramp. Once it reaches zero, retain the armed bridge and continue the
+			 * FOC ISR at zero reference. No Hall timeout, CCR takeover, PI reset,
+			 * theta reseed, dwell or MOE edge belongs to this transition.
+			 */
+			if(bridge_lifecycle == BRIDGE_LIFECYCLE_RUN && MS.i_q_setpoint == 0){
+				bridge_lifecycle = BRIDGE_LIFECYCLE_ARMED_ZERO;
+			}
+			if(bridge_lifecycle == BRIDGE_LIFECYCLE_ARMED_ZERO && MS.i_q_setpoint > 0){
+				bridge_lifecycle = BRIDGE_LIFECYCLE_RUN;
+			}
             // STEP 2A: failsafe — dwell timeout forces bridge off
             // Count main-loop iterations while in MOE_ON; if dwell counter stuck, kill bridge.
             {
@@ -1469,62 +1481,6 @@ int main(void)
             		dwell_timeout_counter=0;
             	}
             }
-#if SOFT_CUTOFF_ENABLE
-            //miekkie zwolnienie: zjedz napiecia faz do neutral (_T/2) przez SOFT_CUTOFF_TICKS cykli, dopiero potem DISABLE
-            if(uint16_half_rotation_counter>POWER_STAGE_STOP_TICKS && ui_8_PWM_ON_Flag && !pwm_cutoff_active){
-            		ui_8_PWM_ON_Flag=0;            //stop nadpisywania switchtime przez FOC; mostek zostaje ENABLE
-				foc_current_feedback_invalidate();
-            	// STEP 2A: reset lifecycle on soft cutoff
-            	bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
-            	neutral_dwell_active = 0;
-            	foc_release_pending = 0;
-            	/* FW-127A: freeze the APPLIED geometry - the ramp must start from what the
-            	 * bridge was actually doing, not from a request that may have been clamped. */
-            	pwm_cutoff_st[0]=pwm_applied[0];
-            	pwm_cutoff_st[1]=pwm_applied[1];
-            	pwm_cutoff_st[2]=pwm_applied[2];
-            	pwm_cutoff_tick=0;
-            	pwm_cutoff_active=1;
-            }
-            if(pwm_cutoff_active){
-            	//pwm_cutoff_tick jest inkrementowany w reg_ADC_processing (~4 kHz), nie tutaj (petla glowna jest szybsza)
-            	if(pwm_cutoff_tick>=SOFT_CUTOFF_TICKS){
-            		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
-            		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
-            		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
-            		timer_primary_output_config(TIMER0,DISABLE); //dopiero teraz odetnij mostek
-            		i8_recent_rotor_direction=0;
-            		PI_iq.integral_part=0;
-            		PI_id.integral_part=0;
-            		pwm_cutoff_active=0;
-            	}else{
-            		int32_t neutral=_T>>1;
-            		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,(uint16_t)(pwm_cutoff_st[0]+(neutral-(int32_t)pwm_cutoff_st[0])*pwm_cutoff_tick/SOFT_CUTOFF_TICKS));
-            		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,(uint16_t)(pwm_cutoff_st[1]+(neutral-(int32_t)pwm_cutoff_st[1])*pwm_cutoff_tick/SOFT_CUTOFF_TICKS));
-            		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,(uint16_t)(pwm_cutoff_st[2]+(neutral-(int32_t)pwm_cutoff_st[2])*pwm_cutoff_tick/SOFT_CUTOFF_TICKS));
-            	}
-            }//end soft cut-off
-#else
-            if(uint16_half_rotation_counter>POWER_STAGE_STOP_TICKS) {
-            	if(ui_8_PWM_ON_Flag){
-					timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
-					timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
-					timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
-					timer_primary_output_config(TIMER0,DISABLE); //Disable PWM if motor is not turning
-					ui_8_PWM_ON_Flag=0;
-					foc_current_feedback_invalidate();
-					i8_recent_rotor_direction=0;
-					PI_iq.integral_part=0;
-					PI_id.integral_part=0;
-					// STEP 2A: reset lifecycle on hard cutoff
-					bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
-					neutral_dwell_active = 0;
-					foc_release_pending = 0;
-            	}
-            }//end half rotation counter
-#endif
-
-
     }
 }
 
@@ -2820,7 +2776,6 @@ void reg_ADC_processing(void)
     //report's list of remaining main-loop-dependent counters.
     //FW-103/104: control_time_ticks replaces Speed_counter - incremented in TIMER1_IRQHandler itself.
     if(uint16_half_rotation_counter<64000)uint16_half_rotation_counter++;
-    if(pwm_cutoff_active && pwm_cutoff_tick<SOFT_CUTOFF_TICKS)pwm_cutoff_tick++; //taktowanie okna miekkiego zwolnienia @4kHz
     if(ui16_erps_counter<64000)ui16_erps_counter++;
 
     //--- Walk Assist physical button (PA4), debounce z histereza (press + release) ---
@@ -3431,9 +3386,8 @@ void reg_ADC_processing(void)
              * IRQ-protected section as the other ISR-touched fields above. */
             rna_half_rotation_counter = uint16_half_rotation_counter;
             if(rna_primask == 0U) __enable_irq();
-            /* FW-122.1: pwm_cutoff_active/pwm_cutoff_tick are written only from main-loop-context
-             * code (main()'s lifecycle block and reg_ADC_processing() itself), never from a real
-             * ISR, so no IRQ protection is needed to read them here. */
+            /* Retained legacy diagnostic fields are main-loop-owned and stay zero in normal
+             * ARMED_ZERO operation, so no IRQ protection is needed to read them here. */
             bool rna_pwm_cutoff_active = pwm_cutoff_active != 0U;
             uint16_t rna_pwm_cutoff_tick = pwm_cutoff_tick;
 
@@ -3733,8 +3687,8 @@ void autodetect(void) {
 	 * returns, several seconds later.
 	 */
 	if(!hall_calibration_standstill_confirmed()) return;
-	// Position calibration owns the bridge directly. Cancel any pending normal
-	// soft cut-off before phase 1 so its delayed state cannot interfere here.
+	// Position calibration owns the bridge directly. Clear retained diagnostic
+	// fields before phase 1; normal ride has no soft-cutoff transaction.
 	pwm_cutoff_active=0;
 	pwm_cutoff_tick=0;
 	uint16_half_rotation_counter=0;

@@ -150,6 +150,11 @@ void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int
 		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
 		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);
 		timer_primary_output_config(TIMER0,DISABLE)	;	//disable PWM if overcurrent detected
+		/* MOE is now physically off. Keep its software mirror coherent even
+		 * though this terminal hard-fault path stops the core below. */
+		ui_8_PWM_ON_Flag=0;
+		bridge_lifecycle=BRIDGE_LIFECYCLE_FAULT;
+		foc_current_feedback_invalidate();
 		while(1){}						//stay here until hard reset
 	}
 
@@ -282,7 +287,6 @@ int utils_truncate_number_abs(long long *number, q31_t max) {
 
 	return did_trunc;
 }
-
 
 
 

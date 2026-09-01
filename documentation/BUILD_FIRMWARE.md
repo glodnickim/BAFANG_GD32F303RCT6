@@ -44,38 +44,48 @@ not firmware build entrypoints.
 
 ## VERSION NUMBERING
 
-Every canonical build invocation reserves a new sequential build number.
-
-Counter storage: `.local/build-number.txt` (gitignored, persistent).
+Canonical version authority is the persistent, global allocator:
 
 ```text
-0.0408 -> 0.0409 -> 0.0410 -> ...
+<parent-repository>\.ebics-version-state\M820_BL820.json
 ```
+
+It is shared by all branches and linked worktrees. `.local/build-number.txt`
+has no canonical authority and is never a fallback.
 
 Format: `0.` + 4-digit zero-padded counter.
 
 Rules:
 
-- each invocation (NORMAL or DIAG) reserves exactly one number;
-- failed builds still consume the number (no rollback);
-- `.build` deletion does not affect the counter;
-- manual `-Version` override does not touch the counter;
+- the official canonical workflow reserves a NORMAL/DIAG pair atomically;
+- failed builds retain their reserved number(s); there is no rollback;
+- missing, corrupt, locked, or unwritable persistent state stops AUTO;
+- `-BuildMode Repro -Version <historical-version>` never allocates;
+- `-BuildMode Developer` uses `DEV-NONCANONICAL` and never allocates;
+- AUTO rejects a manually supplied version;
 - git describe is provenance only, never the firmware version.
 
-Manual version override (special use only):
+The authoritative pair entrypoint is:
 
 ```powershell
-.\scripts\build-firmware.ps1 -Target M820_BL820 -Profile debug -Variant normal -Version 0.9999
+.\scripts\build-canonical-pair.ps1 -Profile debug
 ```
 
-When `-Version` is provided explicitly:
+It reserves both numbers under one global lock, builds NORMAL first and then
+DIAG in `Reserved` mode. A successful published image must pass the identity
+gate: allocated version = generated `EBICS_BUILD_VERSION` = manifest = BIN
+filename.
 
-- the counter is NOT incremented;
-- `version_source` is set to `manual_override` in the manifest;
-- `build_counter` is set to -1;
-- a warning is displayed.
+An audited reconciliation of a stale persistent HWM is separate from allocation:
 
-Do not use manual override for normal workflow.
+```powershell
+.\scripts\reconcile-canonical-hwm.ps1 `
+  -AuthoritativeVersion 0.0470 `
+  -Evidence "<authoritative issued-artifact evidence>"
+```
+
+It can only raise HWM under the same global lock and reserves no firmware
+version. Lowering HWM is rejected.
 
 ## 1. Requirements
 
@@ -95,18 +105,15 @@ C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\13.2 Rel1\bin
 A different location can be passed via `-Toolchain`. A different compiler
 version fails the build to prevent accidentally creating different binaries.
 
-## 2. Normal build for riding
+## 2. Canonical build for riding
 
 From the project root directory:
 
 ```powershell
-.\scripts\build-firmware.ps1 `
-  -Target M820_BL820 `
-  -Profile debug `
-  -Variant normal
+.\scripts\build-canonical-pair.ps1 -Profile debug
 ```
 
-The script reserves the next auto-increment number and produces:
+The first atomically reserved number produces the NORMAL artifact:
 
 ```text
 .build\M820_BL820\0.0409_M820_BL820.bin
@@ -116,16 +123,9 @@ The script reserves the next auto-increment number and produces:
 the ELF does not contain `diag_session_dump_step`. No diagnostics does not
 disable the required HMI communication or Canable configuration.
 
-## 3. Diagnostic build
+## 3. Diagnostic member of the canonical pair
 
-```powershell
-.\scripts\build-firmware.ps1 `
-  -Target M820_BL820 `
-  -Profile debug `
-  -Variant diagnostic
-```
-
-The script reserves the next auto-increment number and produces:
+The second atomically reserved number produces:
 
 ```text
 .build\M820_BL820\0.0410_M820_BL820_DIAG.bin
@@ -216,8 +216,10 @@ ram (data_bytes, bss_bytes, used_including_heap_stack_bytes)
 artifacts (raw_binary, raw_binary_sha256, final_binary, final_binary_sha256)
 ```
 
-`version_source` is one of: `auto_increment`, `manual_override`.
-`build_counter` is the integer build number (-1 for manual override).
+`version_source` is one of: `auto_global`, `auto_global_pair_reserved`,
+`repro_explicit`, `developer_noncanonical`.
+`build_counter` is the integer reserved build number, or `-1` for REPRO and
+Developer builds.
 
 ## 8. Memory map contract
 
@@ -257,7 +259,7 @@ eVistDrive M820_BL820 BUILD
 ==================================================
 
 BUILD VERSION:    0.0409
-Version source:   auto_increment
+Version source:   auto_global_pair_reserved
 Variant:          NORMAL
 Git HEAD:         ba794beb8d89
 Git describe:     v0.0286-23-gba794be

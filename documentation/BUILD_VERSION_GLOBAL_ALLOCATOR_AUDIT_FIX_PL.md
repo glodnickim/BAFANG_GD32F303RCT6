@@ -52,6 +52,15 @@ Po buildzie `Test-EbicsVersionIdentity` wymaga zgodności numeru w wygenerowanym
 `build_version.h`, manifeście i nazwie opublikowanego BIN. Niezgodność jest błędem i pozostawia
 rezerwację zużytą; test hosta zawiera celowo błędny manifest i potwierdza odrzucenie.
 
+## Kontrolowane uzgodnienie istniejącego HWM
+
+`scripts/reconcile-canonical-hwm.ps1` obsługuje wyłącznie udokumentowaną korektę
+istniejącego, zaniżonego stanu po odnalezieniu silniejszego dowodu wydanej wersji.
+Wywołanie wymaga wersji i tekstu dowodu, bierze ten sam globalny lock, może tylko
+podnieść HWM, zapisuje poprzedni HWM oraz dowód w stanie i zwraca `NEW VERSION
+RESERVED: NO`. Nie jest to ręczny override builda; spadek HWM i brak/uszkodzenie
+stanu są odrzucane fail-closed.
+
 Zweryfikowano w izolowanym stanie: pojedynczą parę `0.9201` NORMAL / `0.9202` DIAG oraz dwa
 równoległe orchestratory: `0.9301/0.9302` i `0.9303/0.9304`, bez duplikatu i bez przeplotu par.
 REPRO `0.8123` przeszedł pełny build bez HWM, a Developer wydał wyłącznie

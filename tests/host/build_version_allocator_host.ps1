@@ -17,6 +17,18 @@ try {
     $v = @($jobs | Wait-Job | Receive-Job); $jobs | Remove-Job
     if (($v | Sort-Object -Unique).Count -ne 4) { throw 'duplicate allocation under concurrency' }
 
+    # A controlled HWM reconciliation raises an existing stale state under the same lock but
+    # never allocates a firmware version.  Lowering HWM is forbidden.
+    $syncRoot = "$root-sync"
+    Initialize-EbicsVersionState $syncRoot -AllowInitialMigration | Out-Null
+    $sync = Sync-EbicsCanonicalHwm 'C:\worktree-sync' $syncRoot 470 'host-test authoritative issued evidence'
+    if (-not $sync.Changed -or $sync.PreviousHwm -ne 459 -or $sync.Hwm -ne 470 -or $sync.NewVersionReserved) { throw 'controlled HWM reconciliation failed' }
+    if ((Get-EbicsCanonicalHwm 'C:\worktree-sync-check' $syncRoot) -ne '0.0470') { throw 'reconciled HWM was not persistent' }
+    $failed = $false
+    try { Sync-EbicsCanonicalHwm 'C:\worktree-sync' $syncRoot 469 'attempted downgrade' | Out-Null } catch { $failed = $true }
+    if (-not $failed) { throw 'HWM downgrade was accepted' }
+    Remove-Item -LiteralPath $syncRoot -Recurse -Force
+
     # Missing, malformed and semantically invalid state must fail closed; AUTO may not recreate it.
     $state = Join-Path $root 'M820_BL820.json'
     foreach ($bad in @('', '{', '{"schema":1,"target":"M820_BL820"}', '{"schema":2,"target":"M820_BL820","hwm":500}', '{"schema":1,"target":"OTHER","hwm":500}', '{"schema":1,"target":"M820_BL820","hwm":458}')) {
@@ -54,4 +66,7 @@ try {
     try { Test-EbicsVersionIdentity '0.0999' $header $manifest $artifact | Out-Null } catch { $failed = $true }
     if (-not $failed) { throw 'identity mismatch was published' }
     Write-Output 'build_version_allocator_host: PASS'
-} finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+} finally {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$root-sync" -Recurse -Force -ErrorAction SilentlyContinue
+}

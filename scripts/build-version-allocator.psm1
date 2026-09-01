@@ -61,6 +61,40 @@ function Get-EbicsVersionState {
     return $s
 }
 
+function Sync-EbicsCanonicalHwm {
+    param(
+        [string]$RepoRoot,
+        [string]$StateRoot = "",
+        [ValidateRange(459,9999)][int]$AuthoritativeHwm,
+        [ValidateNotNullOrEmpty()][string]$Evidence,
+        [ValidateRange(1,120)][int]$LockTimeoutSeconds = 20
+    )
+    $root = Get-EbicsVersionStateRoot $RepoRoot $StateRoot
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $lock = Enter-EbicsVersionLock $root $LockTimeoutSeconds
+    try {
+        $state = Get-EbicsVersionState $root
+        $previous = [int]$state.hwm
+        if ($AuthoritativeHwm -lt $previous) {
+            throw "Refusing to lower global canonical HWM: state is 0.$($previous.ToString('D4')), authoritative evidence requests 0.$($AuthoritativeHwm.ToString('D4'))."
+        }
+        if ($AuthoritativeHwm -eq $previous) {
+            return [pscustomobject]@{ Root=$root; PreviousHwm=$previous; Hwm=$previous; Changed=$false; Atomic=$true; NewVersionReserved=$false }
+        }
+        [ordered]@{
+            schema = 1
+            target = "M820_BL820"
+            hwm = $AuthoritativeHwm
+            migrated_from = $state.migrated_from
+            hwm_reconciled_from = $previous
+            hwm_reconciled_utc = [DateTime]::UtcNow.ToString("o")
+            hwm_reconciliation_evidence = $Evidence
+            updated_utc = [DateTime]::UtcNow.ToString("o")
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root "M820_BL820.json") -Encoding UTF8
+        return [pscustomobject]@{ Root=$root; PreviousHwm=$previous; Hwm=$AuthoritativeHwm; Changed=$true; Atomic=$true; NewVersionReserved=$false }
+    } finally { Exit-EbicsVersionLock $lock }
+}
+
 function Reserve-EbicsCanonicalVersion {
     param(
         [string]$RepoRoot,
@@ -75,8 +109,11 @@ function Reserve-EbicsCanonicalVersion {
         $state = Get-EbicsVersionState $root
         $old = [int]$state.hwm; $numbers = @()
         1..$Count | ForEach-Object { $numbers += (++$old) }
-        @{ schema = 1; target = "M820_BL820"; hwm = $old; migrated_from = $state.migrated_from; updated_utc = [DateTime]::UtcNow.ToString("o") } |
-            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root "M820_BL820.json") -Encoding UTF8
+        $nextState = [ordered]@{ schema = 1; target = "M820_BL820"; hwm = $old; migrated_from = $state.migrated_from; updated_utc = [DateTime]::UtcNow.ToString("o") }
+        foreach ($name in @("hwm_reconciled_from", "hwm_reconciled_utc", "hwm_reconciliation_evidence")) {
+            if ($state.PSObject.Properties.Name -contains $name) { $nextState[$name] = $state.$name }
+        }
+        $nextState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root "M820_BL820.json") -Encoding UTF8
         return [pscustomobject]@{ Root=$root; PreviousHwm=[int]$state.hwm; Versions=@($numbers | ForEach-Object { '0.{0:D4}' -f $_ }); Atomic=$true }
     } finally { Exit-EbicsVersionLock $lock }
 }
@@ -96,4 +133,4 @@ function Test-EbicsVersionIdentity {
     }
     return $true
 }
-Export-ModuleMember -Function Get-EbicsVersionStateRoot,Initialize-EbicsVersionState,Reserve-EbicsCanonicalVersion,Get-EbicsCanonicalHwm,Test-EbicsVersionIdentity
+Export-ModuleMember -Function Get-EbicsVersionStateRoot,Initialize-EbicsVersionState,Sync-EbicsCanonicalHwm,Reserve-EbicsCanonicalVersion,Get-EbicsCanonicalHwm,Test-EbicsVersionIdentity

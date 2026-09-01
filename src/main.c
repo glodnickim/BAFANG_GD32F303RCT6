@@ -3511,15 +3511,15 @@ void reg_ADC_processing(void)
             prev_metric_why_backward = false;
             prev_metric_why_notlatched = false;
         }
-        //FW-028: the ride core bypasses the legacy monolith's zero-target PI cleanup.
-        //When the final command is zero, drop stale controller integral immediately so
-        //the bridge cannot keep making torque after the assist target has disappeared.
-        //FW-037: safety cuts are no longer reset here — they ramp down (integral clears when the
-        //setpoint ramp reaches 0), so brake/backward/etc. fade smoothly. FW-028 zero-target reset stays.
-        if(MS.i_q_setpoint==0){
-			PI_iq.integral_part=0;
-			PI_id.integral_part=0;
-        }
+        //STOP-CLICK-C1: FW-028's zero-target integral reset (and the FW-037 note above it) is
+        //gone. This foreground write raced the 16 kHz PI/FOC owner (runPIcontrol(), FW-128A) -
+        //two asynchronous writers of the same integral_part, one clearing it up to 4000x/s while
+        //the ISR kept accumulating - which is the mechanism behind the audible click at the final
+        //release into ARMED_ZERO. Ordinary zero torque now leaves PI_iq/PI_id owned exclusively
+        //by the 16 kHz PI: at Iq_ref==0 it keeps regulating measured Id/Iq toward zero under its
+        //existing clamps, exactly as it does at any other setpoint. See armed_zero_lifecycle_host
+        //and the STOP-CLICK-C1 host suite for the single-writer proof. This does not reintroduce
+        //the pre-FW-037 hard safety_cut path below - that remains a fade via the Iq release ramp.
         //FW-037: the old hard "safety_cut -> immediate neutral PWM + bridge DISABLE" path was
         //removed. Brake / backward / overtemp / torque-fault now fade via the Iq release ramp
         //(ride_control forces iq_target=0 + 200 ms release) and the normal soft cutoff after the
@@ -3564,10 +3564,8 @@ void reg_ADC_processing(void)
 			uint16_cadence_filtered=0;
     	}
 		torque_cumulated=0;
-		if (!MS.i_q_setpoint){//reset integral part, if no power from throttle signal is wanted
-			PI_iq.integral_part=0;
-			PI_id.integral_part=0;
-		}
+		//STOP-CLICK-C1: the redundant second zero-target reset (same defect as the FW-028 site
+		//above - a foreground writer racing the 16 kHz PI owner) is removed with it.
     }
 
 	autodetect_standstill_track(); //FW-110: every field it reads is fresh as of this tick, right here

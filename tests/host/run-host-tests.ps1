@@ -416,6 +416,15 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
+    @{ Name = 'STOP-CLICK-C1 PI D/Q integrator continuity (real PI_control() replica + production wiring guards)'
+       Harness = Join-Path $PSScriptRoot 'stopclick_c1_pi_integral_host.c'
+       # No modules linked - main.c/FOC.c are the ARM entry point/ISR core (same reasoning as
+       # armed_zero_lifecycle_host.c above); T1/T4-T10 are proven against their source text,
+       # T2/T3/boundedness against a byte-faithful replica of FOC.c's PI_control() pinned to the
+       # real body by its own model-matches-production source guard.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DFOC_C_PATH=$focCPathForward") },
     @{ Name = 'QS-3 final Iq slew parity (real final ramp + lifecycle wiring)'
        Harness = Join-Path $PSScriptRoot 'qs3_final_iq_slew_host.c'
        Modules = @((Join-Path $root 'src\assist_dynamics.c'),

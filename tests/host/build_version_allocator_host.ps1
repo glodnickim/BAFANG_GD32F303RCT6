@@ -24,6 +24,10 @@ try {
     $sync = Sync-EbicsCanonicalHwm 'C:\worktree-sync' $syncRoot 470 'host-test authoritative issued evidence'
     if (-not $sync.Changed -or $sync.PreviousHwm -ne 459 -or $sync.Hwm -ne 470 -or $sync.NewVersionReserved) { throw 'controlled HWM reconciliation failed' }
     if ((Get-EbicsCanonicalHwm 'C:\worktree-sync-check' $syncRoot) -ne '0.0470') { throw 'reconciled HWM was not persistent' }
+    $postSync = Reserve-EbicsCanonicalVersion 'C:\worktree-sync-reserve' $syncRoot 1
+    if ($postSync.Versions[0] -ne '0.0471') { throw 'reservation after HWM reconciliation was not monotonic' }
+    $syncState = Get-Content -LiteralPath (Join-Path $syncRoot 'M820_BL820.json') -Raw | ConvertFrom-Json
+    if ($syncState.hwm_reconciled_from -ne 459 -or $syncState.hwm_reconciliation_evidence -ne 'host-test authoritative issued evidence') { throw 'reconciliation evidence was not retained after reservation' }
     $failed = $false
     try { Sync-EbicsCanonicalHwm 'C:\worktree-sync' $syncRoot 469 'attempted downgrade' | Out-Null } catch { $failed = $true }
     if (-not $failed) { throw 'HWM downgrade was accepted' }
@@ -53,6 +57,17 @@ try {
     Remove-Item -LiteralPath $lockRoot -Recurse -Force
     if (-not $failed) { throw 'existing lock did not stop allocation' }
 
+    # A state that cannot be written is a hard stop, never an implicit local-counter fallback.
+    $readonlyRoot = "$root-readonly"
+    Initialize-EbicsVersionState $readonlyRoot -AllowInitialMigration | Out-Null
+    $readonlyState = Get-Item -LiteralPath (Join-Path $readonlyRoot 'M820_BL820.json')
+    $readonlyState.IsReadOnly = $true
+    $failed = $false
+    try { Reserve-EbicsCanonicalVersion 'C:\worktree-readonly' $readonlyRoot 1 | Out-Null } catch { $failed = $true }
+    $readonlyState.IsReadOnly = $false
+    Remove-Item -LiteralPath $readonlyRoot -Recurse -Force
+    if (-not $failed) { throw 'unwritable state did not stop allocation' }
+
     # The post-build gate must reject a deliberately mismatched published identity.
     $identity = Join-Path $root 'identity'
     New-Item -ItemType Directory -Force -Path $identity | Out-Null
@@ -69,4 +84,5 @@ try {
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath "$root-sync" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$root-readonly" -Recurse -Force -ErrorAction SilentlyContinue
 }

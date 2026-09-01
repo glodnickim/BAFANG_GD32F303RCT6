@@ -1,0 +1,126 @@
+/*
+ * QS-3D-R1: single final Iq slew owner at the 16 kHz FOC rate.
+ *
+ * The 4 kHz ride/control domain publishes a complete command through a bounded
+ * single-producer/single-consumer mailbox. The 16 kHz ISR accepts a command only
+ * when both sequence reads identify the same stable generation; otherwise it keeps
+ * the last command that was verified. All payload members are explicit aligned
+ * 32-bit objects -- there are no C bitfields and no assumed 64-bit atomic transfer.
+ *
+ * Battery-current limiting remains upstream in ride_control.c (QS-3C contract).
+ * Walk Assist, calibration and comm-loss publish explicit BYPASS/FORCE_ZERO
+ * commands through the same owner; they never write MS.i_q_setpoint directly.
+ */
+
+#ifndef FAST_IQ_SLEW_H_
+#define FAST_IQ_SLEW_H_
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#define FAST_IQ_SLEW_READ_ATTEMPTS 3U
+
+/* Slew modes published by the 4 kHz domain. */
+typedef enum {
+	FIS_MODE_RISE        = 0,  /* normal rise toward target */
+	FIS_MODE_FALL        = 1,  /* normal fall toward target */
+	FIS_MODE_RELEASE     = 2,  /* normal release: live state -> zero in configured time */
+	FIS_MODE_SAFETY      = 3,  /* safety release: live state -> zero in configured time */
+	FIS_MODE_FORCE_ZERO  = 4,  /* exact same-tick zero (force_zero_reference, coast_release) */
+	FIS_MODE_BYPASS      = 5,  /* service/Walk passthrough, still written by fast owner */
+	FIS_MODE_HOLD        = 6   /* target equals the authoritative live Q10 state */
+} fis_mode_t;
+
+/*
+ * One verified behavior command. step_mag_8 is the legacy per-4-kHz Q8 step;
+ * adding it to the Q10 accumulator on each of four 16-kHz ticks preserves the
+ * original integrated slope exactly. Release commands instead carry their real
+ * 16-kHz duration and a producer-computed floor(2^32 / duration) reciprocal. The
+ * consumer uses multiply/shift plus a remainder correction at the release edge,
+ * so it derives an exact live-state rate without a division instruction in the ISR.
+ */
+typedef struct {
+	int32_t  target;
+	uint32_t step_mag_8;
+	uint32_t mode;
+	uint32_t release_ticks_16k;
+	uint32_t release_recip_q32;
+} fast_iq_slew_command_t;
+
+/* Every published field is a naturally aligned Cortex-M4 atomic word access. */
+typedef struct {
+	volatile uint32_t seq;                   /* odd = update in progress, even = stable */
+	volatile int32_t  target;
+	volatile uint32_t step_mag_8;
+	volatile uint32_t mode;
+	volatile uint32_t release_ticks_16k;
+	volatile uint32_t release_recip_q32;
+} fast_iq_slew_mailbox_t;
+
+/* Producer API (called from 4 kHz ride/control domain). */
+
+void fast_iq_slew_publish(
+	fast_iq_slew_mailbox_t *mb,
+	int32_t target,
+	fis_mode_t mode,
+	uint16_t step_mag_8,
+	uint32_t release_ticks_16k);
+
+/* Consumer API (called from 16 kHz FOC ISR). */
+
+/* Reset mailbox and consumer state. Legal only at boot or bridge-off cold PREPARE. */
+void fast_iq_slew_reset(fast_iq_slew_mailbox_t *mb);
+
+/* True cold PREPARE hook: also makes the externally visible fast output exact zero. */
+void fast_iq_slew_cold_prepare(
+	fast_iq_slew_mailbox_t *mb,
+	int32_t *iq_out);
+
+/*
+ * Advance the slew by one 16 kHz tick. Reads the mailbox, advances the fractional
+ * accumulator, and writes MS.i_q_setpoint via the provided pointer. Returns the
+ * current Iq_ref.
+ */
+int32_t fast_iq_slew_tick(
+	fast_iq_slew_mailbox_t *mb,
+	int32_t *iq_out);
+
+/* Read-only word-sized observations used by diagnostics and deterministic tests. */
+int32_t fast_iq_slew_current_target(void);
+fis_mode_t fast_iq_slew_current_mode(void);
+uint32_t fast_iq_slew_current_step_mag_8(void);
+uint32_t fast_iq_slew_current_release_ticks_16k(void);
+
+/*
+ * Authoritative live final-slew state. The ISR is the sole writer; the 4 kHz producer
+ * takes one aligned 32-bit snapshot to choose RISE/FALL/HOLD from trajectory direction,
+ * never from target sign or target history.
+ */
+int32_t fast_iq_slew_current_accumulator_q10(void);
+
+/* Test-only interrupt injection boundaries around every producer store. */
+#if defined(FAST_IQ_SLEW_TEST_HOOKS)
+typedef enum {
+	FIS_PUBLISH_BEFORE_UPDATE = 0,
+	FIS_PUBLISH_AFTER_SEQ_ODD,
+	FIS_PUBLISH_AFTER_TARGET,
+	FIS_PUBLISH_AFTER_STEP,
+	FIS_PUBLISH_AFTER_MODE,
+	FIS_PUBLISH_AFTER_RELEASE_TICKS,
+	FIS_PUBLISH_AFTER_RELEASE_RECIP,
+	FIS_PUBLISH_BEFORE_SEQ_EVEN,
+	FIS_PUBLISH_AFTER_SEQ_EVEN
+} fis_publish_stage_t;
+
+void fast_iq_slew_test_hook(
+	fis_publish_stage_t stage,
+	fast_iq_slew_mailbox_t *mb);
+
+/* Test access to the real release-rate implementation, not a duplicated model. */
+void fast_iq_slew_test_set_accumulator_q10(int32_t accumulator_q10);
+uint32_t fast_iq_slew_test_release_rate_q10(
+	uint32_t accumulator_q10,
+	uint32_t release_ticks_16k);
+#endif
+
+#endif /* FAST_IQ_SLEW_H_ */

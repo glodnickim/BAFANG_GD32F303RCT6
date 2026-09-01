@@ -917,8 +917,6 @@ int main(void)
 	MS.Speedx100=0; //in km/h*100
 	MS.assist_level=2;
 	motor_core_init(&MS);
-	motor_command_t initial_motor_command = {0};
-	motor_core_set_command(&initial_motor_command);
 	ride_control_init();
 	pas_direction_init();  //FW-109 v2: explicit contract, not an accident of .bss zeroing -
 	                        //see inc/pas_direction.h; this module's per-step API (on_step/
@@ -1324,13 +1322,8 @@ int main(void)
 					if(comm_lost_ticks < 60000) comm_lost_ticks++;
 					if(comm_lost_ticks >= COMM_CUT_TICKS){ //3 s no HMI frame -> kill assist (fail-safe: broken cable / dead HMI)
 						MS.assist_level=0;
-						motor_command_t comm_stop_command = {
-							.iq_target = 0,
-							.id_target = MS.i_d_setpoint,
-							.enable = true,
-							.emergency_stop = false
-						};
-						motor_core_set_command(&comm_stop_command);
+						/* COMM LOSS classification: exact zero through the fast owner. */
+						ride_control_force_final_iq_zero();
 					}
 					if(comm_lost_ticks >= COMM_OFF_TICKS && MS.Speedx100==0){ //10 s no HMI frame -> power off, but only at standstill
 						power_off_controller();
@@ -1352,8 +1345,8 @@ int main(void)
              * torque. Permission to produce torque is GATE B further down, and that one does
              * require a valid calibration.
              */
-            if(MS.i_q_setpoint > 0){
-            	if(!ui_8_PWM_ON_Flag){
+            if(ride_control_final_iq_requested() > 0){
+                if(!ui_8_PWM_ON_Flag){
 				pwm_cutoff_active=0;        //clear retained legacy diagnostic state
 			get_standstill_position();
 			// FW-126: a fresh run must not blend its first real sample into the PREVIOUS
@@ -1393,6 +1386,12 @@ int main(void)
 					neutral_dwell_active = 1;
 					foc_release_pending = 0;
 					first_active_foc_sampled = 0;
+					/* QS-3D-R1: authoritative bridge-off cold PREPARE. Clear the old
+					 * target/mode/rate/fraction and externally visible Iq before MOE ON.
+					 * A fresh 4 kHz publish during neutral dwell supplies current demand. */
+					fast_iq_slew_cold_prepare(
+						ride_control_final_iq_slew_mailbox(),
+						&MS.i_q_setpoint);
 					timer_primary_output_config(TIMER0,ENABLE);
 					uint16_half_rotation_counter=0;
 					bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;
@@ -1442,7 +1441,7 @@ int main(void)
 			}
 			/*
 			 * Normal ride stop/restart lifecycle. The final reference is
-			 * MS.i_q_setpoint, the single output of the existing assist_dynamics
+			 * MS.i_q_setpoint, the single output of the 16 kHz fast slew
 			 * ramp. Once it reaches zero, retain the armed bridge and continue the
 			 * FOC ISR at zero reference. No Hall timeout, CCR takeover, PI reset,
 			 * theta reseed, dwell or MOE edge belongs to this transition.
@@ -3483,8 +3482,8 @@ void reg_ADC_processing(void)
         prev_metric_pedaling = (pas_direction_fwd_run()>0 && pas_idle_ticks<=pas_stop_timeout);
         if(prev_metric_pedaling){
             /*
-             * MS.i_q_setpoint is the FINAL commanded current, written by
-             * motor_core_set_command() after the ramps — not the measured MS.i_q. This asks
+             * MS.i_q_setpoint is the FINAL commanded current, written by the 16 kHz
+             * fast slew owner — not the measured MS.i_q. This asks
              * "did the control path ask for anything", which is the question this card is
              * about. Whether the power stage then delivered it is a different measurement.
              */
@@ -3614,7 +3613,7 @@ int32_t speed_PLL (int32_t ist, int32_t soll, uint8_t speedadapt)
  *
  * Normal mode is now visibly the invariant the whole FW-128 series is built around:
  *
- *     reference = Iq_ref   (MS.i_q_setpoint, single writer motor_core.c:22)
+ *     reference = Iq_ref   (MS.i_q_setpoint, dynamic writer fast_iq_slew_tick)
  *     feedback  = measured Iq
  *
  * Everything in this function is lifted verbatim from where it used to sit inline in
@@ -3626,9 +3625,17 @@ static void pi_iq_apply_inputs(void)
 	/* QS-3C: PI_iq is ALWAYS an Iq-domain current regulator - feedback = measured motor Iq,
 	 * setpoint = motor Iq reference from MS.i_q_setpoint (the single final-slew owner's
 	 * output). The battery-current limiter no longer lives here: it is an upstream Iq cap in
-	 * ride_control.c (before assist_dynamics_apply), so NO post-slew battery clamp exists and
-	 * PI_iq never leaves the Iq domain. Legacy override removed (PI_iq.setpoint =
-	 * battery_current_max>>6 and PI_iq.recent_value = MS.Battery_Current>>6). */
+	 * ride_control.c, so NO post-slew battery clamp exists and PI_iq never leaves the Iq
+	 * domain. Legacy override removed (PI_iq.setpoint = battery_current_max>>6 and
+	 * PI_iq.recent_value = MS.Battery_Current>>6).
+	 *
+	 * QS-3D: MS.i_q_setpoint is now produced HERE, every 16 kHz tick, by the single final
+	 * slew owner - fast_iq_slew_tick(), which consumes the 4 kHz mailbox published by
+	 * ride_control.c. This is the ONLY writer of MS.i_q_setpoint on the normal ride path
+	 * and raw foreground demand never overwrites the fast output. */
+	fast_iq_slew_tick(
+		ride_control_final_iq_slew_mailbox(),
+		&MS.i_q_setpoint);
 	PI_iq.recent_value = MS.i_q;                                          /* measured Iq   */
 	PI_iq.setpoint = MP.reverse * i8_reverse_flag * MS.i_q_setpoint;      /* Iq_ref        */
 }
@@ -3682,18 +3689,18 @@ void autodetect(void) {
 	pwm_cutoff_active=0;
 	pwm_cutoff_tick=0;
 	uint16_half_rotation_counter=0;
+	/* CALIBRATION phase 1 is mutually exclusive open-loop bridge ownership. Keep
+	 * the q-axis fast owner at an explicit cold exact-zero command before MOE ON. */
+	ride_control_force_final_iq_zero();
+	fast_iq_slew_cold_prepare(
+		ride_control_final_iq_slew_mailbox(),
+		&MS.i_q_setpoint);
 	timer_primary_output_config(TIMER0,ENABLE);
 	ui_8_PWM_ON_Flag=1;
 	MS.hall_angle_detect_flag = 0; //set uq to contstant value in FOC.c for open loop control
 	q31_rotorposition_absolute = 1 << 31;
 	i32_hall_order = 1;//reset hall order
-	motor_command_t detect_command = {
-		.iq_target = 0,
-		.id_target = 200, //set MS.id to appr. 2000mA
-		.enable = true,
-		.emergency_stop = false
-	};
-	motor_core_set_command(&detect_command);
+	motor_core_set_id_target(200); //set MS.id to appr. 2000mA
 
 	for (int i = 0; i < 1080; i++) {
 		q31_rotorposition_absolute += one_deg; //drive motor in open loop with steps of 1 deg
@@ -3799,9 +3806,7 @@ void autodetect(void) {
     MS.i_q = 0;
     MS.u_d=0;
     MS.u_q=0;
-	detect_command.iq_target = MS.i_q_setpoint;
-	detect_command.id_target = 0;
-	motor_core_set_command(&detect_command);
+	motor_core_set_id_target(0);
     uint32_tics_filtered=1000000;
 
 

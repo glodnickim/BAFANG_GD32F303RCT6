@@ -114,10 +114,10 @@ int main(void)
 
 	/* --- S1: entering the neutral bridge state does NOT depend on calibration ------------- */
 	{
-		const char *gate = strstr(m, "if(MS.i_q_setpoint > 0){");
+		const char *gate = strstr(m, "if(ride_control_final_iq_requested() > 0){");
 		CHECK(gate != NULL,
 		      "S1a. the bridge-entry gate is demand only - no calibration term");
-		CHECK(strstr(m, "if(MS.i_q_setpoint > 0 && current_cal_foc_allowed") == NULL,
+		CHECK(strstr(m, "if(ride_control_final_iq_requested() > 0 && current_cal_foc_allowed") == NULL,
 		      "S1b. the old deadlocking combined gate is gone");
 	}
 

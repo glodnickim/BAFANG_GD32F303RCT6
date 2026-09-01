@@ -103,6 +103,9 @@ static void control_tick(uint16_t raw_mv, int event)
 	in.safety_cut_non_direction = (g_safety_cut != 0);
 	in.throttle_iq = g_throttle_iq;
 	ride_control_update(&in);
+	for (unsigned q = 0; q < 4U; q++) {
+		fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+	}
 
 	g_probe.iq_request = assist_modes_get_last_output()->iq_request;
 	g_probe.iq_setpoint = MS.i_q_setpoint;

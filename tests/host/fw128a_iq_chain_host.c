@@ -195,7 +195,7 @@ int main(void)
 		const char *req = strstr(r, "iq_chain_note_requested(");
 		const char *lim = strstr(r, "assist_limits_apply(iq_target");
 		const char *alw = strstr(r, "iq_chain_note_allowed(");
-		const char *ramp = strstr(r, "assist_dynamics_apply(");
+		const char *ramp = alw ? strstr(alw, "ride_publish_final_iq(iq_target") : NULL;
 		CHECK(req && lim && req < lim,
 		      "A1e. Iq_requested is recorded BEFORE the limiters - that is what makes it 'requested'");
 		CHECK(alw && ramp && alw < ramp,
@@ -263,16 +263,19 @@ int main(void)
 	      strstr(m, "sample_window_decide(pwm_applied") != NULL &&
 	      strstr(m, "current_feedback_update(sample_ctx->state") != NULL,
 	      "A13. the FW-127 acquisition chain is still wired exactly as it was");
-	CHECK(strstr(r, "assist_dynamics_apply(") != NULL,
+	CHECK(strstr(r, "fast_iq_slew_publish(") != NULL,
 	      "S4a. the ramp is still the single call it was - no ramp arithmetic was touched here");
 	CHECK(count_occurrences(r, "assist_limits_apply(") == 2,
 	      "S4b. the limiter is still called exactly twice (pedal and throttle), unchanged");
-	CHECK(count_occurrences(r, "motor_core_set_command(") == 3,
-	      "S4c. the three command sites (stop, calibration, normal) are unchanged");
+	CHECK(count_occurrences(r, "motor_core_set_command(") == 0 &&
+	      strstr(r, "ride_control_force_final_iq_zero();") != NULL &&
+	      strstr(r, "ride_control_request_service_iq(calibration_iq);") != NULL &&
+	      strstr(r, "motor_core_set_id_target(input->current_id);") != NULL,
+	      "S4c. stop/calibration/normal ownership is explicit and Motor Core cannot overwrite Iq");
 
 	/* --- A8/A9: stop and fault paths still bypass the normal chain ------------------------------ */
 	{
-		const char *stop = strstr(r, "motor_core_set_command(&stop_command)");
+		const char *stop = strstr(r, "ride_control_force_final_iq_zero();");
 		const char *note = strstr(r, "iq_chain_note_requested(");
 		CHECK(stop && note && stop < note,
 		      "A8/A9. the safety-cut command returns before the canonical chain is even reached - "

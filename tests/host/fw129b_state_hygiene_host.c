@@ -41,6 +41,7 @@
 #include "assist_modes.h"
 #include "assist_start.h"
 #include "config.h"
+#include "fast_iq_slew.h"
 #include "motor_core.h"
 #include "pas_direction.h"
 #include "pas_quadrature.h"
@@ -55,6 +56,10 @@
 #define TEST_BATTERY_MV   42000U
 #define TEST_VOLTAGE_RAW  2000
 #define TEST_TEMPERATURE_C 30
+
+/* 16 kHz FOC / 4 kHz control: the ISR runs the final slew integration four times per
+ * control tick (see pi_iq_apply_inputs() in src/main.c). */
+#define FOC_TICKS_PER_CTRL 4U
 
 /* A firm, unambiguous push, and the near-zero residual the ghost-assist case was found at:
  * ~0.04 kg of equivalent load, which is sensor noise, not a rider. */
@@ -157,6 +162,14 @@ static void do_tick(step_t *s, int event)
 	in.safety_cut_non_direction = s->non_direction_safety_cut;
 	in.throttle_iq = 0;
 	ride_control_update(&in);
+	/* QS-3D: ride_control_update() now only PUBLISHES the final Iq demand to the 16 kHz
+	 * mailbox (fast_iq_slew_publish). MS.i_q_setpoint is produced by the real 16 kHz owner
+	 * (fast_iq_slew_tick) in pi_iq_apply_inputs(), i.e. once per FOC tick within this control
+	 * tick - mirror the production wiring exactly so the ramp is observable here. */
+	fast_iq_slew_mailbox_t *mb = ride_control_final_iq_slew_mailbox();
+	for (unsigned q = 0; q < FOC_TICKS_PER_CTRL; q++) {
+		fast_iq_slew_tick(mb, &MS.i_q_setpoint);
+	}
 }
 
 static void fwd1(step_t *s) { do_tick(s, EV_FORWARD); }

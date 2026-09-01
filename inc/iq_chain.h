@@ -33,10 +33,10 @@
  *     Iq_allowed     the demand after every limiter still active in FW-128A
  *                    (assist_limits_apply voltage/thermal/speed, assist_start smoothing,
  *                    the gear preload cap), BEFORE the ramp
- *                    producer: ride_control_update(), immediately before assist_dynamics_apply()
+ *                    producer: ride_control_update(), immediately before final mailbox publish
  *
  *     Iq_ref         the ramped reference PI_iq actually follows
- *                    producer: motor_core_set_command() -> MS.i_q_setpoint
+ *                    producer: fast_iq_slew_tick() @ 16 kHz -> MS.i_q_setpoint
  *
  * Iq_ref IS NOT STORED HERE, on purpose. MS.i_q_setpoint already holds it and already has one
  * writer; copying it into this struct would create exactly the duplicate state this card exists

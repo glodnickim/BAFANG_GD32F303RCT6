@@ -1,5 +1,6 @@
 #include "ride_control.h"
 #include "battery_iq_cap.h"   /* QS-3C: battery-current limiter as an upstream Iq cap */
+#include "fast_iq_slew.h"     /* QS-3D: 16 kHz final Iq slew owner */
 #include "iq_chain.h"   /* FW-128A: names for the demand stages, no ownership change */
 
 #include <string.h>    /* FW-129B: clearing the diagnostic snapshots in ride_control_init() */
@@ -18,9 +19,13 @@
 #include "torque_input.h"
 #include "tuning_config.h"
 
+/* QS-3D: `map` is shared (defined non-static in assist_dynamics.c and assist_limits.c,
+ * no header). Forward-declared here for the mailbox step computation. */
+int32_t map(int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max);
+
 // FW-094: the ride core is the only assist pipeline — there is no engine type to select or
 // report. Walk Assist and position calibration are not assist modes: they are motor-layer
-// service paths with their own Iq producers (motor_service.h), called below.
+// service requests; QS-3D-R1 carries both through the same fast Iq writer via BYPASS.
 
 /*
  * FW-031: ride latch + current floor.
@@ -103,6 +108,59 @@ bool ride_control_battery_limit_active(void)
 {
 	return ride_battery_cap.bc_active;
 }
+
+/*
+ * QS-3D: the 4 kHz -> 16 kHz final-Iq-slew mailbox (seqlocked). Owned here (the 4 kHz
+ * producer side); the 16 kHz FOC ISR in main.c consumes it via fast_iq_slew_tick().
+ * There is exactly ONE dynamic Iq state now, and it lives at 16 kHz.
+ */
+static fast_iq_slew_mailbox_t final_iq_slew_mailbox;
+static volatile int32_t final_iq_requested;
+
+fast_iq_slew_mailbox_t *ride_control_final_iq_slew_mailbox(void)
+{
+	return &final_iq_slew_mailbox;
+}
+
+int32_t ride_control_final_iq_requested(void)
+{
+	return final_iq_requested;
+}
+
+static void ride_publish_final_iq(
+	int32_t target,
+	fis_mode_t mode,
+	uint16_t step_mag_8,
+	uint32_t release_ticks_16k)
+{
+	fast_iq_slew_publish(
+		&final_iq_slew_mailbox,
+		target,
+		mode,
+		step_mag_8,
+		release_ticks_16k);
+	final_iq_requested = target;
+}
+
+void ride_control_force_final_iq_zero(void)
+{
+	ride_publish_final_iq(0, FIS_MODE_FORCE_ZERO, 0U, 0U);
+}
+
+void ride_control_request_service_iq(int32_t iq_target)
+{
+	if (iq_target < 0) {
+		iq_target = 0;
+	}
+	ride_publish_final_iq(iq_target, FIS_MODE_BYPASS, 0U, 0U);
+}
+
+/* QS-3D: forward declaration - defined after ride_control_update. */
+static fis_mode_t ride_final_iq_slew_compute(
+	const assist_dynamics_input_t *input,
+	int32_t iq_target,
+	uint16_t *out_step_mag,
+	uint32_t *out_release_ticks_16k);
 
 /*
  * FW-112 v2 TERMINAL CANCEL: one helper for every terminal inhibit that must stop the
@@ -297,7 +355,9 @@ void ride_control_init(void)
 	pedal_assist_gate_init();
 	assist_extended_boost_init();   //FW-084
 	assist_modes_reset();
-	assist_dynamics_reset();        //FW-129: the Iq ramp accumulator and any release fade
+	assist_dynamics_reset();        //reference module hygiene; its 4 kHz final owner is inactive
+	fast_iq_slew_reset(&final_iq_slew_mailbox);   //QS-3D: reset the 16 kHz slew state/mailbox
+	final_iq_requested = 0;          //QS-3D-R1: bridge-off demand observation only
 	assist_start_reset();           //smooth-start envelope + startup-boost latch
 	torque_input_cancel_rolling_rearm();
 
@@ -317,13 +377,8 @@ void ride_control_init(void)
 void ride_control_update(const ride_control_input_t *input)
 {
 	if (input == 0) {
-		motor_command_t stop_command = {
-			.iq_target = 0,
-			.id_target = 0,
-			.enable = false,
-			.emergency_stop = true
-		};
-		motor_core_set_command(&stop_command);
+		ride_control_force_final_iq_zero();
+		motor_core_set_id_target(0);
 		return;
 	}
 	bool walk_release_cut = walk_was_active && !input->walk_active;
@@ -376,13 +431,8 @@ void ride_control_update(const ride_control_input_t *input)
 		 * outlive the detour and fire on exit. */
 		cancel_rearm_recovery();
 		int32_t calibration_iq = hall_calibration_iq_request();
-		motor_command_t calibration_command = {
-			.iq_target = calibration_iq,
-			.id_target = input->current_id,
-			.enable = true,
-			.emergency_stop = false
-		};
-		motor_core_set_command(&calibration_command);
+		ride_control_request_service_iq(calibration_iq);
+		motor_core_set_id_target(input->current_id);
 		return;
 	}
 
@@ -394,7 +444,7 @@ void ride_control_update(const ride_control_input_t *input)
 	bool force_zero_reference = false;   /* FW-112 v2, see below */
 	/*
 	 * FW-069: Iq ramps are per level now, filled from the level config in the assist branch
-	 * below. They stay 0 on the Walk Assist path ON PURPOSE: assist_dynamics_apply() returns
+	 * below. They stay 0 on the Walk Assist path ON PURPOSE: the legacy 4 kHz dynamics owner returned
 	 * before the ramp code whenever walk_active is set, because WA owns its complete Iq
 	 * trajectory (FW-060/FW-067) and a second dynamic element behind its speed controller
 	 * would only make the loop less stable. 0 also selects the compiled fallbacks, so a
@@ -1052,33 +1102,140 @@ void ride_control_update(const ride_control_input_t *input)
 	};
 	/*
 	 * QS-3C: the battery-current limiter is an UPSTREAM Iq-domain cap, applied HERE before
-	 * the single final Iq slew (assist_dynamics_apply below). It min-arbitrates into the
-	 * same Iq_allowed demand as the other limiters (pedal/thermal/throttle already folded
-	 * into iq_target), so battery limiting participates BEFORE the ONE final owner and the
-	 * normal runtime rule stays PI_iq.setpoint = MS.i_q_setpoint (Iq domain, no post-slew
-	 * battery clamp). battery_iq_cap.c is the single owner of the cap; it never writes
-	 * PI_iq.setpoint or PI_iq.recent_value.
+	 * the single final Iq slew (the 16 kHz mailbox publish below). It min-arbitrates into
+	 * the same Iq_allowed demand as the other limiters (pedal/thermal/throttle already
+	 * folded into iq_target), so battery limiting participates BEFORE the ONE final owner
+	 * and the normal runtime rule stays PI_iq.setpoint = MS.i_q_setpoint (Iq domain, no
+	 * post-slew battery clamp). battery_iq_cap.c is the single owner of the cap; it never
+	 * writes PI_iq.setpoint or PI_iq.recent_value.
 	 */
 	battery_iq_cap_update(input->battery_current_mA, input->battery_current_max,
 		input->phase_current_max, iq_target, input->u_abs, input->cal_i, &ride_battery_cap);
-	/* Inactive cap == phase_current_max >= any demand, so this min is a no-op then and only
-	 * limits Iq when the battery limiter is actually holding demand down. */
 	if (ride_battery_cap.iq_battery_cap < iq_target) {
 		iq_target = ride_battery_cap.iq_battery_cap;
 	}
-	/* FW-128A: Iq_allowed - after every limiter still active in this card, before the ramp.
-	 * The ramp below turns it into Iq_ref, which lives in MS.i_q_setpoint and nowhere else. */
+	/* FW-128A: Iq_allowed - after every limiter still active in this card, before the slew.
+	 * The 16 kHz slew turns it into Iq_ref, which lives in MS.i_q_setpoint and nowhere else. */
 	iq_chain_note_allowed(iq_target);
 
-	int32_t iq_reference = assist_dynamics_apply(
-		iq_target,
-		input->current_iq,
-		&dynamics_input);
-	motor_command_t command = {
-		.iq_target = iq_reference,
-		.id_target = input->current_id,
-		.enable = true,
-		.emergency_stop = false
-	};
-	motor_core_set_command(&command);
+	/*
+	 * QS-3D: publish the final Iq demand through the single mailbox. The 16 kHz FOC ISR
+	 * owns the actual slew accumulator; this only computes the mode and step fields.
+	 */
+	uint16_t step_mag_8 = 0;
+	uint32_t release_ticks_16k = 0U;
+	fis_mode_t slew_mode = ride_final_iq_slew_compute(
+		&dynamics_input, iq_target, &step_mag_8, &release_ticks_16k);
+	ride_publish_final_iq(iq_target, slew_mode, step_mag_8, release_ticks_16k);
+
+	/* Iq is owned exclusively by fast_iq_slew_tick(); motor_core owns only Id here. */
+	motor_core_set_id_target(input->current_id);
+}
+
+/*
+ * QS-3D: compute the 16 kHz mailbox step from the 4 kHz dynamics inputs.
+ *
+ * Migration of the legacy 4 kHz dynamics owner's MODE and STEP computation into a producer-side
+ * function that publishes to the 16 kHz mailbox. The physical behavior is preserved:
+ *   - RISE/FALL: the per-control (4 kHz) Q8 step is the full-scale Q8 step divided across the
+ *     (adaptive / fixed) ramp duration, rounded up (matches the old ceiling division). The
+ *     16 kHz ISR divides it across the four inner ticks with an exact Q10 accumulator.
+ *     The total rise/fall reaches the target in the configured time.
+ *   - RELEASE: the fast owner derives its exact rate from the current live Q10 accumulator
+ *     at the release command edge. Requested/published target history is irrelevant.
+ *
+ * All step math happens here in the 4 kHz domain; the 16 kHz ISR only adds the precomputed
+ * per-control step via its fractional accumulator (no division, no float).
+ *
+ * iq_target      : final demand this tick (after all limiters and the battery cap)
+ * Returns the slew mode; fills *out_step_mag with the per-control (4 kHz) Q8 magnitude.
+ */
+static fis_mode_t ride_final_iq_slew_compute(
+	const assist_dynamics_input_t *input,
+	int32_t iq_target,
+	uint16_t *out_step_mag,
+	uint32_t *out_release_ticks_16k)
+{
+	enum { CTRL_TICKS_PER_MS = 4, FOC_TICKS_PER_MS = 16,
+		RELEASE_MAX_MS = 3000,
+		UP_SLOW_FB_MS = 600, UP_FAST_FB_MS = 300,
+		DN_SLOW_FB_MS = 1000, DN_FAST_FB_MS = 140 };
+
+	int32_t ramp_up_slow = ((input->ramp_up_slow_ms > 0U) ? input->ramp_up_slow_ms : UP_SLOW_FB_MS)
+		* CTRL_TICKS_PER_MS;
+	int32_t ramp_up_fast = ((input->ramp_up_fast_ms > 0U) ? input->ramp_up_fast_ms : UP_FAST_FB_MS)
+		* CTRL_TICKS_PER_MS;
+	int32_t ramp_down_slow = ((input->ramp_down_slow_ms > 0U) ? input->ramp_down_slow_ms : DN_SLOW_FB_MS)
+		* CTRL_TICKS_PER_MS;
+	int32_t ramp_down_fast = ((input->ramp_down_fast_ms > 0U) ? input->ramp_down_fast_ms : DN_FAST_FB_MS)
+		* CTRL_TICKS_PER_MS;
+
+	int32_t up_ticks = ramp_up_slow;
+	int32_t dn_ticks = ramp_down_slow;
+#if IQ_RAMP_ADAPTIVE
+	{
+		int32_t up_s = map((int32_t)input->speed_x100,
+			IQ_RAMP_SPEED_LO, IQ_RAMP_SPEED_HI, ramp_up_slow, ramp_up_fast);
+		int32_t up_c = map((int32_t)input->cadence_rpm,
+			IQ_RAMP_CAD_LO, IQ_RAMP_CAD_HI, ramp_up_slow, ramp_up_fast);
+		int32_t dn_s = map((int32_t)input->speed_x100,
+			IQ_RAMP_SPEED_LO, IQ_RAMP_SPEED_HI, ramp_down_slow, ramp_down_fast);
+		int32_t dn_c = map((int32_t)input->cadence_rpm,
+			IQ_RAMP_CAD_LO, IQ_RAMP_CAD_HI, ramp_down_slow, ramp_down_fast);
+		up_ticks = (up_c < up_s) ? up_c : up_s;
+		dn_ticks = (dn_c < dn_s) ? dn_c : dn_s;
+	}
+#endif
+
+	*out_step_mag = 0;
+	*out_release_ticks_16k = 0U;
+
+	/* FW-037/048/112: immediate cut, coast release and force-zero demand the same same-tick
+	 * exact zero from the 16 kHz owner. */
+	if (input->immediate_cut) return FIS_MODE_FORCE_ZERO;
+	if (input->coast_release && iq_target == 0) return FIS_MODE_FORCE_ZERO;
+	if (input->force_zero_reference) return FIS_MODE_FORCE_ZERO;
+	/* Walk Assist owns its own trajectory; pass through without slew. */
+	if (input->walk_active) return FIS_MODE_BYPASS;
+
+	bool profile_release_active = iq_target == 0 &&
+		!input->profile_pedaling_active &&
+		input->profile_release_ms > 0;
+
+	int32_t iq_scale = input->iq_scale;
+	if (iq_scale < 1) iq_scale = input->phase_current_max;
+	if (iq_scale < 1) iq_scale = PH_CURRENT_MAX;
+	if (iq_scale < 1) iq_scale = 1;
+
+	if (profile_release_active) {
+		/* The ISR derives the rate once from its LIVE Q10 accumulator at this mode edge. */
+		uint16_t release_ms = input->profile_release_ms;
+		if (release_ms > RELEASE_MAX_MS) release_ms = RELEASE_MAX_MS;
+		*out_release_ticks_16k = (uint32_t)release_ms * FOC_TICKS_PER_MS;
+		if (*out_release_ticks_16k == 0U) *out_release_ticks_16k = 1U;
+		return input->safety_cut ? FIS_MODE_SAFETY : FIS_MODE_RELEASE;
+	}
+
+	/*
+	 * Normal RISE/FALL/HOLD. Direction is the trajectory relative to the authoritative
+	 * live Q10 accumulator, not the sign of a positive target and not target history.
+	 * The aligned 32-bit Q10 read is one atomic Cortex-M4 snapshot; the ISR rechecks the
+	 * exact Q10 relation when accepting the command. Compute the per-control (4 kHz) Q8
+	 * step for that direction; the 16 kHz ISR divides it
+	 * across the four inner ticks with an exact Q10 accumulator, preserving the identical
+	 * physical rate (architecture migration only - not re-derived at 16 kHz resolution). */
+	int32_t live_q10 = fast_iq_slew_current_accumulator_q10();
+	int64_t target_q10 = (int64_t)iq_target << 10;
+	if (target_q10 == live_q10) {
+		return FIS_MODE_HOLD;
+	}
+	bool rising = target_q10 > live_q10;
+	int32_t ticks = rising ? up_ticks : dn_ticks;
+	if (ticks < 1) ticks = 1;
+	int32_t scale_q = (int32_t)iq_scale << IQ_RAMP_Q_SHIFT;
+	int32_t step_4k = (int64_t)(scale_q + ticks - 1) / ticks;
+	if (step_4k < 1) step_4k = 1;
+	if (step_4k > 32767) step_4k = 32767;
+	*out_step_mag = (uint16_t)step_4k;
+	return rising ? FIS_MODE_RISE : FIS_MODE_FALL;
 }

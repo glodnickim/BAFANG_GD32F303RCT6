@@ -276,6 +276,9 @@ static void do_tick(step_t *s, int event)
 	in.safety_cut_non_direction = s->non_direction_safety_cut;
 	in.throttle_iq = 0;
 	ride_control_update(&in);
+	for (unsigned q = 0; q < 4U; q++) {
+		fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+	}
 
 	check_invariants(s, event);
 }
@@ -324,6 +327,164 @@ static step_t establish_latch(void)
 	return s;
 }
 
+/* --- QS-3D-R2 production-path direction proof --------------------------------------------- */
+typedef struct {
+	int32_t target;
+	int32_t live_q10;
+	fis_mode_t mode;
+	uint32_t step_mag_8;
+} r2_command_observation_t;
+
+static void r2_publish_idle_rider(void)
+{
+	rider_input_t r;
+	memset(&r, 0, sizeof(r));
+	r.wheel_speed_x100 = 800U;
+	r.motor_erps = 200U; /* avoids the standstill preload; this is still a no-pedal throttle path */
+	r.torque_sensor_valid = true;
+	r.pas_sensor_valid = true;
+	r.sample_tick = ++g_tick;
+	rider_input_update(&r);
+}
+
+static ride_control_input_t r2_base_input(int32_t target)
+{
+	ride_control_input_t in;
+	memset(&in, 0, sizeof(in));
+	in.speed_x100 = 800U;
+	in.assist_level_index = TEST_ASSIST_LEVEL;
+	in.battery_voltage_mv = TEST_BATTERY_MV;
+	in.iq_scale = PH_CURRENT_MAX;
+	in.ride_core_iq_limit = PH_CURRENT_MAX;
+	in.phase_current_max = PH_CURRENT_MAX;
+	in.battery_current_mA = 0;
+	in.battery_current_max = 15000;
+	in.u_abs = 600;
+	in.cal_i = 95;
+	in.current_iq = MS.i_q_setpoint;
+	in.current_id = MS.i_d_setpoint;
+	in.voltage_raw = TEST_VOLTAGE_RAW;
+	in.voltage_min_raw = VOLTAGE_MIN;
+	in.controller_temperature_c = TEST_TEMPERATURE_C;
+	in.speed_limit_x100 = SPEEDLIMIT;
+	in.legal_enabled = false;
+	in.offroad = true;
+	in.throttle_iq = target;
+	in.elapsed_ticks = 1U;
+	return in;
+}
+
+static void r2_seed_live(int32_t live)
+{
+	ride_control_request_service_iq(live);
+	(void)fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+}
+
+static r2_command_observation_t r2_produce(ride_control_input_t *in)
+{
+	r2_publish_idle_rider();
+	in->current_iq = MS.i_q_setpoint;
+	in->current_id = MS.i_d_setpoint;
+	ride_control_update(in);
+	fast_iq_slew_mailbox_t *mb = ride_control_final_iq_slew_mailbox();
+	r2_command_observation_t result = {
+		.target = mb->target,
+		.live_q10 = fast_iq_slew_current_accumulator_q10(),
+		.mode = (fis_mode_t)mb->mode,
+		.step_mag_8 = mb->step_mag_8
+	};
+	return result;
+}
+
+static void test_qs3d_r2_production_direction(void)
+{
+	r2_command_observation_t down, up, one_down, one_up, hold;
+
+	reset_all(); r2_seed_live(600);
+	ride_control_input_t in = r2_base_input(250);
+	down = r2_produce(&in);
+	CHECK(down.live_q10 == (600 << 10) && down.target == 250 && down.mode == FIS_MODE_FALL,
+		"R2 production: live 600 -> positive target 250 selects FALL");
+
+	reset_all(); r2_seed_live(250); in = r2_base_input(600);
+	up = r2_produce(&in);
+	CHECK(up.live_q10 == (250 << 10) && up.target == 600 && up.mode == FIS_MODE_RISE,
+		"R2 production: live 250 -> target 600 selects RISE");
+	CHECK(down.step_mag_8 != 0U && up.step_mag_8 != 0U &&
+		down.step_mag_8 != up.step_mag_8,
+		"R2 production: configured down/up rate fields are selected independently");
+
+	reset_all(); r2_seed_live(600); in = r2_base_input(599); one_down = r2_produce(&in);
+	CHECK(one_down.target == 599 && one_down.mode == FIS_MODE_FALL,
+		"R2 production: live 600 -> target 599 selects FALL");
+	reset_all(); r2_seed_live(599); in = r2_base_input(600); one_up = r2_produce(&in);
+	CHECK(one_up.target == 600 && one_up.mode == FIS_MODE_RISE,
+		"R2 production: live 599 -> target 600 selects RISE");
+	reset_all(); r2_seed_live(250); in = r2_base_input(250); hold = r2_produce(&in);
+	CHECK(hold.target == 250 && hold.mode == FIS_MODE_HOLD && hold.step_mag_8 == 0U,
+		"R2 production: live 250 -> target 250 selects HOLD");
+	(void)fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+	CHECK(MS.i_q_setpoint == 250,
+		"R2 production: HOLD preserves the exact live final output");
+
+	/* Real battery cap: exact 250-count cap, then release back to 700. */
+	reset_all(); r2_seed_live(700); in = r2_base_input(700);
+	in.battery_current_mA = 1000; in.battery_current_max = 250;
+	in.u_abs = 2048; in.cal_i = 1;
+	r2_command_observation_t battery_down = r2_produce(&in);
+	CHECK(battery_down.target == 250 && battery_down.mode == FIS_MODE_FALL,
+		"R2 production battery cap: 700 -> 250 selects FALL");
+	r2_seed_live(250); in.battery_current_mA = 0;
+	r2_command_observation_t battery_up = r2_produce(&in);
+	CHECK(battery_up.target == 700 && battery_up.mode == FIS_MODE_RISE,
+		"R2 production battery-cap release: 250 -> 700 selects RISE");
+
+	/* Real temperature limiter yields one intermediate target; direction follows live Q10. */
+	reset_all(); r2_seed_live(600); in = r2_base_input(700); in.controller_temperature_c = 82;
+	r2_command_observation_t thermal_down = r2_produce(&in);
+	CHECK(thermal_down.target > 250 && thermal_down.target < 600 &&
+		thermal_down.mode == FIS_MODE_FALL,
+		"R2 production thermal tightening selects FALL");
+	r2_seed_live(250);
+	r2_command_observation_t thermal_up = r2_produce(&in);
+	CHECK(thermal_up.target == thermal_down.target && thermal_up.mode == FIS_MODE_RISE,
+		"R2 production thermal release/relative increase selects RISE");
+
+	/* phase_current_max is the no-battery-constraint ceiling supplied to the cap stage. */
+	reset_all(); r2_seed_live(700); in = r2_base_input(700); in.phase_current_max = 250;
+	r2_command_observation_t phase_down = r2_produce(&in);
+	CHECK(phase_down.target == 250 && phase_down.mode == FIS_MODE_FALL,
+		"R2 production phase/current ceiling tightening selects FALL");
+	r2_seed_live(250); in.phase_current_max = 700;
+	r2_command_observation_t phase_up = r2_produce(&in);
+	CHECK(phase_up.target == 700 && phase_up.mode == FIS_MODE_RISE,
+		"R2 production phase/current ceiling release selects RISE");
+
+	/* Real target changes while the fast owner is already moving: no stale direction. */
+	reset_all(); in = r2_base_input(700); (void)r2_produce(&in);
+	while (MS.i_q_setpoint < 300) {
+		(void)fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+	}
+	in.throttle_iq = 200;
+	r2_command_observation_t reverse_during_rise = r2_produce(&in);
+	CHECK(reverse_during_rise.live_q10 >= (299 << 10) &&
+		reverse_during_rise.mode == FIS_MODE_FALL,
+		"R2 production: 0->700 near live 300, target 200 immediately selects FALL");
+
+	reset_all(); r2_seed_live(700); in = r2_base_input(200); (void)r2_produce(&in);
+	while (MS.i_q_setpoint > 400) {
+		(void)fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+	}
+	in.throttle_iq = 650;
+	r2_command_observation_t reverse_during_fall = r2_produce(&in);
+	CHECK(reverse_during_fall.live_q10 <= (401 << 10) &&
+		reverse_during_fall.mode == FIS_MODE_RISE,
+		"R2 production: 700->200 near live 400, target 650 immediately selects RISE");
+
+	printf("  QS-3D-R2 production rates: FALL step_Q8=%u, RISE step_Q8=%u, thermal target=%ld\n",
+		(unsigned)down.step_mag_8, (unsigned)up.step_mag_8, (long)thermal_down.target);
+}
+
 /* --- measurement ----------------------------------------------------------------------------*/
 static int32_t mode_iq_request(void)
 {
@@ -363,6 +524,7 @@ int main(void)
 	printf("  PAS_REVERSE_RECOVERY_CONFIRM_STEPS=%u  run deadband %u mV  riding threshold %u centikg\n",
 		(unsigned)PAS_REVERSE_RECOVERY_CONFIRM_STEPS,
 		(unsigned)RUN_DEADBAND_MV_DEFAULT, (unsigned)RIDING_START_LOAD_CENTIKG_DEFAULT);
+	test_qs3d_r2_production_direction();
 
 	/* ==========================================================================================
 	 * MANDATORY SCENARIOS

@@ -94,7 +94,7 @@ $suites = @(
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -227,7 +227,7 @@ $suites = @(
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -249,7 +249,7 @@ $suites = @(
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -280,7 +280,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -305,7 +305,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -324,7 +324,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -355,7 +355,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),
@@ -421,8 +421,20 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @((Join-Path $root 'src\assist_dynamics.c'),
                    (Join-Path $PSScriptRoot 'common\map_adapter.c'))
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward",
-                   "-DASSIST_DYNAMICS_C_PATH=$assistDynamicsCPathForward", "-DMOTOR_CORE_C_PATH=$motorCoreCPathForward") },
+        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward",
+                    "-DASSIST_DYNAMICS_C_PATH=$assistDynamicsCPathForward", "-DMOTOR_CORE_C_PATH=$motorCoreCPathForward") },
+    @{ Name = 'QS-3D 16 kHz final Iq slew parity (real 16 kHz owner + real 4 kHz owner, lockstep)'
+       Harness = Join-Path $PSScriptRoot 'qs3d_16khz_slew_host.c'
+       # Links the REAL 16 kHz slew owner (fast_iq_slew.c) and the REAL legacy 4 kHz owner
+       # (assist_dynamics.c) and drives both in lockstep so the boundary outputs and total
+       # rise/fall/release timing are parity-proven against the shipped Q8 round-half-up ramp.
+       Modules = @((Join-Path $root 'src\fast_iq_slew.c'),
+                   (Join-Path $root 'src\assist_dynamics.c'),
+                   (Join-Path $PSScriptRoot 'common\map_adapter.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-DFAST_IQ_SLEW_TEST_HOOKS', "-DMAIN_C_PATH=$mainCPathForward",
+                   "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward",
+                   "-DMOTOR_CORE_C_PATH=$motorCoreCPathForward", "-DFOC_C_PATH=$focCPathForward") },
     @{ Name = 'QS-3C battery-current limiter upstream ownership (real battery_iq_cap.c + main.c/ride_control.c ownership guard)'
        Harness = Join-Path $PSScriptRoot 'qs3c_battery_cap_host.c'
        Modules = @(Join-Path $root 'src\battery_iq_cap.c')
@@ -507,7 +519,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
                    (Join-Path $root 'src\assist_modes.c'), (Join-Path $root 'src\cadence_comp.c'),
                    (Join-Path $root 'src\power_curve.c'), (Join-Path $root 'src\assist_start.c'),
                    (Join-Path $root 'src\assist_extended_boost.c'), (Join-Path $root 'src\tuning_config.c'),
-                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
+                   (Join-Path $root 'src\ride_control.c'), (Join-Path $root 'src\fast_iq_slew.c'), (Join-Path $root 'src\battery_iq_cap.c'), (Join-Path $root 'src\ride_session.c'),
                    (Join-Path $root 'src\iq_chain.c'),
                    (Join-Path $root 'src\pedal_assist_gate.c'),
                    (Join-Path $root 'src\assist_dynamics.c'),

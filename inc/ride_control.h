@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "fast_iq_slew.h"   /* QS-3D: the final-Iq-slew mailbox type/producer API */
+
 /*
  * FW-094: there is no engine type any more. The ride core is the only assist pipeline, so
  * nothing selects, reports or branches on one. The single remaining trace is a constant byte
@@ -123,6 +125,24 @@ uint16_t ride_control_get_assist_hold_ticks(void);
  * lives in ride_control.c/battery_iq_cap.c; nothing else acts on this to do limiting.
  */
 bool ride_control_battery_limit_active(void);
+
+/*
+ * QS-3D: the shared 4 kHz -> 16 kHz final-Iq-slew mailbox. The 4 kHz ride/control domain
+ * owns the producer side (it computes the target/mode/steps each tick and calls
+ * fast_iq_slew_publish on the returned pointer); the 16 kHz FOC ISR in main.c consumes
+ * it via fast_iq_slew_tick(). Returns a pointer to the single module-static mailbox.
+ */
+fast_iq_slew_mailbox_t *ride_control_final_iq_slew_mailbox(void);
+
+/*
+ * QS-3D-R1 ownership boundary. final_iq_requested is foreground demand used only to
+ * decide whether a bridge-off cold start is needed; it is never the PI reference.
+ * Service and comm-loss use these explicit mailbox commands, so their requests cannot
+ * be overwritten by the next 16 kHz tick from a stale normal command.
+ */
+int32_t ride_control_final_iq_requested(void);
+void ride_control_force_final_iq_zero(void);
+void ride_control_request_service_iq(int32_t iq_target);
 
 /*
  * FW-109: the ride SESSION automaton's current state (src/ride_session.h's ride_session_state_t,

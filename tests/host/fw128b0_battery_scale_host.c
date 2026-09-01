@@ -225,14 +225,14 @@ int main(void)
 		/* QS-3C: the legacy exit derived a PREDICTED current from the COMMAND (the exact
 		 * signal this limiter never reduced - a real defect). It is gone; the new limiter
 		 * exits on the MEASURED current with a 90% hysteresis band instead. The cap is applied
-		 * upstream, before assist_dynamics_apply - not as a post-slew PI clamp. */
+		 * upstream, before fast_iq_slew_publish - not as a post-slew PI clamp. */
 		CHECK(strstr(r, "(MP.battery_current_max*0.9)) BC_limit_flag=0") == NULL &&
 		      strstr(r, "battery_iq_cap_update(") != NULL &&
 		      strstr(r, "iq_battery_cap") != NULL &&
-		      strstr(r, "assist_dynamics_apply(") != NULL &&
+		      strstr(r, "fast_iq_slew_publish(") != NULL &&
 		      strstr(m, "PI_iq.setpoint = MP.reverse * i8_reverse_flag * MS.i_q_setpoint;") != NULL,
 		      "F2. QS-3C: no command-predictor exit, no post-slew clamp - the cap is upstream "
-		      "of the single final slew and PI_iq.setpoint comes only from MS.i_q_setpoint");
+		      "of the single final 16 kHz slew and PI_iq.setpoint comes only from MS.i_q_setpoint");
 		free(r);
 		free(m);
 	}

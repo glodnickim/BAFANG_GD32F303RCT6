@@ -157,6 +157,9 @@ static void do_tick(step_t *s, int event)
 	in.safety_cut_non_direction = s->non_direction_safety_cut;
 	in.throttle_iq = 0;
 	ride_control_update(&in);
+	for (unsigned q = 0; q < 4U; q++) {
+		fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &MS.i_q_setpoint);
+	}
 }
 
 static void fwd1(step_t *s) { do_tick(s, EV_FORWARD); }

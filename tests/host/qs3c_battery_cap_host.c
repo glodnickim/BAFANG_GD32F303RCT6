@@ -251,21 +251,20 @@ static void test_ownership_guard(void)
 		"G8. the battery limiter is the upstream cap module call");
 	CHECK(strstr(rc, "iq_battery_cap") != NULL,
 		"G9. the battery cap output is an Iq-domain quantity");
-	CHECK(strstr(rc, "assist_dynamics_apply(") != NULL,
-		"G10. the single final slew owner is present in ride_control");
-	/* Ordering: the cap update must appear BEFORE assist_dynamics_apply in the source. */
+	CHECK(strstr(rc, "fast_iq_slew_publish(") != NULL,
+		"G10. the single final 16 kHz slew owner is present in ride_control");
+	/* Ordering: the cap update must appear before the normal final publish helper call. */
 	{
 		const char *cap = strstr(rc, "battery_iq_cap_update(");
-		const char *slew = strstr(rc, "assist_dynamics_apply(");
+		const char *slew = cap ? strstr(cap, "ride_publish_final_iq(iq_target") : NULL;
 		const char *iq_allowed = strstr(rc, "iq_chain_note_allowed(");
 		CHECK(cap != NULL && slew != NULL && iq_allowed != NULL && cap < iq_allowed &&
 			iq_allowed < slew,
 			"G11. cap -> Iq_allowed -> final slew ordering: the cap gates demand BEFORE the "
-			"ONE final slew owner");
+			"ONE final 16 kHz slew owner");
 	}
-	/* Exactly one final normal command/slew owner path: motor_core_set_command is the single
-	 * write point and assist_dynamics_apply the single slew - no second down-slew/clamp. */
-	CHECK(occurrences(rc, "assist_dynamics_apply(") == 1,
+	/* Exactly one mailbox publication primitive; the fast ISR is the dynamic write owner. */
+	CHECK(occurrences(rc, "fast_iq_slew_publish(") == 1,
 		"G12. exactly ONE final Iq slew owner call site");
 	CHECK(strstr(rc, "iq_target = ride_battery_cap.iq_battery_cap;") != NULL ||
 		strstr(rc, "< iq_target)") != NULL,

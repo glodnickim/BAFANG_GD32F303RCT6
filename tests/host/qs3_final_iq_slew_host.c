@@ -353,13 +353,16 @@ static void test_7_and_10_lifecycle_and_wiring(void)
 			strstr(main_c, "bridge_lifecycle == BRIDGE_LIFECYCLE_ARMED_ZERO && MS.i_q_setpoint > 0") != NULL,
 			"T8 wiring: normal exact zero still enters persistent ARMED_ZERO");
 		CHECK(strstr(main_c, "get_standstill_position()") != NULL &&
-			strstr(motor_c, "state->i_q_setpoint = command->iq_target") != NULL &&
+			strstr(motor_c, "state->i_q_setpoint = 0") != NULL &&
+			strstr(motor_c, "motor_core_set_id_target") != NULL &&
+			strstr(motor_c, "command->iq_target") == NULL &&
 			strstr(main_c, "PI_iq.setpoint = MP.reverse * i8_reverse_flag * MS.i_q_setpoint;") != NULL &&
 			strstr(main_c, "PI_iq.recent_value = MS.i_q") != NULL &&
 			strstr(ride_c, "battery_iq_cap_update(") != NULL &&
 			strstr(ride_c, "iq_battery_cap") != NULL &&
-			strstr(ride_c, "assist_dynamics_apply(") != NULL,
-			"T10 wiring: PI_iq stays in Iq domain; battery cap is upstream of the final slew");
+			strstr(ride_c, "fast_iq_slew_publish(") != NULL &&
+			strstr(main_c, "fast_iq_slew_tick(") != NULL,
+			"T10 wiring: PI_iq stays in Iq domain; battery cap is upstream of the final 16 kHz slew");
 		}
 		free(main_c); free(ride_c); free(dynamics_c); free(motor_c);
 	}

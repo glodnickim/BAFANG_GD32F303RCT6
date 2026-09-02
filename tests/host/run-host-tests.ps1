@@ -416,6 +416,15 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
+    @{ Name = 'FOC-AW1 D/Q voltage tracking anti-windup (real PI_control()+limiter replica + production wiring guards)'
+       Harness = Join-Path $PSScriptRoot 'focaw1_tracking_aw_host.c'
+       # No modules linked - main.c/FOC.c are the ARM entry point/ISR core (same reasoning as
+       # stopclick_c1_pi_integral_host.c below, whose replica this suite extends). The behaviour
+       # checks run against a byte-faithful replica of PI_control() AND of runPIcontrol()'s
+       # circle limiter; the wiring checks are source-text guards over main.c/FOC.c/main.h.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
     @{ Name = 'STOP-CLICK-C1 PI D/Q integrator continuity (real PI_control() replica + production wiring guards)'
        Harness = Join-Path $PSScriptRoot 'stopclick_c1_pi_integral_host.c'
        # No modules linked - main.c/FOC.c are the ARM entry point/ISR core (same reasoning as

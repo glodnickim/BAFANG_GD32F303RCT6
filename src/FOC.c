@@ -212,7 +212,26 @@ q31_t PI_control (PI_control_t* PI_c)
     float p_part; //proportional part
     p_part= Delta*PI_c->gain_p;
     temp5=p_part;
-    PI_c->integral_part += Delta*PI_c->gain_i;
+    /*
+     * FOC-AW1 tracking anti-windup. aw_sat_error is what the VECTOR limiter refused to apply
+     * in the PREVIOUS cycle, in this controller's own output (voltage) domain; multiplying by
+     * Q15 1/gain_p converts it into the current-error units the integrator works in, so the
+     * integrator is charged with the error the hardware could actually act on rather than the
+     * one that was asked for. Full derivation, the Kaw = 1/Kp argument, the fixed-point
+     * scaling and the overflow bound are in the FOC-AW1 block in inc/main.h.
+     *
+     * Integer multiply + arithmetic shift only: no division, no float division, no loop. The
+     * one float operation is the subtraction below, which is inherent to integral_part being a
+     * float and is not new arithmetic in this ISR.
+     *
+     * Unconditional on purpose. With aw_sat_error == 0 the term is exactly 0.0f and
+     * (Delta - 0.0f)*gain_i is bit-identical to the pre-FOC-AW1 Delta*gain_i, so an
+     * unsaturated cycle is unchanged AND costs the same as a saturated one - no data-dependent
+     * branch in a 16 kHz ISR. p_part above deliberately still uses the RAW Delta: tracking
+     * anti-windup corrects the integrator, never the proportional path.
+     */
+    float aw_part = (float)((PI_c->aw_sat_error * PI_c->aw_inv_kp_q15) >> 15);
+    PI_c->integral_part += (Delta - aw_part)*PI_c->gain_i;
 
 
   if (PI_c->integral_part > PI_c->limit_i) PI_c->integral_part = PI_c->limit_i;

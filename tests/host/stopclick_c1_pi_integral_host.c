@@ -61,6 +61,13 @@ typedef struct {
 	float   integral_part;
 	int16_t max_step;
 	int32_t out;
+	/* FOC-AW1 added tracking anti-windup to the same body. This suite's claim is about the
+	 * integrator's CONTINUITY through ordinary zero torque, not about tracking, so the replica
+	 * carries the fields and leaves aw_inv_kp_q15 at 0 - which makes the correction an exact
+	 * zero and the arithmetic below bit-identical to the pre-FOC-AW1 regulator this suite was
+	 * written against. FOC-AW1's own behaviour is covered by focaw1_tracking_aw_host.c. */
+	int32_t aw_sat_error;
+	int32_t aw_inv_kp_q15;
 } model_pi_t;
 
 /* Representative of PI_iq's production init (main.c ~line 970-976 / inc/config.h
@@ -88,7 +95,8 @@ static int32_t model_pi_control(model_pi_t *PI_c)
 {
 	float Delta = (float)(PI_c->setpoint - PI_c->recent_value);
 	float p_part = Delta * PI_c->gain_p;
-	PI_c->integral_part += Delta * PI_c->gain_i;
+	float aw_part = (float)((PI_c->aw_sat_error * PI_c->aw_inv_kp_q15) >> 15);
+	PI_c->integral_part += (Delta - aw_part) * PI_c->gain_i;
 
 	if (PI_c->integral_part > PI_c->limit_i) PI_c->integral_part = PI_c->limit_i;
 	if (PI_c->integral_part < -(PI_c->limit_i)) PI_c->integral_part = -(PI_c->limit_i);
@@ -252,7 +260,8 @@ static void production_wiring_checks(void)
 
 	/* Model-matches-production guard: the replica's math must still track FOC.c's real
 	 * PI_control() body. If this ever fails, model_pi_control() above is stale, not this guard. */
-	CHECK(strstr(foc_c, "PI_c->integral_part += Delta*PI_c->gain_i;") != NULL &&
+	CHECK(strstr(foc_c, "PI_c->integral_part += (Delta - aw_part)*PI_c->gain_i;") != NULL &&
+		strstr(foc_c, "float aw_part = (float)((PI_c->aw_sat_error * PI_c->aw_inv_kp_q15) >> 15);") != NULL &&
 		strstr(foc_c, "if (PI_c->integral_part > PI_c->limit_i) PI_c->integral_part = PI_c->limit_i;") != NULL &&
 		strstr(foc_c, "if (PI_c->integral_part < -(PI_c->limit_i)) PI_c->integral_part = -(PI_c->limit_i);") != NULL &&
 		strstr(foc_c, "else PI_c->out=(p_part+PI_c->integral_part);") != NULL,
@@ -312,11 +321,13 @@ static void production_wiring_checks(void)
 		const char *cold_prepare = strstr(main_c, "if(!ui_8_PWM_ON_Flag){");
 		CHECK(cold_prepare != NULL, "setup: cold PREPARE block (GATE A) is locatable");
 		if (cold_prepare) {
-			/* ~3080 chars of (heavily commented) source separate the two anchors - measured
-			 * against the shipped file, span sized with headroom rather than tight to it. */
-			CHECK(span_contains(cold_prepare, cold_prepare + 3400, "PI_iq.integral_part=0; PI_iq.out=0;") &&
-				span_contains(cold_prepare, cold_prepare + 3400, "PI_id.integral_part=0; PI_id.out=0;") &&
-				span_contains(cold_prepare, cold_prepare + 3400, "bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;"),
+			/* ~3480 chars of (heavily commented) source separate the two anchors - measured
+			 * against the shipped file, span sized with headroom rather than tight to it.
+			 * FOC-AW1 added its foc_aw_tracking_reset() call and comment inside this same
+			 * block, which is why the span is 3800 rather than the original 3400. */
+			CHECK(span_contains(cold_prepare, cold_prepare + 3800, "PI_iq.integral_part=0; PI_iq.out=0;") &&
+				span_contains(cold_prepare, cold_prepare + 3800, "PI_id.integral_part=0; PI_id.out=0;") &&
+				span_contains(cold_prepare, cold_prepare + 3800, "bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;"),
 				"T7: cold PREPARE still zeroes both PI integrators before a fresh bridge-on");
 		}
 

@@ -332,6 +332,79 @@ PI_control_t PI_iq;
 PI_control_t PI_id;
 PI_control_t PI_speed;
 
+/* FOC-AW1 saturation observability. Written only by runPIcontrol() (16 kHz FOC ISR) and by
+ * foc_aw_tracking_reset(); read by diagnostics. See inc/main.h. */
+volatile uint8_t  foc_aw_saturated = 0;
+volatile uint32_t foc_aw_sat_ticks = 0;
+
+/*
+ * FOC-AW1: derive this controller's Q15 tracking gain Kaw = 1/gain_p, once, at boot.
+ *
+ * The float division lives here - foreground, executed exactly twice in the life of the
+ * firmware - precisely so the 16 kHz ISR gets an integer multiply and a shift instead. A
+ * non-positive gain_p (impossible with the shipped P_FACTOR_I_Q/P_FACTOR_I_D, but not
+ * something this function is entitled to assume) leaves aw_inv_kp_q15 at 0, which disables
+ * tracking and restores the pre-FOC-AW1 regulator exactly rather than dividing by zero.
+ */
+static void pi_aw_init(PI_control_t* PI_c)
+{
+	PI_c->aw_sat_error = 0;
+	PI_c->aw_inv_kp_q15 = 0;
+	if (PI_c->gain_p > 0.0f) {
+		float q15 = 32768.0f / PI_c->gain_p + 0.5f;   /* +0.5 = round, not truncate */
+		if (q15 > (float)FOC_AW_INV_KP_Q15_MAX) q15 = (float)FOC_AW_INV_KP_Q15_MAX;
+		PI_c->aw_inv_kp_q15 = (int32_t)q15;
+	}
+}
+
+/*
+ * FOC-AW1: the ONE place a residual becomes tracking state, called by runPIcontrol() after the
+ * circle limiter has decided what is actually applied. Contract and sign conventions are in
+ * the FOC-AW1 block in inc/main.h; the two things worth repeating here are:
+ *
+ *   - PI_iq.out IS Vq_requested, so PI_iq's residual is the physical one unchanged;
+ *   - PI_id.out is NEGATED into Vd (Vd = -PI_id.out), so PI_id's residual is the physical one
+ *     with the sign flipped. Getting this wrong would make the D-axis anti-windup charge the
+ *     integrator FURTHER into saturation instead of unwinding it, which is why the conversion
+ *     is done once, here, and never inside the regulator.
+ *
+ * The clamp is a bound, not a behaviour: a physically reachable residual cannot exceed
+ * 2*_U_MAX = 3840 because both operands are individually clamped to limit_output = _U_MAX, so
+ * it can only fire if some future change breaks that invariant - and if it does, it keeps the
+ * fixed-point multiply in PI_control() inside int32 instead of letting it overflow silently.
+ */
+static void foc_aw_publish_residual(void)
+{
+	int32_t sat_q = MS.u_q_req - MS.u_q;   /* physical Vq: requested - applied */
+	int32_t sat_d = MS.u_d_req - MS.u_d;   /* physical Vd: requested - applied */
+
+	if (sat_q >  FOC_AW_SAT_ERROR_MAX) sat_q =  FOC_AW_SAT_ERROR_MAX;
+	if (sat_q < -FOC_AW_SAT_ERROR_MAX) sat_q = -FOC_AW_SAT_ERROR_MAX;
+	if (sat_d >  FOC_AW_SAT_ERROR_MAX) sat_d =  FOC_AW_SAT_ERROR_MAX;
+	if (sat_d < -FOC_AW_SAT_ERROR_MAX) sat_d = -FOC_AW_SAT_ERROR_MAX;
+
+	MS.u_q_sat_err = sat_q;
+	MS.u_d_sat_err = sat_d;
+
+	PI_iq.aw_sat_error =  sat_q;
+	PI_id.aw_sat_error = -sat_d;
+}
+
+void foc_aw_tracking_reset(void)
+{
+	PI_iq.aw_sat_error = 0;
+	PI_id.aw_sat_error = 0;
+	MS.u_q_req = 0;
+	MS.u_d_req = 0;
+	MS.u_abs_req = 0;
+	MS.u_q_sat_err = 0;
+	MS.u_d_sat_err = 0;
+	foc_aw_saturated = 0;
+	/* Per-run, not since-boot: "did THIS run saturate, and for how long" is the question the
+	 * counter exists to answer, and every caller of this function is starting or ending a run. */
+	foc_aw_sat_ticks = 0;
+}
+
 uint16_t ui16_timertics=0;
 uint8_t ui8_6step_flag=0;
 uint8_t ui8_hall_state=0;
@@ -975,6 +1048,14 @@ int main(void)
 	PI_iq.shift=11;
 	PI_iq.limit_i=_U_MAX;
 
+	/* FOC-AW1: derive each controller's tracking gain from the gain_p just assigned above, and
+	 * start both with a clean residual. gain_p is written nowhere else after this point, so one
+	 * derivation here is enough - and it happens in the foreground, at boot, which is why the
+	 * float division it needs never reaches the 16 kHz ISR. */
+	pi_aw_init(&PI_id);
+	pi_aw_init(&PI_iq);
+	foc_aw_tracking_reset();
+
     //FW-023: no trustworthy record (never written, half-written, or written by a build with a
     //different MotorParams_t layout) -> lay down a fresh one built from the defaults above.
     if(!param_record_valid()){
@@ -1363,6 +1444,11 @@ int main(void)
             		PI_iq.integral_part=0; PI_iq.out=0;
             		PI_id.integral_part=0; PI_id.out=0;
             		MS.u_q=0; MS.u_d=0; MS.u_abs=0;
+            		//FOC-AW1: cold PREPARE. The regulators are being zeroed right here with the
+            		//bridge off, so a residual measured against the PREVIOUS run's applied vector
+            		//would be the same kind of stale carry-over FW-035 zeroes .out for. This is one
+            		//of the three allowed reset points - see foc_aw_tracking_reset() in inc/main.h.
+            		foc_aw_tracking_reset();
             		switchtime[0]=_T>>1; switchtime[1]=_T>>1; switchtime[2]=_T>>1;
             		pwm_applied[0]=_T>>1; pwm_applied[1]=_T>>1; pwm_applied[2]=_T>>1;
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
@@ -1472,6 +1558,7 @@ int main(void)
             			i8_recent_rotor_direction=0;
             			PI_iq.integral_part=0;
             			PI_id.integral_part=0;
+            			foc_aw_tracking_reset(); //FOC-AW1: bridge going IDLE, regulators zeroed with it
             			bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
             			neutral_dwell_active = 0;
             			dwell_timeout_counter=0;
@@ -3647,21 +3734,39 @@ void runPIcontrol(void){
 	  PI_id.setpoint = MS.i_d_setpoint;
 	  q31_u_d_temp = -PI_control(&PI_id); //control direct current to zero
 
+	  /* FOC-AW1: the REQUESTED vector, recorded before the limiter can touch it. This is the
+	   * split the whole card rests on - "what the regulators asked for" and "what the bridge
+	   * was allowed to produce" used to be the same two variables, so the difference between
+	   * them could not be observed, let alone fed back. */
+	  MS.u_q_req = q31_u_q_temp;
+	  MS.u_d_req = q31_u_d_temp;
+
 	  //circle limitation
 
 	  MS.u_abs = (int32_t)sqrtf((float)(q31_u_d_temp*q31_u_d_temp+q31_u_q_temp*q31_u_q_temp));
 //	  arm_sqrt_q31((q31_u_d_temp*q31_u_d_temp+q31_u_q_temp*q31_u_q_temp)<<1,&MS.u_abs);
 //	  MS.u_abs = (MS.u_abs>>16)+1;
+	  MS.u_abs_req = MS.u_abs;   //FOC-AW1: magnitude before the clamp below rewrites MS.u_abs
 
 	  if (MS.u_abs > _U_MAX){
 			MS.u_q = (q31_u_q_temp*_U_MAX)/MS.u_abs; //division!
 			MS.u_d = (q31_u_d_temp*_U_MAX)/MS.u_abs; //division!
 			MS.u_abs = _U_MAX;
+			foc_aw_saturated = 1;
+			foc_aw_sat_ticks++;  //free-running per-run counter; wrapping is meaningless here
 		}
 	  else{
 			MS.u_q=q31_u_q_temp;
 			MS.u_d=q31_u_d_temp;
+			foc_aw_saturated = 0;
 		}
+
+	  /* FOC-AW1: cycle N publishes the residual that cycle N+1's PI_control() consumes. It has
+	   * to be here, AFTER the branch above: the applied vector does not exist until the limiter
+	   * has decided. In the else branch applied == requested, so this stores an exact zero and
+	   * the next cycle's regulator is bit-identical to the pre-FOC-AW1 one. */
+	  foc_aw_publish_residual();
+
 	  PI_flag=0;
 
 }
@@ -6166,6 +6271,7 @@ uint16_t hall_calibration_iq_request(void){
 			cal_iq=0;
 			PI_iq.integral_part=0;
 			PI_id.integral_part=0;
+			foc_aw_tracking_reset(); //FOC-AW1: service path, disabling the bridge in the same breath
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);

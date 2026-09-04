@@ -711,6 +711,26 @@ uint8_t soc_one_second_flag=0;
 //FW-134: seconds the bike has actually been MOVING this session. Serialized into CAN 0x3210
 //bytes 4..5 - see the increment in the 1 Hz block and sendCAN_3210().
 volatile uint16_t ride_seconds=0;
+
+/*
+ * FW-136.0: four numbers that turn "I can hear a click" into something falsifiable.
+ *
+ * Every verdict on the stop click so far came from the ear, and on that evidence three cards
+ * (FW-131, FW-131.1, QZERO-3) were shipped without changing anything. The whole hypothesis is
+ * "click = current x commutation-angle jump", and it is decided by ONE number: whether any
+ * current flows at all in the speed zone where the angle jumps.
+ *
+ * Deliberately NOT diagnostics-gated. The build that clicks is the build that must be measured,
+ * and DIAG adds bus traffic that has already been reported as disturbing the HMI readings. The
+ * cost is 8 bytes of RAM and a read handler that produces no traffic until asked.
+ *
+ * Read them with CAN READ 0x6032 (see send_click_zone_status() in CAN_Display.c). Cumulative
+ * since power-on, so neither the number of stops nor the order of them matters.
+ */
+volatile uint16_t click_release_count=0;   //quiet descents to exact zero Iq reference - the DENOMINATOR
+volatile uint16_t click_handback_count=0;  //times QZERO handed the axis back to the zero-current PI
+volatile uint16_t click_zone_peak_iq=0;    //peak |measured Iq| with the reference at zero and erps below the switch
+volatile uint16_t click_handback_erps=0;   //erps at the last handback; 0 = it never happened
 uint32_t rest_seconds=0;            //consecutive seconds with |I| < I_REST_MA
 uint32_t soc_save_seconds=0;        //seconds since last flash save
 float soc_last_saved=0;            //SOC_real at last save
@@ -3861,6 +3881,35 @@ static void pi_iq_apply_inputs(void)
 void runPIcontrol(void){
 
 	pi_iq_apply_inputs();
+
+	/*
+	 * FW-136.0 measurement. Placed here, OUTSIDE the QUIET_ZERO_ENABLE block, so both A/B images
+	 * measure the same two things the same way - otherwise the comparison would be worthless.
+	 *
+	 * The release edge is the tick the reference reaches exact zero on a QUIET policy, which is
+	 * the same fact QZERO arms on and is published whether or not QZERO consumes it.
+	 *
+	 * The peak is gated on BOTH the reference being zero and the rotor being below the
+	 * commutation-angle switch. Without the first gate it would just record ordinary slow riding
+	 * under power; without the second it would record the whole ride. Together they are exactly
+	 * the coast through the zone where FW-048 says the angle steps - the click zone.
+	 */
+	{
+		static uint8_t click_prev_ref_nonzero = 0;
+		uint8_t ref_nonzero = (MS.i_q_setpoint != 0) ? 1U : 0U;
+		if(click_prev_ref_nonzero && !ref_nonzero &&
+		   fast_iq_slew_current_zero_policy() == FIS_ZERO_POLICY_QUIET){
+			if(click_release_count < 0xFFFFU) click_release_count++;
+		}
+		click_prev_ref_nonzero = ref_nonzero;
+
+		if(!ref_nonzero && (int32_t)ui16_erps < (int32_t)RIDE_COAST_RELEASE_ERPS){
+			int32_t meas = MS.i_q;
+			if(meas < 0) meas = -meas;
+			if(meas > 0xFFFF) meas = 0xFFFF;
+			if((uint16_t)meas > click_zone_peak_iq) click_zone_peak_iq = (uint16_t)meas;
+		}
+	}
 #if QUIET_ZERO_ENABLE
 	/*
 	 * QZERO: PHASE B of the release, decided here - after pi_iq_apply_inputs() has produced this
@@ -3895,7 +3944,29 @@ void runPIcontrol(void){
 			.iq_integral = PI_iq.integral_part,
 			.id_integral = PI_id.integral_part
 		};
+		static uint32_t qz_prev_state = (uint32_t)QZERO_INACTIVE;
 		quiet_zero_tick(&quiet_zero_state, &qz_in, &qz);
+		/*
+		 * FW-136.0: count the SLOW handback - the axis given back to the full zero-current PI
+		 * because the rotor fell below the commutation-angle switch. Detected at the call site
+		 * rather than by changing the module's output: leaving INACTIVE-bound while the
+		 * reference is still zero AND the rotor is below the threshold is precisely the SLOW
+		 * branch's own condition (quiet_zero.c).
+		 *
+		 * Known, accepted ambiguity: the abort branch could in principle land in the same tick,
+		 * but that needs |Iq| >= QZERO_ABORT_CURRENT (half of PH_CURRENT_MAX, ~33 A) below 10
+		 * erps - not something a freewheeling rotor can produce.
+		 *
+		 * If this stays 0 across a ride while click_release_count climbs, the handback NEVER
+		 * HAPPENS: the erps reading freezes above the threshold as the rotor stops, QZERO brakes
+		 * all the way to standstill, and QZERO-3 was fixing a path that does not execute.
+		 */
+		if(qz_prev_state != (uint32_t)QZERO_INACTIVE && qz.state == (uint32_t)QZERO_INACTIVE &&
+		   MS.i_q_setpoint == 0 && (int32_t)ui16_erps < (int32_t)RIDE_COAST_RELEASE_ERPS){
+			if(click_handback_count < 0xFFFFU) click_handback_count++;
+			click_handback_erps = ui16_erps;
+		}
+		qz_prev_state = qz.state;
 	}
 	if(qz.apply_integral){
 		PI_iq.integral_part = qz.iq_integral;

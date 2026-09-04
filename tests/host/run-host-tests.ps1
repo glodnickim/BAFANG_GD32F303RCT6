@@ -80,6 +80,17 @@ $suites = @(
        Modules = @(Join-Path $root 'src\rotor_angle.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
 
+    @{ Name = 'FW-136.0 click-zone measurement (wiring guards + gating replica)'
+       Harness = Join-Path $PSScriptRoot 'fw1360_click_measurement_host.c'
+       # No modules linked - the measurement is inline in runPIcontrol() (main.c, the ARM entry
+       # point) and the responder is in the CAN receive path, so the wiring is proven against the
+       # production source and the gating against a replica pinned to it. The guards are aimed at
+       # the ways a diagnostic can silently measure NOTHING, which is how FW-121.0 and FW-106 each
+       # cost a ride.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCAN_DISPLAY_C_PATH=$canDisplayCPathForward") },
+
     @{ Name = 'FW-135 update-session power hold (production wiring guards over main.c/CAN_Display.c)'
        Harness = Join-Path $PSScriptRoot 'fw135_update_power_hold_host.c'
        # No modules linked - main.c is the ARM entry point and CAN_Display.c the CAN receive path

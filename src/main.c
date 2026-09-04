@@ -814,8 +814,21 @@ uint16_t soc_boot_vmin=0xFFFF;    //min pack voltage seen during the settle wind
 uint16_t soc_boot_vmax=0;         //max pack voltage seen during the settle window [mV]
 float soc_anchor_start_mah=0;     //remaining_mah captured when the anchor was set
 uint32_t idle_ticks_slow=0;       //auto-off: slow-loop (40 ms) ticks with no rider/comms activity
-volatile uint16_t comm_lost_ticks=0; //comms watchdog: slow-loop ticks since last HMI frame (reset in processCAN_Rx)
-volatile uint8_t comm_seen=0;     //comms watchdog: 1 after first HMI frame -> arms the watchdog (grace period at boot)
+/*
+ * FW-135: the comms watchdog is split in two, because "may I assist?" and "may I stay powered?"
+ * are different questions with different evidence.
+ *
+ * hmi_* is reset only by frames whose SOURCE is the display (CAN_Display.c). It guards assist.
+ * bus_* is reset by ANY received frame. It guards nothing but the self power-off, so a display
+ * firmware update - which fills the bus with traffic addressed to node 3 while the display
+ * itself is silent in its bootloader - can no longer make us cut the display's own supply.
+ * update_hold_ticks suspends that power-off for a while after any 0x3005.
+ */
+volatile uint16_t hmi_lost_ticks=0;    //slow-loop ticks since the last frame FROM the display
+volatile uint8_t  hmi_seen=0;          //1 after the first display frame -> arms the assist cut
+volatile uint16_t bus_lost_ticks=0;    //slow-loop ticks since the last frame of any kind
+volatile uint8_t  bus_seen=0;          //1 after the first frame of any kind -> arms the power-off
+volatile uint16_t update_hold_ticks=0; //>0 = an update session is in progress, do not power off
 extern volatile uint16_t cmd3005_seen;      //FW-132: 0x3005 frames seen (CAN_Display.c)
 extern volatile uint8_t  cmd3005_last_target; //FW-132: whom the last one was addressed to
 uint8_t auto_off_minutes=AUTO_OFF_MINUTES; //runtime auto-off timeout [min]; overwritten by HMI 0x6303
@@ -1486,19 +1499,29 @@ int main(void)
 					power_off_controller(); //no activity for auto_off_minutes -> self power-off
 				}
 
-				//--- Comms watchdog: armed only after the first HMI frame (comm_seen) so it never
-				//    fires during the boot grace period before the display starts talking.
-				//    comm_lost_ticks is reset in processCAN_Rx on each HMI frame.
-				if(comm_seen){
-					if(comm_lost_ticks < 60000) comm_lost_ticks++;
-					if(comm_lost_ticks >= COMM_CUT_TICKS){ //3 s no HMI frame -> kill assist (fail-safe: broken cable / dead HMI)
-						MS.assist_level=0;
-						/* COMM LOSS classification: exact zero through the fast owner. */
-						ride_control_force_final_iq_zero();
-					}
-					if(comm_lost_ticks >= COMM_OFF_TICKS && MS.Speedx100==0){ //10 s no HMI frame -> power off, but only at standstill
-						power_off_controller();
-					}
+				//--- FW-135 comms watchdogs. Both are armed only after the first frame of their
+				//    own kind, so neither can fire during the boot grace period. Both counters
+				//    are reset in processCAN_Rx.
+				//
+				//    ASSIST needs a live display. The bus counter is allowed to cut assist too:
+				//    a bus that has gone completely silent is a pulled cable, and that must stop
+				//    the motor whether or not the display ever identified itself as source 3.
+				if(hmi_lost_ticks < 60000) hmi_lost_ticks++;
+				if(bus_lost_ticks < 60000) bus_lost_ticks++;
+				if((hmi_seen && hmi_lost_ticks >= COMM_CUT_TICKS) ||
+				   (bus_seen && bus_lost_ticks >= COMM_CUT_TICKS)){ //3 s -> kill assist (fail-safe: broken cable / dead HMI)
+					MS.assist_level=0;
+					/* COMM LOSS classification: exact zero through the fast owner. */
+					ride_control_force_final_iq_zero();
+				}
+
+				//    POWER only needs a live BUS. During a DISPLAY firmware update the updater
+				//    talks to node 3 for minutes, so nothing arrives for us - but cutting power
+				//    there cuts the display's own supply mid-flash. The hold covers the quiet
+				//    stretches of that flash; it is armed by 0x3005 and only expires with time.
+				if(update_hold_ticks > 0) update_hold_ticks--;
+				if(bus_seen && bus_lost_ticks >= COMM_OFF_TICKS && MS.Speedx100==0 && update_hold_ticks==0){
+					power_off_controller(); //10 s of silence at standstill -> self power-off
 				}
 
             }//end slow loop
@@ -4973,15 +4996,17 @@ static void diag_build_aggregate(void){
 	 *           late. Turns "the rhythm slips" into a number.
 	 *   Data3 = 0x3005 frames seen (u16) - evidence for tightening that ownership later.
 	 *   Data4 hi = target of the last 0x3005 (31 = the display-update broadcast we now ignore)
-	 *           lo = comms-watchdog state: bit0 armed, bit1 past the assist cut, bit2 past the
-	 *                power-off threshold.
+	 *           lo = FW-135 watchdog state: bit0 HMI armed, bit1 past the assist cut, bit2 past
+	 *                the power-off threshold, bit3 BUS armed, bit4 update hold active.
 	 */
 	{
 		uint32_t dropped = can_tx_queue_dropped_count(); if(dropped>65535U) dropped=65535U;
 		uint16_t peak = slow_loop_peak;
-		uint8_t wd = (uint8_t)((comm_seen?0x01:0) |
-			((comm_seen && comm_lost_ticks>=COMM_CUT_TICKS)?0x02:0) |
-			((comm_seen && comm_lost_ticks>=COMM_OFF_TICKS)?0x04:0));
+		uint8_t wd = (uint8_t)((hmi_seen?0x01:0) |
+			((hmi_seen && hmi_lost_ticks>=COMM_CUT_TICKS)?0x02:0) |
+			((bus_seen && bus_lost_ticks>=COMM_OFF_TICKS)?0x04:0) |
+			(bus_seen?0x08:0) |
+			((update_hold_ticks>0)?0x10:0));
 		transmit_message.tx_efid = 0x0001022B;
 		transmit_message.tx_data[0] = (uint8_t)((dropped>>8)&0xFF);
 		transmit_message.tx_data[1] = (uint8_t)(dropped&0xFF);

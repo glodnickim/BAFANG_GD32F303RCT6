@@ -80,6 +80,18 @@ $suites = @(
        Modules = @(Join-Path $root 'src\rotor_angle.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
 
+    @{ Name = 'FW-135 update-session power hold (production wiring guards over main.c/CAN_Display.c)'
+       Harness = Join-Path $PSScriptRoot 'fw135_update_power_hold_host.c'
+       # No modules linked - main.c is the ARM entry point and CAN_Display.c the CAN receive path
+       # (same reasoning as armed_zero_lifecycle_host.c). The guards prove that a DISPLAY firmware
+       # update can no longer make the controller cut its own display's supply, and - just as
+       # important - that the hold which achieves that gates the SILENCE power-off ONLY, never the
+       # on/off button and never the inactivity timer.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCAN_DISPLAY_C_PATH=$canDisplayCPathForward",
+                   "-DCONFIG_H_PATH=$configHPathForward") },
+
     @{ Name = 'FW-129 unit domain: calibration invariance, mode equations, low-duty handover'
        Harness = Join-Path $PSScriptRoot 'fw129_unit_domain_host.c'
        # The whole assist arithmetic against the shipped modules: sensor calibration ->

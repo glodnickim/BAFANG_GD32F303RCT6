@@ -129,8 +129,11 @@ uint16_t k=0;
 uint8_t level_code;
 uint8_t level_code_old;
 uint8_t level_counter;
-extern volatile uint16_t comm_lost_ticks; //comms watchdog counter (defined in main.c) - reset on each HMI frame
-extern volatile uint8_t comm_seen;        //comms watchdog arm flag (defined in main.c) - set on first HMI frame
+extern volatile uint16_t hmi_lost_ticks;    //FW-135 assist watchdog (main.c) - reset only on frames whose SOURCE is the display
+extern volatile uint8_t  hmi_seen;          //FW-135 assist watchdog arm flag (main.c) - set on the first display frame
+extern volatile uint16_t bus_lost_ticks;    //FW-135 power watchdog (main.c) - reset on ANY received frame
+extern volatile uint8_t  bus_seen;          //FW-135 power watchdog arm flag (main.c) - set on the first frame of any kind
+extern volatile uint16_t update_hold_ticks; //FW-135 update session hold (main.c) - suspends the silence power-off
 extern volatile uint16_t ride_seconds;    //FW-134: seconds of motion (defined in main.c)
 //FW-132: evidence for tightening the 0x3005 ownership later - how many arrived and whom the last
 //one was addressed to. Diagnostics only; nothing in the control path reads these.
@@ -296,9 +299,23 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 	Ext_ID_Rx.target = (receive_message.rx_efid>>19)&0x1F; //only 5 bit width
 	Ext_ID_Rx.source = (receive_message.rx_efid>>24)&0x1F;
 
+	/*
+	 * FW-135: two independent liveness questions, so two counters.
+	 *
+	 * BUS - ANY frame, whoever it is addressed to. This is the only thing the self power-off
+	 * may depend on. During a DISPLAY firmware update the updater talks to node 3, so nothing
+	 * is addressed to us for minutes at a time even though the bus is plainly alive - and
+	 * powering off there cuts the display's own supply in the middle of a flash write.
+	 *
+	 * HMI - frames whose SOURCE is the display, addressed or broadcast alike. This is what the
+	 * right to assist depends on. The old code reset that counter on any frame with
+	 * target == 2, so a Canable, a BESST or an updater kept a DEAD display looking alive.
+	 */
+	bus_lost_ticks=0;
+	bus_seen=1;
+	if(Ext_ID_Rx.source==3){ hmi_lost_ticks=0; hmi_seen=1; }
+
 	if(Ext_ID_Rx.target==2){ //controller answers on target=2 only (factory ignores tgt=4 info queries; answering duplicates pollutes target=3)
-		comm_lost_ticks=0; //comms watchdog: HMI is alive, reset loss counter
-		comm_seen=1;       //arm the watchdog after the first HMI frame (boot grace period ends here)
 		switch (Ext_ID_Rx.operation){
 			case WRITE_CMD:
 
@@ -673,6 +690,10 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 	 */
 	if(Ext_ID_Rx.command==0x3005){
 		if(cmd3005_seen<0xFFFFU)cmd3005_seen++;
+		//FW-135: an update session has been announced. Suspend the silence power-off, so a quiet
+		//stretch of the DISPLAY flash cannot cut its own supply. Armed by EVERY 0x3005, addressed
+		//and broadcast alike - both kinds mean somebody is flashing something on this bus.
+		update_hold_ticks=UPDATE_HOLD_TICKS;
 		cmd3005_last_target=(uint8_t)Ext_ID_Rx.target;
 		if(Ext_ID_Rx.target!=31){ //31 = broadcast: belongs to the display update session, not to us
 			NVIC_SystemReset();
@@ -1036,7 +1057,7 @@ void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
 				                (torque_fault?0x08:0) |
 				                (pas_direction_backpedal_confirmed()?0x10:0) |
 				                (torque_input_calibration_active()?0x20:0) |
-				                ((comm_seen && comm_lost_ticks>=COMM_CUT_TICKS)?0x40:0) |
+				                ((hmi_seen && hmi_lost_ticks>=COMM_CUT_TICKS)?0x40:0) |
 				                (ui_8_PWM_ON_Flag?0x80:0);
 				//FW-094: one pipeline, one source. The old ternary's other arm was the
 				//monolith's MS->i_q_setpoint_temp and was already unreachable.

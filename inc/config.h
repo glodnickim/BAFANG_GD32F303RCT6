@@ -758,7 +758,22 @@
 // Slow loop runs every 40 ms, so all *_TICKS below are counted in 40 ms units.
 #define AUTO_OFF_MINUTES 10   // default inactivity timeout [min] before self power-off (0 = disabled). Overwritten at runtime by HMI 0x6303 if HMI sends its own auto-off time.
 #define COMM_CUT_TICKS 75     // 75*40ms = 3.0 s with no HMI frame -> assist forced to 0 (fail-safe: broken cable / dead HMI, motor stops pulling)
-#define COMM_OFF_TICKS 250    // 250*40ms = 10 s with no HMI frame AND standstill -> self power-off (never powers off while still moving)
+#define COMM_OFF_TICKS 250    // 250*40ms = 10 s with a SILENT BUS AND standstill -> self power-off (never powers off while still moving)
+/*
+ * FW-135: the two thresholds above answer two DIFFERENT questions and must not share one
+ * counter. Assist needs a live DISPLAY (source == 3). Staying powered only needs a live BUS,
+ * because a display firmware update fills the bus with frames addressed to node 3 while the
+ * display itself sits in its bootloader and says nothing - and powering off there cuts the
+ * display's own supply in the middle of a flash write.
+ *
+ * The hold below closes the remaining gap: a flash erase can be quieter than COMM_OFF_TICKS.
+ * Any 0x3005, addressed or broadcast, arms it, and it then simply EXPIRES. Releasing it on the
+ * first frame from the display would be a hole: the display usually sends a frame or two after
+ * the announcement before it enters its bootloader. It suppresses ONLY the silence power-off -
+ * the on/off button and the inactivity auto-off are untouched, so the bike still turns itself
+ * off and can never be left stuck on.
+ */
+#define UPDATE_HOLD_TICKS 7500 // 7500*40ms = 5 min after any 0x3005 -> silence power-off suspended
 
 //---------------------------------------------------------------------
 //Thermal protection (controller NTC) + Error 10 (overtemperature) signalling

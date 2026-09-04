@@ -129,7 +129,7 @@ _Static_assert(ASSIST_LAUNCH_REFERENCE_RPM == START_PHASE_CURVE_RPM,
 	.minimum_pedal_load_centikg = ASSIST_MIN_PEDAL_LOAD_DEFAULT_CENTIKG, \
 	.startup_boost = {true, ASSIST_STARTUP_BOOST_CADENCE, 100, 27}, \
 	.smooth_start = {false, 300}, \
-	.release_ms = 650, \
+	.release_ms = 100, \
 	.power_rise_filter_ms = (power_rise), \
 	.power_fall_filter_ms = (power_fall), \
 	.riding_start_load_centikg = ASSIST_RIDING_MIN_PEDAL_LOAD_DEFAULT_CENTIKG, \
@@ -159,10 +159,10 @@ _Static_assert(ASSIST_LAUNCH_REFERENCE_RPM == START_PHASE_CURVE_RPM,
 	.riding_start_load_centikg = ASSIST_RIDING_MIN_PEDAL_LOAD_DEFAULT_CENTIKG, \
 	/* FW-069: level 0 never assists, but the shared Iq ramp still runs through it while \
 	 * the current fades out after a level change to 0. Zero here would mean "no ramp". */ \
-	.iq_rise_slow_ms = 600, \
-	.iq_rise_fast_ms = 300, \
-	.iq_fall_slow_ms = 1000, \
-	.iq_fall_fast_ms = 140, \
+	.iq_rise_slow_ms = 300, \
+	.iq_rise_fast_ms = 150, \
+	.iq_fall_slow_ms = 500, \
+	.iq_fall_fast_ms = 70, \
 	.extended_boost = { \
 		ASSIST_EXT_BOOST_TRIGGER_DEFAULT_CENTIKG, \
 		ASSIST_EXT_BOOST_STRENGTH_DEFAULT_PCT, \
@@ -174,38 +174,38 @@ static const assist_level_config_t default_levels[ASSIST_LEVEL_COUNT + 1] = {
 	DEFAULT_IDLE_LEVEL,
 	/* LEVEL 1 / assist 50% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 50, 60, 50,
-		150, 375, 600, 300, 1000, 180),
+		150, 375, 300, 150, 500, 90),
 	/* LEVEL 2 / assist 100% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 100, 100, 80,
-		160, 400, 600, 330, 1000, 210),
+		160, 400, 300, 165, 500, 105),
 	/* LEVEL 3 / assist 160% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 160, 140, 120,
-		190, 450, 650, 380, 1050, 250),
+		190, 450, 325, 190, 525, 125),
 	/* LEVEL 4 / assist 210% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 210, 160, 160,
-		220, 500, 700, 450, 1100, 300),
+		220, 500, 350, 225, 550, 150),
 	/* LEVEL 5 / assist 260% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_POWER_LINEAR, 260, 180, 200,
-		250, 550, 750, 500, 1200, 350)
+		250, 550, 375, 250, 600, 175)
 };
 
 static const assist_level_config_t emtb_levels[ASSIST_LEVEL_COUNT + 1] = {
 	DEFAULT_IDLE_LEVEL,
 	/* LEVEL 1 / assist 50% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 50, 60, 50,
-		150, 375, 600, 300, 1000, 180),
+		150, 375, 300, 150, 500, 90),
 	/* LEVEL 2 / assist 100% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 100, 100, 80,
-		160, 400, 600, 330, 1000, 210),
+		160, 400, 300, 165, 500, 105),
 	/* LEVEL 3 / assist 160% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 160, 140, 120,
-		190, 450, 650, 380, 1050, 250),
+		190, 450, 325, 190, 525, 125),
 	/* LEVEL 4 / assist 210% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 210, 160, 160,
-		220, 500, 700, 450, 1100, 300),
+		220, 500, 350, 225, 550, 150),
 	/* LEVEL 5 / assist 260% */
 	DEFAULT_POWER_LEVEL(ASSIST_MODE_EMTB, 260, 180, 200,
-		250, 550, 750, 500, 1200, 350)
+		250, 550, 375, 250, 600, 175)
 };
 
 #undef DEFAULT_POWER_LEVEL
@@ -229,10 +229,13 @@ static uint8_t active_bank;
 #define BANK_WA_MAX_WHEEL_X10_DEFAULT 70U
 #define BANK_WA_MAX_WHEEL_X10_MIN     10U   /* 1.0 km/h */
 #define BANK_WA_MAX_WHEEL_X10_MAX     255U  /* 25.5 km/h */
-#define BANK_WA_CURRENT_DEFAULT       30U
+/* FW-130: 30 -> 15 -> 25, matching WALK_ASSIST_CURRENT_DEFAULT. The byte drives the WA ceiling
+ * (percent of PH_CURRENT_MAX, clamped to WA_MOTOR_IQ_ABS_MAX = 157). 25 % resolves to that hard
+ * ceiling, so a fresh bank now ships with the most force this firmware will give a walk. */
+#define BANK_WA_CURRENT_DEFAULT       25U
 #define BANK_WA_CURRENT_MIN           1U
 #define BANK_WA_CURRENT_MAX           100U
-#define BANK_WA_TARGET_RPM_DEFAULT    20U
+#define BANK_WA_TARGET_RPM_DEFAULT    30U  /* FW-130 zamknięcie: patrz WALK_ASSIST_RPM_DEFAULT */
 #define BANK_WA_TARGET_RPM_MIN        20U
 #define BANK_WA_TARGET_RPM_MAX        60U
 #define BANK_WA_LATCH_DEFAULT         0U
@@ -1319,7 +1322,9 @@ uint16_t assist_modes_get_wa_max_wheel_x100(void)
 
 uint8_t assist_modes_get_wa_current_pct(void)
 {
-	/* FW-060: compatibility/API only; the constant-RPM controller does not read it. */
+	/* FW-130: read again. main.c resolves this percentage of PH_CURRENT_MAX into the Walk
+	 * Assist Iq ceiling. Between FW-060 and FW-130 this function had no caller at all, which
+	 * is why the Canable slider looked live while the ceiling was a fixed 40 Iq. */
 	return valid_wa_current_pct(bank_wa_current_pct[active_bank]);
 }
 
@@ -1425,7 +1430,7 @@ uint16_t assist_modes_serialize_bank(uint8_t bank_index, uint8_t *buffer)
 	buffer[5] = BANK_RECORD_LEN;
 	buffer[6] = active_bank;
 	buffer[7] = valid_wa_max_wheel_x10(bank_wa_max_wheel_x10[bank_index]);
-	/* FW-060: retain byte 8 for backward compatibility; new WA ignores it. */
+	/* FW-130: byte 8 is live again - it is the WA current ceiling percentage. */
 	buffer[8] = valid_wa_current_pct(bank_wa_current_pct[bank_index]);
 	buffer[9] = valid_wa_target_rpm(bank_wa_target_rpm[bank_index]);
 	buffer[10] = bank_wa_latch_after_release[bank_index] ? 1U : 0U;

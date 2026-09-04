@@ -9,10 +9,10 @@
 
 /* FW-069: fallbacks used only if the caller left a ramp field at 0. The real values are
  * per level and arrive through assist_dynamics_input_t. */
-#define RAMP_UP_SLOW_FALLBACK_MS   600
-#define RAMP_UP_FAST_FALLBACK_MS   300
-#define RAMP_DOWN_SLOW_FALLBACK_MS 1000
-#define RAMP_DOWN_FAST_FALLBACK_MS 140
+#define RAMP_UP_SLOW_FALLBACK_MS   300
+#define RAMP_UP_FAST_FALLBACK_MS   150
+#define RAMP_DOWN_SLOW_FALLBACK_MS 500
+#define RAMP_DOWN_FAST_FALLBACK_MS 70
 
 static int32_t ramp_ticks(uint16_t ms, int32_t fallback_ms)
 {

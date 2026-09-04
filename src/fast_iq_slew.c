@@ -35,8 +35,8 @@
 #define FIS_ACC_SHIFT 10        /* Q10 accumulator (2 extra bits make /4 exact) */
 #define FIS_Q_SHIFT   8         /* input step (Q8) matches IQ_RAMP_Q_SHIFT */
 
-_Static_assert(sizeof(fast_iq_slew_mailbox_t) == 24U,
-	"mailbox must contain exactly six 32-bit words");
+_Static_assert(sizeof(fast_iq_slew_mailbox_t) == 28U,
+	"mailbox must contain exactly seven 32-bit words");
 _Static_assert(offsetof(fast_iq_slew_mailbox_t, seq) == 0U,
 	"sequence word must lead the mailbox");
 _Static_assert(offsetof(fast_iq_slew_mailbox_t, target) == 4U,
@@ -84,7 +84,8 @@ static bool fis_command_equal(
 		a->step_mag_8 == b->step_mag_8 &&
 		a->mode == b->mode &&
 		a->release_ticks_16k == b->release_ticks_16k &&
-		a->release_recip_q32 == b->release_recip_q32;
+		a->release_recip_q32 == b->release_recip_q32 &&
+		a->zero_policy == b->zero_policy;
 }
 
 /*
@@ -106,6 +107,7 @@ static bool fis_mailbox_read_verified(
 		candidate.mode = mb->mode;
 		candidate.release_ticks_16k = mb->release_ticks_16k;
 		candidate.release_recip_q32 = mb->release_recip_q32;
+		candidate.zero_policy = mb->zero_policy;
 
 		FIS_MEMORY_BARRIER();
 		uint32_t seq2 = mb->seq;
@@ -267,7 +269,8 @@ void fast_iq_slew_publish(
 	int32_t target,
 	fis_mode_t mode,
 	uint16_t step_mag_8,
-	uint32_t release_ticks_16k)
+	uint32_t release_ticks_16k,
+	fis_zero_policy_t zero_policy)
 {
 	uint32_t release_recip_q32 = 0U;
 	if (release_ticks_16k > 1U) {
@@ -292,6 +295,8 @@ void fast_iq_slew_publish(
 	FIS_TEST_HOOK(FIS_PUBLISH_AFTER_RELEASE_TICKS, mb);
 	mb->release_recip_q32 = release_recip_q32;
 	FIS_TEST_HOOK(FIS_PUBLISH_AFTER_RELEASE_RECIP, mb);
+	mb->zero_policy = (uint32_t)zero_policy;
+	FIS_TEST_HOOK(FIS_PUBLISH_AFTER_ZERO_POLICY, mb);
 
 	/* DMB + compiler clobber: all payload stores complete before stable publication. */
 	FIS_MEMORY_BARRIER();
@@ -310,6 +315,7 @@ void fast_iq_slew_reset(fast_iq_slew_mailbox_t *mb)
 	fis.command.mode = (uint32_t)FIS_MODE_FORCE_ZERO;
 	fis.command.release_ticks_16k = 0U;
 	fis.command.release_recip_q32 = 0U;
+	fis.command.zero_policy = (uint32_t)FIS_ZERO_POLICY_NONE;
 
 	/* Reset is exclusive with the consumer, but still leave a normal stable generation. */
 	mb->seq = 1U;
@@ -319,6 +325,7 @@ void fast_iq_slew_reset(fast_iq_slew_mailbox_t *mb)
 	mb->mode = (uint32_t)FIS_MODE_FORCE_ZERO;
 	mb->release_ticks_16k = 0U;
 	mb->release_recip_q32 = 0U;
+	mb->zero_policy = (uint32_t)FIS_ZERO_POLICY_NONE;
 	FIS_MEMORY_BARRIER();
 	mb->seq = 2U;
 }
@@ -349,6 +356,17 @@ uint32_t fast_iq_slew_current_step_mag_8(void)
 uint32_t fast_iq_slew_current_release_ticks_16k(void)
 {
 	return fis.command.release_ticks_16k;
+}
+
+fis_zero_policy_t fast_iq_slew_current_zero_policy(void)
+{
+	/*
+	 * QZERO: the policy of the last VERIFIED command, i.e. of the same generation that produced
+	 * this tick's Iq_ref. Read from the consumer's own copy rather than from the mailbox, so a
+	 * publish that lands mid-tick can never pair one generation's reference with another
+	 * generation's policy.
+	 */
+	return (fis_zero_policy_t)fis.command.zero_policy;
 }
 
 int32_t fast_iq_slew_current_accumulator_q10(void)

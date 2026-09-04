@@ -131,20 +131,23 @@ static void ride_publish_final_iq(
 	int32_t target,
 	fis_mode_t mode,
 	uint16_t step_mag_8,
-	uint32_t release_ticks_16k)
+	uint32_t release_ticks_16k,
+	fis_zero_policy_t zero_policy)
 {
 	fast_iq_slew_publish(
 		&final_iq_slew_mailbox,
 		target,
 		mode,
 		step_mag_8,
-		release_ticks_16k);
+		release_ticks_16k,
+		zero_policy);
 	final_iq_requested = target;
 }
 
 void ride_control_force_final_iq_zero(void)
 {
-	ride_publish_final_iq(0, FIS_MODE_FORCE_ZERO, 0U, 0U);
+	/* QZERO: a forced zero is never a rider release - NONE keeps the ordinary zero-current PI. */
+	ride_publish_final_iq(0, FIS_MODE_FORCE_ZERO, 0U, 0U, FIS_ZERO_POLICY_NONE);
 }
 
 void ride_control_request_service_iq(int32_t iq_target)
@@ -152,7 +155,8 @@ void ride_control_request_service_iq(int32_t iq_target)
 	if (iq_target < 0) {
 		iq_target = 0;
 	}
-	ride_publish_final_iq(iq_target, FIS_MODE_BYPASS, 0U, 0U);
+	/* QZERO: service/Walk own their own trajectory; they never arm Quiet Zero. */
+	ride_publish_final_iq(iq_target, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 }
 
 /* QS-3D: forward declaration - defined after ride_control_update. */
@@ -160,7 +164,8 @@ static fis_mode_t ride_final_iq_slew_compute(
 	const assist_dynamics_input_t *input,
 	int32_t iq_target,
 	uint16_t *out_step_mag,
-	uint32_t *out_release_ticks_16k);
+	uint32_t *out_release_ticks_16k,
+	fis_zero_policy_t *out_zero_policy);
 
 /*
  * FW-112 v2 TERMINAL CANCEL: one helper for every terminal inhibit that must stop the
@@ -256,7 +261,8 @@ _Static_assert(RIDE_HARD_CUT_RAMP_MS <= 250,
  * before the angle steps. It does NOT release the bridge — that still happens on the
  * rotor-stopped path in main.c.
  */
-#define RIDE_COAST_RELEASE_ERPS 10
+/* RIDE_COAST_RELEASE_ERPS now lives in inc/config.h - QZERO's low-speed handback needs the same
+ * number, and two copies of a threshold whose whole job is a safety margin is how they drift. */
 
 static bool preload_active;
 static int32_t preload_ticks;
@@ -1098,7 +1104,9 @@ void ride_control_update(const ride_control_input_t *input)
 		.ramp_down_fast_ms = ramp_down_fast_ms,
 		.elapsed_ticks = input->elapsed_ticks,
 		.coast_release = coast_release,   //FW-048
-		.force_zero_reference = force_zero_reference   //FW-112 v2
+		.force_zero_reference = force_zero_reference,   //FW-112 v2
+		/* QZERO: carried for the zero-policy only - see assist_dynamics_input_t.service_cut. */
+		.service_cut = input->service_cut_active
 	};
 	/*
 	 * QS-3C: the battery-current limiter is an UPSTREAM Iq-domain cap, applied HERE before
@@ -1124,9 +1132,10 @@ void ride_control_update(const ride_control_input_t *input)
 	 */
 	uint16_t step_mag_8 = 0;
 	uint32_t release_ticks_16k = 0U;
+	fis_zero_policy_t zero_policy = FIS_ZERO_POLICY_NONE;
 	fis_mode_t slew_mode = ride_final_iq_slew_compute(
-		&dynamics_input, iq_target, &step_mag_8, &release_ticks_16k);
-	ride_publish_final_iq(iq_target, slew_mode, step_mag_8, release_ticks_16k);
+		&dynamics_input, iq_target, &step_mag_8, &release_ticks_16k, &zero_policy);
+	ride_publish_final_iq(iq_target, slew_mode, step_mag_8, release_ticks_16k, zero_policy);
 
 	/* Iq is owned exclusively by fast_iq_slew_tick(); motor_core owns only Id here. */
 	motor_core_set_id_target(input->current_id);
@@ -1154,12 +1163,13 @@ static fis_mode_t ride_final_iq_slew_compute(
 	const assist_dynamics_input_t *input,
 	int32_t iq_target,
 	uint16_t *out_step_mag,
-	uint32_t *out_release_ticks_16k)
+	uint32_t *out_release_ticks_16k,
+	fis_zero_policy_t *out_zero_policy)
 {
 	enum { CTRL_TICKS_PER_MS = 4, FOC_TICKS_PER_MS = 16,
 		RELEASE_MAX_MS = 3000,
-		UP_SLOW_FB_MS = 600, UP_FAST_FB_MS = 300,
-		DN_SLOW_FB_MS = 1000, DN_FAST_FB_MS = 140 };
+		UP_SLOW_FB_MS = 300, UP_FAST_FB_MS = 150,
+		DN_SLOW_FB_MS = 500, DN_FAST_FB_MS = 70 };
 
 	int32_t ramp_up_slow = ((input->ramp_up_slow_ms > 0U) ? input->ramp_up_slow_ms : UP_SLOW_FB_MS)
 		* CTRL_TICKS_PER_MS;
@@ -1189,6 +1199,12 @@ static fis_mode_t ride_final_iq_slew_compute(
 
 	*out_step_mag = 0;
 	*out_release_ticks_16k = 0U;
+	/*
+	 * QZERO: default-deny. Only the profile release branch below grants QUIET, so every mode
+	 * that returns before it - immediate cut, FW-048 coast, FW-112 force-zero, Walk Assist
+	 * BYPASS - and every ordinary RISE/FALL/HOLD leaves the ordinary zero-current PI in charge.
+	 */
+	*out_zero_policy = FIS_ZERO_POLICY_NONE;
 
 	/* FW-037/048/112: immediate cut, coast release and force-zero demand the same same-tick
 	 * exact zero from the 16 kHz owner. */
@@ -1213,6 +1229,14 @@ static fis_mode_t ride_final_iq_slew_compute(
 		if (release_ms > RELEASE_MAX_MS) release_ms = RELEASE_MAX_MS;
 		*out_release_ticks_16k = (uint32_t)release_ms * FOC_TICKS_PER_MS;
 		if (*out_release_ticks_16k == 0U) *out_release_ticks_16k = 1U;
+		/*
+		 * QZERO: THE one place Quiet Zero is granted. This branch is reached only when the
+		 * rider stopped pedalling (the level's own release fade) or a hard cut is fading the
+		 * current out over RIDE_HARD_CUT_RAMP_MS - brake, overtemperature, torque fault or a
+		 * reverse. The pedal-load calibration reaches it too, through the same hard_cut, and is
+		 * the one cause excluded here: it is a workshop procedure, not a release.
+		 */
+		*out_zero_policy = input->service_cut ? FIS_ZERO_POLICY_NONE : FIS_ZERO_POLICY_QUIET;
 		return input->safety_cut ? FIS_MODE_SAFETY : FIS_MODE_RELEASE;
 	}
 

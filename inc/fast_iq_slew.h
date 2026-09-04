@@ -32,6 +32,22 @@ typedef enum {
 } fis_mode_t;
 
 /*
+ * QZERO: why THIS zero was commanded. The mode alone cannot answer that question - FIS_MODE_SAFETY
+ * covers a reverse, a brake, an overtemperature AND the pedal-load calibration, and a zero that
+ * came from the speed or battery limiter arrives as an ordinary FALL to target 0. The policy is
+ * therefore published explicitly by the 4 kHz producer alongside the mode, and it is the ONLY
+ * thing that may arm Quiet Zero (see inc/quiet_zero.h).
+ *
+ * QUIET is set for exactly two causes: the normal end of pedalling (the level's release fade) and
+ * a reverse/safety release. NONE is everything else, including every limiter, service and
+ * calibration path, Walk Assist and force-zero - those keep the ordinary zero-current PI.
+ */
+typedef enum {
+	FIS_ZERO_POLICY_NONE  = 0,
+	FIS_ZERO_POLICY_QUIET = 1
+} fis_zero_policy_t;
+
+/*
  * One verified behavior command. step_mag_8 is the legacy per-4-kHz Q8 step;
  * adding it to the Q10 accumulator on each of four 16-kHz ticks preserves the
  * original integrated slope exactly. Release commands instead carry their real
@@ -45,6 +61,7 @@ typedef struct {
 	uint32_t mode;
 	uint32_t release_ticks_16k;
 	uint32_t release_recip_q32;
+	uint32_t zero_policy;
 } fast_iq_slew_command_t;
 
 /* Every published field is a naturally aligned Cortex-M4 atomic word access. */
@@ -55,6 +72,7 @@ typedef struct {
 	volatile uint32_t mode;
 	volatile uint32_t release_ticks_16k;
 	volatile uint32_t release_recip_q32;
+	volatile uint32_t zero_policy;
 } fast_iq_slew_mailbox_t;
 
 /* Producer API (called from 4 kHz ride/control domain). */
@@ -64,7 +82,8 @@ void fast_iq_slew_publish(
 	int32_t target,
 	fis_mode_t mode,
 	uint16_t step_mag_8,
-	uint32_t release_ticks_16k);
+	uint32_t release_ticks_16k,
+	fis_zero_policy_t zero_policy);
 
 /* Consumer API (called from 16 kHz FOC ISR). */
 
@@ -91,6 +110,10 @@ fis_mode_t fast_iq_slew_current_mode(void);
 uint32_t fast_iq_slew_current_step_mag_8(void);
 uint32_t fast_iq_slew_current_release_ticks_16k(void);
 
+/* QZERO: the policy of the command the ISR is currently acting on. Consumed by the 16 kHz FOC
+ * ISR to decide whether a zero reference may arm Quiet Zero; diagnostics read it too. */
+fis_zero_policy_t fast_iq_slew_current_zero_policy(void);
+
 /*
  * Authoritative live final-slew state. The ISR is the sole writer; the 4 kHz producer
  * takes one aligned 32-bit snapshot to choose RISE/FALL/HOLD from trajectory direction,
@@ -108,6 +131,7 @@ typedef enum {
 	FIS_PUBLISH_AFTER_MODE,
 	FIS_PUBLISH_AFTER_RELEASE_TICKS,
 	FIS_PUBLISH_AFTER_RELEASE_RECIP,
+	FIS_PUBLISH_AFTER_ZERO_POLICY,
 	FIS_PUBLISH_BEFORE_SEQ_EVEN,
 	FIS_PUBLISH_AFTER_SEQ_EVEN
 } fis_publish_stage_t;

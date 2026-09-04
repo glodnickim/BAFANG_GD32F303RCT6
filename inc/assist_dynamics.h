@@ -12,6 +12,13 @@ typedef struct {
 	bool walk_active;
 	bool immediate_cut;
 	bool safety_cut;
+	/*
+	 * QZERO: safety_cut is true for a brake, an overtemperature cutoff, a torque-sensor fault,
+	 * a reverse AND the pedal-load calibration. This flag separates the last one out, so the
+	 * published zero-policy can grant Quiet Zero on a rider-relevant release and refuse it on a
+	 * service procedure. Nothing else reads it and no cut decision depends on it.
+	 */
+	bool service_cut;
 	bool profile_pedaling_active;
 	uint16_t profile_release_ms;
 	/*

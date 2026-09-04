@@ -324,19 +324,24 @@ static void production_wiring_checks(void)
 			/* ~3480 chars of (heavily commented) source separate the two anchors - measured
 			 * against the shipped file, span sized with headroom rather than tight to it.
 			 * FOC-AW1 added its foc_aw_tracking_reset() call and comment inside this same
-			 * block, which is why the span is 3800 rather than the original 3400. */
-			CHECK(span_contains(cold_prepare, cold_prepare + 3800, "PI_iq.integral_part=0; PI_iq.out=0;") &&
-				span_contains(cold_prepare, cold_prepare + 3800, "PI_id.integral_part=0; PI_id.out=0;") &&
-				span_contains(cold_prepare, cold_prepare + 3800, "bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;"),
+			 * block, and QZERO added its quiet_zero_reset() next to it, which is why the span
+			 * is 4200 rather than the original 3400 (the anchor now sits at 3817). */
+			CHECK(span_contains(cold_prepare, cold_prepare + 4200, "PI_iq.integral_part=0; PI_iq.out=0;") &&
+				span_contains(cold_prepare, cold_prepare + 4200, "PI_id.integral_part=0; PI_id.out=0;") &&
+				span_contains(cold_prepare, cold_prepare + 4200, "bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;"),
 				"T7: cold PREPARE still zeroes both PI integrators before a fresh bridge-on");
 		}
 
 		/* T7b: the dwell-timeout failsafe (bridge shutting down to IDLE) also keeps its reset -
-		 * FOC inactive / coherent PREPARE is the allowed reset domain per the card's section 7. */
+		 * FOC inactive / coherent PREPARE is the allowed reset domain per the card's section 7.
+		 *
+		 * FW-131 widened this window 1300 -> 1600: rotor_angle_reset() joined the same reset
+		 * domain (the angle state belongs to the regulators it feeds). What the guard asserts is
+		 * unchanged - both integrator resets are still there, still in this block. */
 		CHECK(dwell_failsafe != NULL &&
-			span_contains(dwell_failsafe, dwell_failsafe + 1300, "PI_iq.integral_part=0;") &&
-			span_contains(dwell_failsafe, dwell_failsafe + 1300, "PI_id.integral_part=0;") &&
-			span_contains(dwell_failsafe, dwell_failsafe + 1300, "bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;"),
+			span_contains(dwell_failsafe, dwell_failsafe + 1600, "PI_iq.integral_part=0;") &&
+			span_contains(dwell_failsafe, dwell_failsafe + 1600, "PI_id.integral_part=0;") &&
+			span_contains(dwell_failsafe, dwell_failsafe + 1600, "bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;"),
 			"T7b: dwell-timeout failsafe still zeroes both PI integrators when the bridge goes IDLE");
 	}
 
@@ -351,30 +356,36 @@ static void production_wiring_checks(void)
 	}
 
 	/* T9: service/calibration reset preserved, still gated on the bridge going off in the same
-	 * breath (hall_calibration_iq_request's own comment: "nothing is left regulating"). */
+	 * breath (hall_calibration_iq_request's own comment: "nothing is left regulating"). The span
+	 * is 1200 rather than the original 900 because QZERO added its own reset to the same block
+	 * (the DISABLE anchor now sits at 934); sized with headroom, not tight to it. */
 	{
 		const char *hall_cal = strstr(main_c, "uint16_t hall_calibration_iq_request(void){");
 		CHECK(hall_cal != NULL &&
-			span_contains(hall_cal, hall_cal + 900, "PI_iq.integral_part=0;") &&
-			span_contains(hall_cal, hall_cal + 900, "PI_id.integral_part=0;") &&
-			span_contains(hall_cal, hall_cal + 900, "timer_primary_output_config(TIMER0,DISABLE)"),
+			span_contains(hall_cal, hall_cal + 1200, "PI_iq.integral_part=0;") &&
+			span_contains(hall_cal, hall_cal + 1200, "PI_id.integral_part=0;") &&
+			span_contains(hall_cal, hall_cal + 1200, "timer_primary_output_config(TIMER0,DISABLE)"),
 			"T9: hall calibration's explicit reset is preserved, still coherent with bridge-off");
 	}
 
 	/* Out-of-scope guard: walk_assist_iq_request's own FW-093-restored zero-target reset is a
 	 * distinct, already bike-tested WA-mode mechanism (0.0297-vs-0.0299 real-bike evidence: its
 	 * removal stopped the motor turning at all) - NOT the ordinary ride-path defect this card
-	 * fixes. It must be untouched by this card. */
+	 * fixes. It must be untouched by this card.
+	 *
+	 * FW-130 widened both windows 3700 -> 4300: the function grew by the walk_iq_max input (the
+	 * bank's Walk current percentage now reaches the motor) and its rationale comment. What the
+	 * guard asserts is unchanged - the reset is still there, still in this function. */
 	{
 		const char *walk_assist = strstr(main_c, "uint16_t walk_assist_iq_request(void){");
 		CHECK(walk_assist != NULL &&
-			span_contains(walk_assist, walk_assist + 3700, "if(!limited && PI_iq.integral_part){"),
+			span_contains(walk_assist, walk_assist + 4300, "if(!limited && PI_iq.integral_part){"),
 			"out-of-scope guard: Walk Assist's own zero-target reset code is untouched (not in this card's scope)");
 		if (walk_assist) {
 			/* "restored with the rest of FW-093's revert" lives in a comment - check the RAW text
 			 * at the corresponding offset, same technique as the T1 documentation check above. */
 			const char *raw_walk_assist = main_raw + (walk_assist - main_c);
-			CHECK(span_contains(raw_walk_assist, raw_walk_assist + 3700, "restored with the rest of FW-093's revert"),
+			CHECK(span_contains(raw_walk_assist, raw_walk_assist + 4300, "restored with the rest of FW-093's revert"),
 				"out-of-scope guard: Walk Assist's FW-093 rationale comment is untouched (not in this card's scope)");
 		}
 	}

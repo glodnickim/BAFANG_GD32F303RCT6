@@ -55,7 +55,9 @@
 
 /* Deterministic foreground-publication interruption injection. */
 static bool hook_enabled;
-static int hook_seen[9];       /* 1 = old complete command, 2 = new complete command */
+/* One slot per fis_publish_stage_t. QZERO added FIS_PUBLISH_AFTER_ZERO_POLICY, so the enum is
+ * ten stages wide now; sized off the enum's own last member so it cannot drift again. */
+static int hook_seen[FIS_PUBLISH_AFTER_SEQ_EVEN + 1];  /* 1 = old complete command, 2 = new */
 static int hook_mixed;
 static int32_t hook_iq_out;
 
@@ -66,14 +68,19 @@ void fast_iq_slew_test_hook(
 	if (!hook_enabled) return;
 	(void)fast_iq_slew_tick(mb, &hook_iq_out);
 
+	/* QZERO: zero_policy is part of the command generation, so it is part of what "complete"
+	 * means here - a torn read that paired the new policy with the old target would show up as
+	 * hook_mixed rather than passing as one of the two complete commands. */
 	bool old_complete = fast_iq_slew_current_target() == 111 &&
 		fast_iq_slew_current_mode() == FIS_MODE_BYPASS &&
 		fast_iq_slew_current_step_mag_8() == 3U &&
-		fast_iq_slew_current_release_ticks_16k() == 0U;
+		fast_iq_slew_current_release_ticks_16k() == 0U &&
+		fast_iq_slew_current_zero_policy() == FIS_ZERO_POLICY_NONE;
 	bool new_complete = fast_iq_slew_current_target() == 700 &&
 		fast_iq_slew_current_mode() == FIS_MODE_RISE &&
 		fast_iq_slew_current_step_mag_8() == 77U &&
-		fast_iq_slew_current_release_ticks_16k() == 0U;
+		fast_iq_slew_current_release_ticks_16k() == 0U &&
+		fast_iq_slew_current_zero_policy() == FIS_ZERO_POLICY_QUIET;
 
 	if (old_complete) hook_seen[(unsigned)stage] = 1;
 	else if (new_complete) hook_seen[(unsigned)stage] = 2;
@@ -189,7 +196,7 @@ static void parity_rise(void)
 	 * then the ISR runs its four 16 kHz ticks for that period. So publish precedes the
 	 * quarter here. */
 	while (ticks < 4000 && four != target) {
-		fast_iq_slew_publish(&mb, target, FIS_MODE_RISE, step, 0U);
+		fast_iq_slew_publish(&mb, target, FIS_MODE_RISE, step, 0U, FIS_ZERO_POLICY_NONE);
 		eight = run_16k_quarter(&mb, &eight);
 		four = assist_dynamics_apply(target, four, &din);
 		/* Replica stepped per 16 kHz tick inside the same quarter. */
@@ -222,7 +229,7 @@ static void parity_fall(void)
 	unsigned ticks = 0;
 	/* Prime both owners to full via the slow rise. */
 	while (ticks < 4000 && four != IDX_ID_SCALE) {
-		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U);
+		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U, FIS_ZERO_POLICY_NONE);
 		eight = run_16k_quarter(&mb, &eight);
 		four = assist_dynamics_apply(IDX_ID_SCALE, four, &din);
 		CHECK(eight == four, "QS-3D FALL setup: boundary parity during rise");
@@ -231,9 +238,9 @@ static void parity_fall(void)
 	CHECK(eight == IDX_ID_SCALE && four == IDX_ID_SCALE, "QS-3D FALL setup: primed to full scale");
 
 	unsigned n8 = 0, n4 = 0;
-	fast_iq_slew_publish(&mb, 0, FIS_MODE_FALL, dn_step, 0U);
+	fast_iq_slew_publish(&mb, 0, FIS_MODE_FALL, dn_step, 0U, FIS_ZERO_POLICY_NONE);
 	while (n8 < 6000 && four != 0) {
-		fast_iq_slew_publish(&mb, 0, FIS_MODE_FALL, dn_step, 0U);
+		fast_iq_slew_publish(&mb, 0, FIS_MODE_FALL, dn_step, 0U, FIS_ZERO_POLICY_NONE);
 		eight = run_16k_quarter(&mb, &eight);
 		four = assist_dynamics_apply(0, four, &din);
 		CHECK(eight == four, "QS-3D FALL: boundary parity during fall");
@@ -260,7 +267,7 @@ static void parity_release(void)
 	int32_t eight = 0, four = 0;
 	unsigned ticks = 0;
 	while (ticks < 4000 && four != IDX_ID_SCALE) {
-		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U);
+		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U, FIS_ZERO_POLICY_NONE);
 		eight = run_16k_quarter(&mb, &eight);
 		four = assist_dynamics_apply(IDX_ID_SCALE, four, &din);
 		CHECK(eight == four, "QS-3D RELEASE setup: boundary parity during rise");
@@ -276,9 +283,9 @@ static void parity_release(void)
 	uint16_t rel_step = step_for(IDX_ID_SCALE, RELEASE_MS);
 
 	unsigned n8 = 0, n4 = 0;
-	fast_iq_slew_publish(&mb, 0, FIS_MODE_RELEASE, rel_step, RELEASE_MS * 16U);
+	fast_iq_slew_publish(&mb, 0, FIS_MODE_RELEASE, rel_step, RELEASE_MS * 16U, FIS_ZERO_POLICY_NONE);
 	while (n8 < 4000 && four != 0) {
-		fast_iq_slew_publish(&mb, 0, FIS_MODE_RELEASE, rel_step, RELEASE_MS * 16U);
+		fast_iq_slew_publish(&mb, 0, FIS_MODE_RELEASE, rel_step, RELEASE_MS * 16U, FIS_ZERO_POLICY_NONE);
 		eight = run_16k_quarter(&mb, &eight);
 		four = assist_dynamics_apply(0, four, &din);
 		CHECK(eight == four, "QS-3D RELEASE: boundary parity during release fade");
@@ -298,20 +305,20 @@ static void test_force_zero_and_bypass(void)
 
 	uint16_t up_step = step_for(IDX_ID_SCALE, RISE_SLOW_MS);
 	int32_t out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U, FIS_ZERO_POLICY_NONE);
 	for (unsigned i = 0; i < 2400 && out != IDX_ID_SCALE; i++) {
 		run_16k_quarter(&mb, &out);
-		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U);
+		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U, FIS_ZERO_POLICY_NONE);
 	}
 	CHECK(out == IDX_ID_SCALE, "QS-3D FORCE_ZERO setup");
 
-	fast_iq_slew_publish(&mb, 0, FIS_MODE_FORCE_ZERO, 0, 0U);
+	fast_iq_slew_publish(&mb, 0, FIS_MODE_FORCE_ZERO, 0, 0U, FIS_ZERO_POLICY_NONE);
 	out = fast_iq_slew_tick(&mb, &out);
 	CHECK(out == 0, "QS-3D FORCE_ZERO: exact same-tick zero (no residual ramp)");
 	CHECK(fast_iq_slew_current_target() == 0,
 		"QS-3D FORCE_ZERO: verified command target is exact zero");
 
-	fast_iq_slew_publish(&mb, 37, FIS_MODE_BYPASS, 0, 0U);
+	fast_iq_slew_publish(&mb, 37, FIS_MODE_BYPASS, 0, 0U, FIS_ZERO_POLICY_NONE);
 	out = fast_iq_slew_tick(&mb, &out);
 	CHECK(out == 37, "QS-3D BYPASS: Walk Assist passthrough writes target directly");
 }
@@ -324,20 +331,20 @@ static void test_direction_change(void)
 
 	uint16_t up_step = step_for(IDX_ID_SCALE, RISE_SLOW_MS);
 	int32_t out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U, FIS_ZERO_POLICY_NONE);
 	for (unsigned i = 0; i < 2400 && out != IDX_ID_SCALE; i++) {
 		run_16k_quarter(&mb, &out);
-		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U);
+		fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up_step, 0U, FIS_ZERO_POLICY_NONE);
 	}
 	int32_t before = out;
 	uint16_t dn_step = step_for(IDX_ID_SCALE, FALL_SLOW_MS);
-	fast_iq_slew_publish(&mb, 10, FIS_MODE_FALL, dn_step, 0U);
+	fast_iq_slew_publish(&mb, 10, FIS_MODE_FALL, dn_step, 0U, FIS_ZERO_POLICY_NONE);
 	int32_t after = fast_iq_slew_tick(&mb, &out);
 	CHECK(after <= before && after >= 10,
 		"QS-3D DIRECTION: rise->fall cannot produce a positive stale-accumulator jump");
 	for (unsigned i = 0; i < 6000 && out != 10; i++) {
 		run_16k_quarter(&mb, &out);
-		fast_iq_slew_publish(&mb, 10, FIS_MODE_FALL, dn_step, 0U);
+		fast_iq_slew_publish(&mb, 10, FIS_MODE_FALL, dn_step, 0U, FIS_ZERO_POLICY_NONE);
 	}
 	CHECK(out == 10, "QS-3D DIRECTION: reversed target clamps exactly");
 }
@@ -358,7 +365,7 @@ static unsigned release_to_zero(
 	fis_mode_t mode,
 	uint32_t duration_ticks)
 {
-	fast_iq_slew_publish(mb, 0, mode, 0U, duration_ticks);
+	fast_iq_slew_publish(mb, 0, mode, 0U, duration_ticks, FIS_ZERO_POLICY_NONE);
 	unsigned ticks = 0U;
 	while (*out > 0 && ticks <= duration_ticks + 8U) {
 		(void)fast_iq_slew_tick(mb, out);
@@ -416,7 +423,7 @@ static void test_exact_release_ceil_sweep(void)
 			fast_iq_slew_test_set_accumulator_q10((int32_t)states[s]);
 			int32_t out = (int32_t)((states[s] + 512U) >> 10);
 			fis_mode_t mode = (d == 0U) ? FIS_MODE_RELEASE : FIS_MODE_SAFETY;
-			fast_iq_slew_publish(&mb, 0, mode, 0U, durations[d]);
+			fast_iq_slew_publish(&mb, 0, mode, 0U, durations[d], FIS_ZERO_POLICY_NONE);
 			uint32_t used = 0U;
 			while (fast_iq_slew_current_accumulator_q10() > 0 && used <= durations[d]) {
 				(void)fast_iq_slew_tick(&mb, &out);
@@ -441,13 +448,13 @@ static void test_mailbox_interruptions_and_retry(void)
 	fast_iq_slew_mailbox_t mb;
 	memset(&mb, 0, sizeof(mb));
 	fast_iq_slew_reset(&mb);
-	fast_iq_slew_publish(&mb, 111, FIS_MODE_BYPASS, 3U, 0U);
+	fast_iq_slew_publish(&mb, 111, FIS_MODE_BYPASS, 3U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &hook_iq_out);
 
 	memset(hook_seen, 0, sizeof(hook_seen));
 	hook_mixed = 0;
 	hook_enabled = true;
-	fast_iq_slew_publish(&mb, 700, FIS_MODE_RISE, 77U, 0U);
+	fast_iq_slew_publish(&mb, 700, FIS_MODE_RISE, 77U, 0U, FIS_ZERO_POLICY_QUIET);
 	hook_enabled = false;
 
 	CHECK(hook_mixed == 0,
@@ -461,7 +468,7 @@ static void test_mailbox_interruptions_and_retry(void)
 		"J3: immediately after stable publication the consumer accepts the NEW complete command");
 
 	/* Establish a different verified command, then hold seq odd for every read attempt. */
-	fast_iq_slew_publish(&mb, 222, FIS_MODE_BYPASS, 5U, 0U);
+	fast_iq_slew_publish(&mb, 222, FIS_MODE_BYPASS, 5U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &hook_iq_out);
 	mb.seq |= 1U;
 	mb.target = 19;
@@ -469,16 +476,18 @@ static void test_mailbox_interruptions_and_retry(void)
 	mb.mode = (uint32_t)FIS_MODE_SAFETY;
 	mb.release_ticks_16k = 3200U;
 	mb.release_recip_q32 = 123U;
+	mb.zero_policy = (uint32_t)FIS_ZERO_POLICY_QUIET;
 	(void)fast_iq_slew_tick(&mb, &hook_iq_out);
 	CHECK(hook_iq_out == 222 && fast_iq_slew_current_target() == 222 &&
 		fast_iq_slew_current_mode() == FIS_MODE_BYPASS &&
-		fast_iq_slew_current_step_mag_8() == 5U,
+		fast_iq_slew_current_step_mag_8() == 5U &&
+		fast_iq_slew_current_zero_policy() == FIS_ZERO_POLICY_NONE,
 		"K26: all bounded reads fail -> last VERIFIED command remains applied");
 
 	/* Relevant generation wrap: FFFFFFFE -> FFFFFFFF(in progress) -> 0(stable). */
 	fast_iq_slew_reset(&mb);
 	mb.seq = UINT32_MAX - 1U;
-	fast_iq_slew_publish(&mb, 333, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, 333, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	int32_t wrapped_out = 0;
 	(void)fast_iq_slew_tick(&mb, &wrapped_out);
 	CHECK(mb.seq == 0U && wrapped_out == 333,
@@ -493,33 +502,33 @@ static void test_q10_small_max_and_rate_identity(void)
 	fast_iq_slew_reset(&mb);
 
 	/* +7 counts per old 250 us period must be fractionally integrated over four ticks. */
-	fast_iq_slew_publish(&mb, 100, FIS_MODE_RISE, (uint16_t)(7U << 8), 0U);
+	fast_iq_slew_publish(&mb, 100, FIS_MODE_RISE, (uint16_t)(7U << 8), 0U, FIS_ZERO_POLICY_NONE);
 	int32_t q10_samples[4];
 	for (unsigned i = 0; i < 4U; i++) q10_samples[i] = fast_iq_slew_tick(&mb, &out);
 	CHECK(q10_samples[0] > 0 && q10_samples[0] < 7 && q10_samples[3] == 7,
 		"I1: Q10 advances within all four 62.5 us ticks and integrates to +7 counts");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, 1, FIS_MODE_RISE, 1U, 0U);
+	fast_iq_slew_publish(&mb, 1, FIS_MODE_RISE, 1U, 0U, FIS_ZERO_POLICY_NONE);
 	for (unsigned i = 0; i < 2048U && out != 1; i++) (void)fast_iq_slew_tick(&mb, &out);
 	CHECK(out == 1, "K3: small target reaches and clamps to one count");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 32767U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 32767U, 0U, FIS_ZERO_POLICY_NONE);
 	for (unsigned i = 0; i < 64U && out != IDX_ID_SCALE; i++) (void)fast_iq_slew_tick(&mb, &out);
 	CHECK(out == IDX_ID_SCALE, "K4: configured maximum target clamps without overshoot");
 
 	/* Same target and mode, SLOW -> FAST -> SLOW: step is part of command identity. */
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 16U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 16U, 0U, FIS_ZERO_POLICY_NONE);
 	int32_t start = out;
 	run_fast_ticks(&mb, &out, 256U);
 	int32_t slow_delta_1 = out - start;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 160U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 160U, 0U, FIS_ZERO_POLICY_NONE);
 	start = out;
 	run_fast_ticks(&mb, &out, 256U);
 	int32_t fast_delta = out - start;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 16U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 16U, 0U, FIS_ZERO_POLICY_NONE);
 	start = out;
 	run_fast_ticks(&mb, &out, 256U);
 	int32_t slow_delta_2 = out - start;
@@ -538,15 +547,15 @@ static void test_limiter_changes(void)
 	uint16_t up = step_for(IDX_ID_SCALE, RISE_SLOW_MS);
 	uint16_t down = step_for(IDX_ID_SCALE, FALL_SLOW_MS);
 
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 3000U);
 	int32_t before_tighten = out;
-	fast_iq_slew_publish(&mb, 200, FIS_MODE_FALL, down, 0U);
+	fast_iq_slew_publish(&mb, 200, FIS_MODE_FALL, down, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 256U);
 	CHECK(out < before_tighten && out >= 200,
 		"K8: battery/limiter tightening during rise reverses monotonically toward the cap");
 	int32_t at_cap_release = out;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 256U);
 	CHECK(out > at_cap_release && out <= IDX_ID_SCALE,
 		"K9: limiter release during rise resumes monotonically toward demand");
@@ -561,14 +570,14 @@ static void test_live_normal_releases(void)
 	uint16_t down = step_for(IDX_ID_SCALE, FALL_SLOW_MS);
 
 	memset(&mb, 0, sizeof(mb)); fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	unsigned settled = release_to_zero(&mb, &out, FIS_MODE_RELEASE, normal_ticks);
 	CHECK(out == 0 && settled >= normal_ticks - 64U && settled <= normal_ticks,
 		"K10: normal release from settled max reaches exact zero in approximately 650 ms");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 3600U);
 	int32_t live_rise = out;
 	unsigned during_rise = release_to_zero(&mb, &out, FIS_MODE_RELEASE, normal_ticks);
@@ -577,9 +586,9 @@ static void test_live_normal_releases(void)
 		"K11: interrupted rise derives the 650 ms release from LIVE fast state");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
-	fast_iq_slew_publish(&mb, 150, FIS_MODE_FALL, down, 0U);
+	fast_iq_slew_publish(&mb, 150, FIS_MODE_FALL, down, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 2400U);
 	int32_t live_fall = out;
 	unsigned during_fall = release_to_zero(&mb, &out, FIS_MODE_RELEASE, normal_ticks);
@@ -588,9 +597,9 @@ static void test_live_normal_releases(void)
 		"K12: interrupted fall derives the 650 ms release from LIVE fast state");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 6000U);
-	fast_iq_slew_publish(&mb, 300, FIS_MODE_FALL, down, 0U);
+	fast_iq_slew_publish(&mb, 300, FIS_MODE_FALL, down, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	unsigned after_cap = release_to_zero(&mb, &out, FIS_MODE_RELEASE, normal_ticks);
 	CHECK(after_cap >= normal_ticks - 300U && after_cap <= normal_ticks,
@@ -606,32 +615,32 @@ static void test_live_safety_releases(void)
 	uint16_t down = step_for(IDX_ID_SCALE, FALL_SLOW_MS);
 
 	memset(&mb, 0, sizeof(mb)); fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	unsigned settled = release_to_zero(&mb, &out, FIS_MODE_SAFETY, safety_ticks);
 	CHECK(settled >= safety_ticks - 32U && settled <= safety_ticks,
 		"K14: safety release from settled state reaches zero in approximately 200 ms");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, up, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 1800U);
 	unsigned during_rise = release_to_zero(&mb, &out, FIS_MODE_SAFETY, safety_ticks);
 	CHECK(during_rise >= safety_ticks - 100U && during_rise <= safety_ticks,
 		"K15: safety release during rise is derived from LIVE fast state");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
-	fast_iq_slew_publish(&mb, 300, FIS_MODE_FALL, down, 0U);
+	fast_iq_slew_publish(&mb, 300, FIS_MODE_FALL, down, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	unsigned after_cap = release_to_zero(&mb, &out, FIS_MODE_SAFETY, safety_ticks);
 	CHECK(after_cap >= safety_ticks - 100U && after_cap <= safety_ticks,
 		"K16: safety release after limiter change ignores stale requested targets");
 
 	fast_iq_slew_reset(&mb); out = 0;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
-	fast_iq_slew_publish(&mb, 150, FIS_MODE_FALL, down, 0U);
+	fast_iq_slew_publish(&mb, 150, FIS_MODE_FALL, down, 0U, FIS_ZERO_POLICY_NONE);
 	run_fast_ticks(&mb, &out, 2400U);
 	int32_t live_fall = out;
 	unsigned during_fall = release_to_zero(&mb, &out, FIS_MODE_SAFETY, safety_ticks);
@@ -645,11 +654,11 @@ static void test_zero_lifecycle_cold_and_special_modes(void)
 	fast_iq_slew_mailbox_t mb;
 	int32_t out = 0;
 	memset(&mb, 0, sizeof(mb)); fast_iq_slew_reset(&mb);
-	fast_iq_slew_publish(&mb, 300, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, 300, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 
 	enum { MODEL_ACTIVE, MODEL_ARMED_ZERO } lifecycle = MODEL_ACTIVE;
-	fast_iq_slew_publish(&mb, 0, FIS_MODE_RELEASE, 0U, RELEASE_MS * 16U);
+	fast_iq_slew_publish(&mb, 0, FIS_MODE_RELEASE, 0U, RELEASE_MS * 16U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	if (out == 0) lifecycle = MODEL_ARMED_ZERO;
 	CHECK(out > 0 && lifecycle == MODEL_ACTIVE,
@@ -660,13 +669,13 @@ static void test_zero_lifecycle_cold_and_special_modes(void)
 	}
 	CHECK(out == 0 && lifecycle == MODEL_ARMED_ZERO,
 		"K17/K19: exact fast zero is the event that enters ARMED_ZERO");
-	fast_iq_slew_publish(&mb, 100, FIS_MODE_RISE, 512U, 0U);
+	fast_iq_slew_publish(&mb, 100, FIS_MODE_RISE, 512U, 0U, FIS_ZERO_POLICY_NONE);
 	while (out == 0) (void)fast_iq_slew_tick(&mb, &out);
 	if (out > 0) lifecycle = MODEL_ACTIVE;
 	CHECK(lifecycle == MODEL_ACTIVE,
 		"K20: positive real fast output restarts ARMED_ZERO without a cold transaction");
 
-	fast_iq_slew_publish(&mb, 91, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, 91, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	fast_iq_slew_cold_prepare(&mb, &out);
 	CHECK(out == 0 && mb.target == 0 && mb.mode == (uint32_t)FIS_MODE_FORCE_ZERO &&
@@ -674,21 +683,21 @@ static void test_zero_lifecycle_cold_and_special_modes(void)
 		"K21: cold PREPARE clears target, mode, rate input and visible/fractional output");
 
 	/* Service/calibration remain fast-owner BYPASS; comm-loss is exact FORCE_ZERO. */
-	fast_iq_slew_publish(&mb, 37, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, 37, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	CHECK(out == 37, "K22: service command is applied by fast-owner BYPASS");
-	fast_iq_slew_publish(&mb, 0, FIS_MODE_FORCE_ZERO, 0U, 0U);
+	fast_iq_slew_publish(&mb, 0, FIS_MODE_FORCE_ZERO, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	CHECK(out == 0, "K23: comm-loss command is applied as fast-owner exact zero");
-	fast_iq_slew_publish(&mb, 42, FIS_MODE_BYPASS, 0U, 0U);
+	fast_iq_slew_publish(&mb, 42, FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
-	fast_iq_slew_publish(&mb, 100, FIS_MODE_RISE, 256U, 0U);
+	fast_iq_slew_publish(&mb, 100, FIS_MODE_RISE, 256U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	CHECK(out >= 42 && fast_iq_slew_current_mode() == FIS_MODE_RISE,
 		"K24: calibration BYPASS -> normal slew transition has one continuous owner");
 
 	bool hardware_moe = true;
-	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 256U, 0U);
+	fast_iq_slew_publish(&mb, IDX_ID_SCALE, FIS_MODE_RISE, 256U, 0U, FIS_ZERO_POLICY_NONE);
 	(void)fast_iq_slew_tick(&mb, &out);
 	hardware_moe = false; /* model the independent FOC overcurrent action */
 	CHECK(!hardware_moe && out > 0,

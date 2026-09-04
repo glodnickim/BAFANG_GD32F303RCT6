@@ -719,16 +719,18 @@ static void production_wiring_checks(void)
 		"W18: foc_aw_tracking_reset() has exactly four call sites (boot init + the three lifecycle ones)");
 
 	{
-		/* Cold PREPARE (GATE A: bridge fully off, before MOE ON). */
+		/* Cold PREPARE (GATE A: bridge fully off, before MOE ON). The 4200-char window is sized
+		 * with headroom: QZERO added quiet_zero_reset() to this same block, which moved the
+		 * MOE_ON anchor to 3817 and past the previous 3800. */
 		const char *cold_prepare = strstr(main_c, "if(!ui_8_PWM_ON_Flag){");
 		const char *dwell_failsafe = strstr(main_c, "static uint16_t dwell_timeout_counter");
 		const char *hall_cal = strstr(main_c, "uint16_t hall_calibration_iq_request(void){");
 
 		CHECK(cold_prepare != NULL, "setup: cold PREPARE block (GATE A) is locatable");
 		if (cold_prepare) {
-			CHECK(span_contains(cold_prepare, cold_prepare + 3800, "PI_iq.integral_part=0; PI_iq.out=0;") &&
-				span_contains(cold_prepare, cold_prepare + 3800, "foc_aw_tracking_reset();") &&
-				span_contains(cold_prepare, cold_prepare + 3800, "bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;"),
+			CHECK(span_contains(cold_prepare, cold_prepare + 4200, "PI_iq.integral_part=0; PI_iq.out=0;") &&
+				span_contains(cold_prepare, cold_prepare + 4200, "foc_aw_tracking_reset();") &&
+				span_contains(cold_prepare, cold_prepare + 4200, "bridge_lifecycle = BRIDGE_LIFECYCLE_MOE_ON;"),
 				"W19: cold PREPARE zeroes the tracking state alongside the PI integrators it already zeroed");
 		}
 

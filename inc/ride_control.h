@@ -59,6 +59,14 @@ typedef struct {
 	 * "non-reverse" no longer precisely describes what this field excludes.)
 	 */
 	bool safety_cut_non_direction;
+	/*
+	 * QZERO: the SERVICE subset of safety_cut_non_direction - the pedal-load calibration, which
+	 * is a workshop procedure rather than a riding event. It changes no cut decision (hard_cut
+	 * still comes from safety_cut_non_direction, unchanged); it exists so the published
+	 * zero-policy can refuse Quiet Zero on a service cut while still granting it on a real
+	 * brake / overtemperature / torque-fault / reverse release. See inc/quiet_zero.h.
+	 */
+	bool service_cut_active;
 	int32_t throttle_iq;   // FW-030: throttle current (mapped from ADC in main.c); floor on ride-core output
 	bool start_phase;     // FW-087: pedalling begun but no cadence measured yet
 	/*

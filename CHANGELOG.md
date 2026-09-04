@@ -6,6 +6,147 @@ local (untracked) notes.
 
 ## [Unreleased]
 
+### QZERO-2 — the quiet stop applies every time, not only when the release itself made the zero
+
+- First ride with Quiet Zero reported a stop that behaved differently every time: sometimes the
+  motor coasts quietly, sometimes it brakes hard with a click. Cause: v1 armed only on the
+  non-zero -> zero edge of the final reference, so a release that happened while the current had
+  ALREADY been taken to zero by something else - riding at the legal speed limit, a battery or
+  thermal limit, a closing torque gate, or simply easing off before the cranks stop - produced no
+  edge and silently fell back to the braked stop.
+- The rising edge of the QUIET verdict now arms it too. This is still "never a limiter": the
+  verdict itself is only ever granted after pedalling has ended, so a limiter alone cannot set it.
+- `quiet_zero_reset()` seeds the verdict history HIGH, so the reset - which runs where the bridge
+  is being switched off - can never manufacture the edge and arm a fade nobody asked for.
+- Host test T3 inverted to the new requirement and extended: an already-standing verdict must not
+  arm again, so "only an edge arms it" survives as the invariant.
+
+### FW-130.1 — Walk Assist: the absence of a Hall signal is not "speed zero"
+
+- After the first ride on FW-130 the walk assist started smoothly and then pulsed on/off. A
+  closed-loop reproduction against the real modules (drivetrain model with a freewheel, swept over
+  three drivetrains, ceilings 35..157 and loads 30..1.5 Iq) showed the governor settling cleanly
+  every time, which cleared "the gain is too high" as a standalone cause and pointed at the signal.
+- Owner requirement: a stopped rotor emits nothing, so a missing reading must never be read as
+  0 rpm. v1 answered a missing or not-yet-computed reading with the FULL ceiling, closing a loop
+  that needs no input from the bike: full power -> overshoot -> zero -> rotor stops -> full power.
+- Explicit `speed_known` (the estimator actually measured a period - `hall_valid` alone is not
+  enough, since the first edge after a gap makes it valid while the speed is still 0). While a
+  session runs without a reading the controller now HOLDS its last verdict.
+- A 2 Iq keepalive, gated on a real reading, keeps the rotor turning so a speed keeps existing.
+  This supersedes FW-113.1's "no positive floor" FOR LAW B ONLY: that requirement was chosen when
+  the current above target fell over 1280 ms and the rotor never stopped. 2 Iq is FW-082's own
+  value, under half of the 5 Iq FW-079 removed for driving the bike. Every safety zero stays zero.
+- Full-scale fall 110 -> 250 ms: the stock 110 ms has a separate downstream slew after it and Walk
+  Assist bypasses ours, so this is the motor current's own fall. Still 5x faster than law A.
+- New test T10: losing the speed signal must never RAISE the current. FW-113.1/113.2 assertions are
+  now law-aware (`RUN_FLOOR_IQ` 0 for law A, 2 for law B) and pass under both.
+
+### FW-130 — Walk Assist rebuilt in the G532 character: one ramped demand, two soft ceilings
+
+- The old law was a speed PI on motor current, and the ride complaint had three separate causes,
+  each measurable in the source: a **fixed 40 Iq ceiling** that no setting could raise (5.7 % of
+  the phase current the ride path may use), a ramp that **rose in 427 ms but fell in 1280 ms**
+  where the stock G532 falls 5x FASTER than it rises, and a wheel-speed limit that was an
+  **on/off switch** — crossing it zeroed the current AND reset the session, so the return started
+  from scratch over more than a second.
+- Replaced with a demand ramped at a constant rate (550 ms rise / 110 ms fall of full scale) whose
+  ceiling is lowered continuously by two governors: the gear-RPM band and the wheel-speed fuse.
+  **No integrator anywhere** — speed is held by taking current away, which is the mechanism that
+  cannot overshoot. The gear band is centred on the bank's own target and proportional to it, so
+  at the configured rpm exactly half the ceiling is available and 20 and 60 rpm behave alike.
+- The bank's **`Walk current` percentage finally reaches the motor**. It had no reader at all
+  between FW-060 and here, so the Canable slider looked like a strength control while the real
+  ceiling was a constant. Default 30 % -> 15 % (~10 A, ~2.6x the old fixed 40 Iq), still clamped
+  by the unchanged absolute WA ceiling of 157.
+- Wheel speed is now a three-stage fuse: taper over the last 1.5 km/h, zero at the cut-off with
+  **the session kept alive** (the return is one 550 ms rise ramp), real stop only 1 km/h above it.
+- Jam-watchdog grace 1.5 s -> 3 s to cover the longer ramp and the higher ceiling; a genuine
+  sustained stall still latches LIMIT then STALL exactly as before.
+- Both laws ship in `walk_speed_controller.c` behind `WALK_GOVERNOR_ENABLE`, so the A/B ride is
+  two .bin files rather than two branches. No CAN or bank-layout change: both governor factors are
+  reconstructible offline from frames that already exist.
+- Tests: new `tests/host/fw130_walk_governor_host.c` (T1-T9) all pass and report SKIPPED on an
+  A-side build rather than passing vacuously; FW-113.1 and FW-113.2 pass under BOTH laws; no new
+  failures in the full host suite. Not built, not ridden.
+
+### RUN fall smoothing default restored to 250 ms (was 0)
+
+- The RUN estimator's fall time constant had been set to 0 (bypass) to remove the ease-off tail.
+  That also passed per-leg torque ripple 1:1 into the power request, so assist sagged in every
+  crank dead spot. The firmware's own suites already said so: `torque_run_asym_host.c` S5 exceeded
+  its 100-native ripple bound (142/126/106/89 at 20/40/60/80 rpm), and
+  `fw112_run_rearm_recovery_host.c` reported 24 failures about the warm RUN estimate.
+- 250 ms is selected BY THE TEST SUITE, not by taste: it is the fastest fall at which every
+  existing behavioural test passes (175 -> 2 failures, 225 -> 1, 250 -> 0). The full measured
+  ripple/ease-off trade-off table lives at the constant in `inc/torque_input.h`.
+- It does not lengthen a stop: when pedalling ceases the demand is zeroed in the same tick through
+  `pedaling_active`, so this constant only ever shapes a reduction while the rider keeps pedalling.
+- Net effect on the full host suite: 27 failures fixed, 0 new (543 -> 516 FAIL lines; the remainder
+  is the pre-existing diag schema-3 suite, untouched by this work).
+
+### QZERO — Quiet Zero: controlled PI integral fade after Iq_ref reaches zero
+
+- Problem, found after STOP-CLICK-C1 and persistent ARMED_ZERO: the motor now runs on far too
+  long after the rider stops pedalling. RUN torque smoothing and `TORQUE_RUN_ASYM_FALL_MS` were
+  excluded on the bike (setting both to 0 changed nothing).
+- Root cause, confirmed in source and in tests before any change: the click fix removed the two
+  4 kHz foreground `PI_iq/PI_id.integral_part` resets, and with them a side effect nobody had
+  named. In persistent ARMED_ZERO the bridge stays on and the FOC ISR keeps regulating, so a
+  CONTINUOUS integrator settles at the only equilibrium that gives zero current in a spinning
+  machine: `u_q ~= BEMF`. The bridge actively matches the back-EMF, no winding current flows,
+  no braking torque exists, and the rotor free-wheels. The old resets collapsed that voltage —
+  which braked the rotor, and whose step was the audible click. `qzero_quiet_zero_host.c` T11-A
+  reproduces the equilibrium on a byte-faithful replica of FOC.c's `PI_control()`.
+- Fix: a new 16 kHz state machine (`src/quiet_zero.c`, `QZERO_INACTIVE/BLEND/HOLD`). On the tick
+  the final Iq reference goes from non-zero to exact 0 for a release the producer marked QUIET,
+  both integrals are faded LINEARLY to exact zero over `QZERO_BLEND_TICKS` = 160 ticks (10 ms)
+  and then held at zero while the reference stays zero. `PI.out` is never touched, the
+  proportional path, current measurement, FOC, SVPWM and MOE all stay live, and a positive
+  reference exits on the same tick — no MOE toggle, no cold PREPARE, no neutral dwell, no CCR
+  write. It does NOT restore the old foreground reset: there is exactly one writer, the ISR.
+- Arming is explicit, not inferred: the QS-3D mailbox gained a seventh word, `zero_policy`
+  (28 B / seven words, part of the same seqlock generation). `ride_control.c` is default-deny and
+  grants `FIS_ZERO_POLICY_QUIET` in ONE place — the profile-release branch, i.e. the normal end
+  of pedalling and a reverse/safety release — with the pedal-load calibration excluded through a
+  new `service_cut_active` input that changes no cut decision. Speed, battery and voltage
+  limiters, level changes, Walk Assist, position calibration, FW-048 coast and FW-112 force-zero
+  all keep the ordinary zero-current PI.
+- Safety bound: `|Iq|` or `|Id| >= QZERO_ABORT_CURRENT` (`PH_CURRENT_MAX >> 1` = 350, an eighth of
+  FOC.c's hard-fault trip) during BLEND/HOLD ends the P-only hold and returns the full
+  zero-current PI. It does not re-arm; only a new release edge can. No negative Iq is ever
+  commanded and no active regen is requested. FOC-AW1 cannot move the integral during QZERO and
+  its residual is cleared on the entry/exit/abort edge, so a restart has no step.
+- Low-speed handback, added after the owner placed the historical click at the END of the coast
+  (~0 rpm, "as the system disengaged") rather than at the release edge. FW-048 documents what lives
+  there: below ~5.56 erps the commutation angle switches formula and jumps, and current flowing
+  through that jump is the clunk heard at standstill - which is also why stretching the release ramp
+  never helped. That reading explains both facts at once: the old foreground reset was not the click,
+  it was what kept braking current alive down into the zone where the click lives. It also exposed a
+  real gap - FW-048 keeps that zone quiet by zeroing the REFERENCE, which no longer suffices when
+  current comes from the absence of the back-EMF match. QZERO therefore hands the axis back to the
+  full zero-current PI below `RIDE_COAST_RELEASE_ERPS`, and refuses entry for a release that
+  completes inside that zone. The threshold moved from ride_control.c to inc/config.h: two consumers,
+  one number. Nothing is lost - energy scales with speed squared, so the last few chainring rpm hold
+  under 1 % of the cruise energy (host T15d pins braking coverage at ~89 % of the speed ramp).
+- A/B: `QUIET_ZERO_ENABLE` in `inc/config.h` gates only the ISR consumer (the policy word is
+  published either way). A = 0.0491 (`0`, baseline C1), B = 0.0490 (`1`, Quiet Zero); 824 B of
+  flash apart, identical RAM. The earlier 0.0489/0.0488 pair is withdrawn - no low-speed gate.
+- Does NOT change: RUN smoothing, torque filters, min-Iq hold, `release_ms`, the 200 ms hard-cut
+  ramp, Ramp Up/Down, Kp/Ki/Kaw, the speed or battery limiter, Hall/theta, current sampling,
+  EEPROM layout, the CAN protocol or the Canable UI.
+- Tests: new `tests/host/qzero_quiet_zero_host.c` (T1-T9 state machine against the real module,
+  T10 integration against the real 16 kHz slew owner including a real 650 ms release and a real
+  fall-to-zero, T11/T12 regulator effect and restart continuity against the pinned `PI_control()`
+  replica, T13/T14 wiring guards over main.c and ride_control.c) — PASS. Two fixed-size source
+  windows widened because QZERO's reset line joined the same blocks (`cold_prepare` 3800 -> 4200,
+  `hall_cal` 900 -> 1200), reason recorded at the numbers. Four suites in the working tree fail
+  identically with and without this card (verified against a tree with the QZERO edits reversed:
+  543 FAIL lines both runs, identical sets); they belong to the diag schema-3 and RUN
+  estimator / torque filter families this card does not touch.
+- Awaiting real-bike test: A/B per `documentation/QZERO_QUIET_ZERO_PL.md` section 6 — normal
+  release, reverse pedals, and short release + immediate re-press.
+
 ### FW-125 — phase-current same-path calibration (root-cause fix for CASE C)
 
 - Purpose: fix a confirmed domain mismatch in the FW-118/119 phase-current zero calibration.

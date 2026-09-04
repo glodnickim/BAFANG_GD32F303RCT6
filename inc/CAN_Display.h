@@ -26,6 +26,8 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS);
 void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS);
 void sendCAN_Poll(MotorParams_t* MP, MotorState_t* MS, uint16_t command);
 void sendCAN_status_broadcast(MotorState_t* MS);
+void sendCAN_status_frame(MotorState_t* MS, uint8_t index); //FW-133: one of 0x1200/0x320F/0x3000
+void sendCAN_3210(void); //FW-134: motion-seconds broadcast the stock controller sends
 #if CAN_TORQUE_STREAM_ENABLE
 void sendCAN_3100(MotorState_t* MS);
 uint32_t sendCAN_3100_dropped_count(void);

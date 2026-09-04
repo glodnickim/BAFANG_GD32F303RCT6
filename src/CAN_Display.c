@@ -131,6 +131,11 @@ uint8_t level_code_old;
 uint8_t level_counter;
 extern volatile uint16_t comm_lost_ticks; //comms watchdog counter (defined in main.c) - reset on each HMI frame
 extern volatile uint8_t comm_seen;        //comms watchdog arm flag (defined in main.c) - set on first HMI frame
+extern volatile uint16_t ride_seconds;    //FW-134: seconds of motion (defined in main.c)
+//FW-132: evidence for tightening the 0x3005 ownership later - how many arrived and whom the last
+//one was addressed to. Diagnostics only; nothing in the control path reads these.
+volatile uint16_t cmd3005_seen=0;
+volatile uint8_t  cmd3005_last_target=0xFF;
 extern uint8_t auto_off_minutes;          //runtime auto-off timeout [min] (defined in main.c) - set from HMI 0x6303
 extern volatile uint32_t control_time_ticks; //FW-114: 4 kHz free-running clock (main.c) - drives the 0x3000 session counter
 uint8_t walk_can_counter;
@@ -649,8 +654,29 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 	}
 	// NOTE: 0x6400/0x6401 (single-frame 0x8228 version/model) handlers REMOVED for exact factory match —
 	// the factory M820 does NOT answer these and the HMI shows info without them. See git history if needed.
-	if(Ext_ID_Rx.command==0x3005){ //jump to bootloader for firmware update
-		NVIC_SystemReset();
+	/*
+	 * FW-132 P0: 0x3005 means "jump to the bootloader", and until now ANY 0x3005 did it - this
+	 * check sits OUTSIDE the target==2 block above, so it saw broadcasts too.
+	 *
+	 * The DP-C245 display updater announces its session with 0x85FF3005, and decoding that id with
+	 * this file's own rule gives target = (0x85FF3005 >> 19) & 0x1F = 31, i.e. BROADCAST. So
+	 * updating the DISPLAY restarted the CONTROLLER, in the middle of the transfer - which matches
+	 * the reported "HMI comes back with a communication error after an update".
+	 *
+	 * The fix is deliberately the NARROWEST one that removes the harm: ignore the broadcast, honour
+	 * every addressed 0x3005 exactly as before. Tightening this further to target==2 only is what
+	 * the guidance card asks for (its P0), but that needs a log of a REAL controller update first:
+	 * if the controller updater also announces by broadcast, requiring target==2 would break our
+	 * own firmware update. The card is explicit about not guessing which frame distinguishes the
+	 * two sessions, and cmd3005_seen/cmd3005_last_target below exist to collect exactly that
+	 * evidence from the bike.
+	 */
+	if(Ext_ID_Rx.command==0x3005){
+		if(cmd3005_seen<0xFFFFU)cmd3005_seen++;
+		cmd3005_last_target=(uint8_t)Ext_ID_Rx.target;
+		if(Ext_ID_Rx.target!=31){ //31 = broadcast: belongs to the display update session, not to us
+			NVIC_SystemReset();
+		}
 	}
 }
 //FW-006/FW-010: explicit write-ACK for a completed multiframe block. At LONG_END the
@@ -831,21 +857,40 @@ void sendCAN_Poll(MotorParams_t* MP, MotorState_t* MS, uint16_t command){
 	}//end case
 }
 
-void sendCAN_status_broadcast(MotorState_t* MS){
-	//Controller alive/status heartbeat broadcast to HMI (replicates factory M820 firmware).
-	//Without these the HMI does not blink the Walk Assist icon and drops out of WA after a few seconds.
-	//Frames (source=2 controller, target=31 broadcast): 0x1200 (warning/brake), 0x320F (status active), 0x3000.
+/*
+ * Controller alive/status broadcasts to the HMI (source=2, target=31). Without them the display
+ * does not blink the Walk Assist icon and drops out of WA after a few seconds.
+ *
+ * FW-133: these three used to go out TOGETHER every 480 ms, because one function sent all of them.
+ * The stock descriptor table (BAFANG_CAN_STOCK_VERIFIED_REFERENCE.md SS10) gives each its own, very
+ * different period:
+ *
+ *     0x1200   495 ms
+ *     0x320F  1980 ms
+ *     0x3000  9900 ms
+ *
+ * So 0x320F was going out 4x and 0x3000 20x more often than the factory sends them, and all three
+ * landed in the SAME tick - three frames at once into a 16-slot queue that silently drops on
+ * overflow (FW-132). Split so the caller can schedule each on its own period and normally only
+ * one frame is offered per pass.
+ */
+void sendCAN_status_frame(MotorState_t* MS, uint8_t index){
 	static const uint32_t hb_efid[3] = {0x02FF1200, 0x02F8320F, 0x02F83000};
 	static const uint8_t  hb_dlen[3] = {1, 8, 4};
-	for(uint8_t i=0;i<3;i++){
-		uint8_t d[8] = {0};
-		if(i==0) d[0] = (MS->brake_active_flag==SET) ? 0x01 : 0x00; //bit0=brake
-		else if(i==1) d[0] = 0x01;
-		else { //0x3000: byte0 = session counter, +1 every 10 s since boot (matches the m510
-		       //logs 01,02,03...; bytes1-3 stay 0). Was a frozen 0x00 00 00 0B every 480 ms.
-		       d[0] = (uint8_t)(control_time_ticks / (CONTROL_TIMEBASE_HZ * 10U)); }
-		can_tx_queue_enqueue(hb_efid[i], hb_dlen[i], d); //FW-110: was a blocking can_message_transmit/can_transmit_states wait
-	}
+	if(index > 2U) return;
+	uint8_t d[8] = {0};
+	if(index==0) d[0] = (MS->brake_active_flag==SET) ? 0x01 : 0x00; //bit0=brake
+	else if(index==1) d[0] = 0x01;
+	else { //0x3000: byte0 = session counter, +1 every 10 s since boot (matches the m510
+	       //logs 01,02,03...; bytes1-3 stay 0).
+	       d[0] = (uint8_t)(control_time_ticks / (CONTROL_TIMEBASE_HZ * 10U)); }
+	can_tx_queue_enqueue(hb_efid[index], hb_dlen[index], d); //FW-110: was a blocking wait
+}
+
+/* All three at once. Only for the one-shot startup/calibration path, never for the cyclic
+ * scheduler - that one owns a separate period per frame (see FW-133 above). */
+void sendCAN_status_broadcast(MotorState_t* MS){
+	for(uint8_t i=0;i<3;i++) sendCAN_status_frame(MS, i);
 }
 
 void sendCAN_Tx(MotorParams_t* MP, MotorState_t* MS){
@@ -1222,3 +1267,34 @@ void update_checksum(void){
 //	else return -value;
 //
 //}
+
+/*
+ * FW-134: cyclic broadcast 0x3210, ~1 s, DLC 8. The factory M510 sends it and we never did.
+ *
+ * WHY IT EXISTS HERE. Walk Assist on the stock bike shows an icon that APPEARS when the mode is
+ * selected and BLINKS while the bike is actually moving. The appearing half needs nothing from us
+ * - the display sent 0x6300 itself, so it already knows. The blinking half had never worked on
+ * eVistDrive, and the owner's own capture (ON/WA/OFF on the same display) shows why: bytes 4..5 of
+ * this frame step +1 once per second, and that window matched the MOVING window exactly - it began
+ * 3.4 s after the mode was selected and ended 2.8 s before it was released, while the bike was
+ * standing still at both ends with the button still held.
+ *
+ * So the controller is not silent during Walk Assist after all. It reports motion in a frame we
+ * never sent. This is the smallest change that gives the display that signal.
+ *
+ * WHAT IS HONEST AND WHAT IS A GUESS:
+ *   bytes 4..5  a REAL seconds-of-motion counter - the one field whose behaviour the capture
+ *               proves. Session-scoped, not a persistent odometer: the reference marks the
+ *               physical meaning as unproven, so inventing a stored lifetime value would be
+ *               claiming more than we know.
+ *   bytes 0..3  constant in the capture (1080 and 4242 on that bike) and documented as
+ *               SEMANTIC_UNKNOWN. Sent as zero rather than copied: another bike's constants are
+ *               not our data.
+ *   bytes 6..7  zero in the capture too.
+ */
+void sendCAN_3210(void){
+	uint8_t d[8] = {0};
+	d[4] = (uint8_t)(ride_seconds & 0xFF);        //LE16 seconds of motion
+	d[5] = (uint8_t)((ride_seconds >> 8) & 0xFF);
+	can_tx_queue_enqueue(0x82F83210, 8, d);
+}

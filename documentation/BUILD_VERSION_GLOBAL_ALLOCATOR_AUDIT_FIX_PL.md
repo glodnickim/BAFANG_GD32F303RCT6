@@ -65,3 +65,35 @@ Zweryfikowano w izolowanym stanie: pojedynczą parę `0.9201` NORMAL / `0.9202` 
 równoległe orchestratory: `0.9301/0.9302` i `0.9303/0.9304`, bez duplikatu i bez przeplotu par.
 REPRO `0.8123` przeszedł pełny build bez HWM, a Developer wydał wyłącznie
 `DEV-NONCANONICAL` i nie utworzył stanu HWM.
+
+---
+
+## AKTUALIZACJA 2026-09-03 — trzy miejsca po przecinku zamiast czterech
+
+**Decyzja właściciela.** HMI pokazuje dokładnie trzy miejsca po przecinku, więc czterocyfrowy
+numer **nie był możliwy do odczytania z roweru** — a to jedyna sytuacja, w której numer wersji
+jest naprawdę potrzebny.
+
+Zmiana jest **wyłącznie w formatowaniu**. Licznik, jego stan, blokada, HWM i cała logika
+rezerwacji są nietknięte:
+
+```text
+przed:  '0.{0:D4}' -f 496   ->  0.0496
+po:     Format-EbicsVersion 496  ->  0.496
+```
+
+`0.0496` i `0.496` to **ta sama liczba**. Nic nie zostało przenumerowane, sekwencja nie startuje
+od nowa, monotoniczność zachowana.
+
+**Jedno źródło formatu:** nowa funkcja `Format-EbicsVersion` w
+`scripts/build-version-allocator.psm1`, wyeksportowana i używana przez wszystkie trzy miejsca,
+które wcześniej formatowały numer samodzielnie (komunikat o obniżeniu HWM, rezerwacja pary,
+`Get-EbicsCanonicalHwm`) oraz przez `reconcile-canonical-hwm.ps1`.
+
+**Odporność na przekroczenie 999:** część główna jest wyliczana (`hwm / 1000`), a nie wpisana
+jako `0.`, więc 1000 → `1.000`, a nie `0.1000`. Przy okazji naprawione parsowanie w
+`reconcile-canonical-hwm.ps1`: brało numer przez `Substring(2)`, co przy `1.000` dałoby zero.
+Teraz rozbija po kropce i liczy `major*1000 + minor`. Wzorzec walidacji `^0\.\d{4}$` →
+`^\d+\.\d{3}$`.
+
+Test `tests/host/build_version_allocator_host.ps1` zaktualizowany i **PASS**.

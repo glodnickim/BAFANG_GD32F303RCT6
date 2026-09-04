@@ -76,7 +76,7 @@ function Sync-EbicsCanonicalHwm {
         $state = Get-EbicsVersionState $root
         $previous = [int]$state.hwm
         if ($AuthoritativeHwm -lt $previous) {
-            throw "Refusing to lower global canonical HWM: state is 0.$($previous.ToString('D4')), authoritative evidence requests 0.$($AuthoritativeHwm.ToString('D4'))."
+            throw "Refusing to lower global canonical HWM: state is $(Format-EbicsVersion $previous), authoritative evidence requests $(Format-EbicsVersion $AuthoritativeHwm)."
         }
         if ($AuthoritativeHwm -eq $previous) {
             return [pscustomobject]@{ Root=$root; PreviousHwm=$previous; Hwm=$previous; Changed=$false; Atomic=$true; NewVersionReserved=$false }
@@ -114,11 +114,32 @@ function Reserve-EbicsCanonicalVersion {
             if ($state.PSObject.Properties.Name -contains $name) { $nextState[$name] = $state.$name }
         }
         $nextState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root "M820_BL820.json") -Encoding UTF8
-        return [pscustomobject]@{ Root=$root; PreviousHwm=[int]$state.hwm; Versions=@($numbers | ForEach-Object { '0.{0:D4}' -f $_ }); Atomic=$true }
+        return [pscustomobject]@{ Root=$root; PreviousHwm=[int]$state.hwm; Versions=@($numbers | ForEach-Object { Format-EbicsVersion $_ }); Atomic=$true }
     } finally { Exit-EbicsVersionLock $lock }
 }
 
-function Get-EbicsCanonicalHwm { param([string]$RepoRoot,[string]$StateRoot="") $s=Get-EbicsVersionState (Get-EbicsVersionStateRoot $RepoRoot $StateRoot); return ('0.{0:D4}' -f [int]$s.hwm) }
+<#
+    ONE place that turns the global counter into the printed version, so every script, artifact
+    name and header agrees by construction.
+
+    THREE DECIMALS, always. The HMI displays exactly three digits after the point, so a
+    four-digit build number could not be read off the bike at all - which is the whole reason
+    this format exists. Owner decision 2026-09-03.
+
+    The major part is derived rather than hardcoded to "0.", so the counter passing 999 rolls
+    into 1.000 instead of quietly printing four decimals again. Counter and printed version stay
+    one-to-one either way.
+
+    NOTE ON HISTORY: releases issued before this change were printed with four decimals from the
+    SAME counter. 0.0496 and 0.496 are the same number written two ways; nothing was renumbered
+    and the sequence never restarts.
+#>
+function Format-EbicsVersion {
+    param([Parameter(Mandatory=$true)][int]$Number)
+    return ('{0}.{1:D3}' -f [math]::Floor($Number / 1000), ($Number % 1000))
+}
+
+function Get-EbicsCanonicalHwm { param([string]$RepoRoot,[string]$StateRoot="") $s=Get-EbicsVersionState (Get-EbicsVersionStateRoot $RepoRoot $StateRoot); return (Format-EbicsVersion ([int]$s.hwm)) }
 
 function Test-EbicsVersionIdentity {
     param([string]$Version, [string]$HeaderPath, [string]$ManifestPath, [string]$ArtifactPath, [string]$Variant = "normal")
@@ -133,4 +154,4 @@ function Test-EbicsVersionIdentity {
     }
     return $true
 }
-Export-ModuleMember -Function Get-EbicsVersionStateRoot,Initialize-EbicsVersionState,Sync-EbicsCanonicalHwm,Reserve-EbicsCanonicalVersion,Get-EbicsCanonicalHwm,Test-EbicsVersionIdentity
+Export-ModuleMember -Function Format-EbicsVersion,Get-EbicsVersionStateRoot,Initialize-EbicsVersionState,Sync-EbicsCanonicalHwm,Reserve-EbicsCanonicalVersion,Get-EbicsCanonicalHwm,Test-EbicsVersionIdentity

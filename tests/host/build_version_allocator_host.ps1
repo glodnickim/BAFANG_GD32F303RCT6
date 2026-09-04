@@ -11,8 +11,8 @@ try {
     Initialize-EbicsVersionState $root -AllowInitialMigration | Out-Null
     $a = Reserve-EbicsCanonicalVersion 'C:\worktree-A' $root 1
     $b = Reserve-EbicsCanonicalVersion 'C:\worktree-B' $root 2
-    if ($a.Versions[0] -ne '0.0460' -or $b.Versions[0] -ne '0.0461' -or $b.Versions[1] -ne '0.0462') { throw 'sequential/pair allocation failed' }
-    if ((Get-EbicsCanonicalHwm 'C:\worktree-C' $root) -ne '0.0462') { throw 'shared HWM failed' }
+    if ($a.Versions[0] -ne '0.460' -or $b.Versions[0] -ne '0.461' -or $b.Versions[1] -ne '0.462') { throw 'sequential/pair allocation failed' }
+    if ((Get-EbicsCanonicalHwm 'C:\worktree-C' $root) -ne '0.462') { throw 'shared HWM failed' }
     $jobs = 1..4 | ForEach-Object { Start-Job -ArgumentList $module,$root -ScriptBlock { param($m,$r) Import-Module $m -Force; (Reserve-EbicsCanonicalVersion 'C:\other-worktree' $r 1).Versions[0] } }
     $v = @($jobs | Wait-Job | Receive-Job); $jobs | Remove-Job
     if (($v | Sort-Object -Unique).Count -ne 4) { throw 'duplicate allocation under concurrency' }
@@ -23,9 +23,9 @@ try {
     Initialize-EbicsVersionState $syncRoot -AllowInitialMigration | Out-Null
     $sync = Sync-EbicsCanonicalHwm 'C:\worktree-sync' $syncRoot 470 'host-test authoritative issued evidence'
     if (-not $sync.Changed -or $sync.PreviousHwm -ne 459 -or $sync.Hwm -ne 470 -or $sync.NewVersionReserved) { throw 'controlled HWM reconciliation failed' }
-    if ((Get-EbicsCanonicalHwm 'C:\worktree-sync-check' $syncRoot) -ne '0.0470') { throw 'reconciled HWM was not persistent' }
+    if ((Get-EbicsCanonicalHwm 'C:\worktree-sync-check' $syncRoot) -ne '0.470') { throw 'reconciled HWM was not persistent' }
     $postSync = Reserve-EbicsCanonicalVersion 'C:\worktree-sync-reserve' $syncRoot 1
-    if ($postSync.Versions[0] -ne '0.0471') { throw 'reservation after HWM reconciliation was not monotonic' }
+    if ($postSync.Versions[0] -ne '0.471') { throw 'reservation after HWM reconciliation was not monotonic' }
     $syncState = Get-Content -LiteralPath (Join-Path $syncRoot 'M820_BL820.json') -Raw | ConvertFrom-Json
     if ($syncState.hwm_reconciled_from -ne 459 -or $syncState.hwm_reconciliation_evidence -ne 'host-test authoritative issued evidence') { throw 'reconciliation evidence was not retained after reservation' }
     $failed = $false
@@ -71,14 +71,14 @@ try {
     # The post-build gate must reject a deliberately mismatched published identity.
     $identity = Join-Path $root 'identity'
     New-Item -ItemType Directory -Force -Path $identity | Out-Null
-    $header = Join-Path $identity 'build_version.h'; $manifest = Join-Path $identity 'manifest.json'; $artifact = Join-Path $identity '0.0999_M820_BL820.bin'
-    Set-Content -LiteralPath $header -Value '#define EBICS_BUILD_VERSION "0.0999"' -Encoding ascii
-    '{"version":"0.0999"}' | Set-Content -LiteralPath $manifest -Encoding UTF8
+    $header = Join-Path $identity 'build_version.h'; $manifest = Join-Path $identity 'manifest.json'; $artifact = Join-Path $identity '0.999_M820_BL820.bin'
+    Set-Content -LiteralPath $header -Value '#define EBICS_BUILD_VERSION "0.999"' -Encoding ascii
+    '{"version":"0.999"}' | Set-Content -LiteralPath $manifest -Encoding UTF8
     New-Item -ItemType File -Path $artifact | Out-Null
-    Test-EbicsVersionIdentity '0.0999' $header $manifest $artifact | Out-Null
-    '{"version":"0.0998"}' | Set-Content -LiteralPath $manifest -Encoding UTF8
+    Test-EbicsVersionIdentity '0.999' $header $manifest $artifact | Out-Null
+    '{"version":"0.998"}' | Set-Content -LiteralPath $manifest -Encoding UTF8
     $failed = $false
-    try { Test-EbicsVersionIdentity '0.0999' $header $manifest $artifact | Out-Null } catch { $failed = $true }
+    try { Test-EbicsVersionIdentity '0.999' $header $manifest $artifact | Out-Null } catch { $failed = $true }
     if (-not $failed) { throw 'identity mismatch was published' }
     Write-Output 'build_version_allocator_host: PASS'
 } finally {

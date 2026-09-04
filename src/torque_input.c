@@ -216,9 +216,16 @@ static uint16_t update_run_asym_filter(uint16_t target_native)
 	int32_t target_q = (int32_t)target_native << TORQUE_ASSIST_FILTER_Q_SHIFT;
 	int32_t error_q = target_q - run_asym_q;
 	if (error_q != 0) {
-		int32_t filter_ticks = (error_q > 0) ?
-			((int32_t)TORQUE_RUN_ASYM_RISE_MS * TORQUE_INPUT_TICKS_PER_MS) :
-			((int32_t)TORQUE_RUN_ASYM_FALL_MS * TORQUE_INPUT_TICKS_PER_MS);
+		int32_t filter_ms = (error_q > 0) ?
+			(int32_t)TORQUE_RUN_ASYM_RISE_MS :
+			(int32_t)TORQUE_RUN_ASYM_FALL_MS;
+		/* A zero configured fall is a deliberate test bypass, not a zero
+		 * divisor: copy the current filtered torque target this control tick. */
+		if (filter_ms == 0) {
+			run_asym_q = target_q;
+			return target_native;
+		}
+		int32_t filter_ticks = filter_ms * TORQUE_INPUT_TICKS_PER_MS;
 		int32_t step_q = error_q / filter_ticks;
 		if (step_q == 0) {
 			if (target_native == 0U) {

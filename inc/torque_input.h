@@ -12,7 +12,7 @@
  * 84 kg at 2320 mV. The default conversion is piecewise-linear through
  * those measured points, so the firmware is usable without load calibration.
  * FW-129: a user load calibration corrects the sensor GAIN only - the measured delta is
- * referred back to the default sensor and then read on the SAME piecewise characteristic,
+ * referred back to the default sensor and then read on the SAME piecewise characteristic,TORQUE_RUN_ASYM_FALL_MS
  * so calibrating moves where the curve sits without changing its shape. span_native keeps
  * its meaning either way: the native delta this sensor produces at 60.00 kg. The zero point
  * is always automatic and never writable. The assist deadband is a separate
@@ -125,7 +125,33 @@
  * unlike the old window this does NOT keep growing as cadence drops further).
  */
 #define TORQUE_RUN_ASYM_RISE_MS          120U  /* fast: flat ~193 ms first-positive-demand, any cadence */
-#define TORQUE_RUN_ASYM_FALL_MS          350U  /* slow: 58% ripple attenuation beyond AFILT @ 20 rpm, see host S5 */
+/*
+ * Fall smoothing, measured rather than guessed, and SELECTED BY THE TEST SUITE rather than by
+ * taste. tests/host/torque/torque_run_asym_host.c S5 drives the real per-leg ripple through the
+ * real module; the numbers are RUN peak-to-peak in native units (27 native ~ 1 kg). The ease-off
+ * cost is ~4x this constant (exponential with this time constant, plus the exact-zero snap):
+ *
+ *   FALL_MS | 20 rpm | 40 rpm | 60 rpm | 80 rpm | ease-off | existing suites
+ *        0  |   142  |   126  |   106  |    89  | instant  | S5 bound (100) FAILS, FW-112 v2 x24 FAIL
+ *      175  |    91  |    80  |    57  |    42  |  ~0.70 s | FW-112 v2 x2 FAIL
+ *      225  |     -  |     -  |     -  |     -  |  ~0.90 s | FW-112 v2 x1 FAIL
+ *      250  |    76  |    67  |    46  |    34  |  ~1.00 s | ALL GREEN  <- shipped
+ *      350  |    62  |    55  |    38  |    28  |  ~1.40 s | ALL GREEN, too long on ease-off
+ *
+ * 250 is the FASTEST fall at which every existing behavioural test still passes. Below it,
+ * fw112_run_rearm_recovery_host.c loses first its "warm RUN is high" precondition and then its
+ * re-seed tolerance (S1 R3) - i.e. the estimator stops holding a warm value long enough for the
+ * rearm behaviour those cards pinned. Lowering it further is a real change to that behaviour and
+ * needs its own card, not a looser test.
+ *
+ * What it has to separate: a crank dead spot lasts 110-150 ms at riding cadence, a deliberate
+ * ease-off lasts seconds. It does NOT lengthen a stop - when pedalling ceases the demand is
+ * zeroed in the same tick by a different path (pedaling_active), so this constant only ever
+ * shapes a REDUCTION while the rider keeps pedalling.
+ *
+ * 0 remains legal and is a deliberate bypass seam (exact target this tick), not a divisor bug.
+ */
+#define TORQUE_RUN_ASYM_FALL_MS          250U
 
 typedef enum {
 	TORQUE_CAL_SOURCE_DEFAULT = 0,

@@ -65,6 +65,21 @@ $suites = @(
        Modules = @((Join-Path $root 'src\walk_assist_motor.c'),
                    (Join-Path $root 'src\walk_speed_controller.c'))
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-130 Walk Assist governor: G532 ramp, centred gear band, wheel fuse (real modules)'
+       # Reports SKIPPED when built with WALK_GOVERNOR_ENABLE=0 rather than passing vacuously,
+       # so an A-side build cannot look green for behaviour it does not implement.
+       Harness = Join-Path $PSScriptRoot 'fw130_walk_governor_host.c'
+       Modules = @((Join-Path $root 'src\walk_assist_motor.c'),
+                   (Join-Path $root 'src\walk_speed_controller.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-131 canonical rotor angle: continuity across the formula handover (real rotor_angle.c)'
+       # L0 models the LEGACY pair of formulas alongside the new module, so the improvement is a
+       # measured number: the old code stepped 24 deg even exactly on a Hall edge and up to 36 deg
+       # mid-sector. Everything after it asserts the step is gone.
+       Harness = Join-Path $PSScriptRoot 'fw131_rotor_angle_host.c'
+       Modules = @(Join-Path $root 'src\rotor_angle.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+
     @{ Name = 'FW-129 unit domain: calibration invariance, mode equations, low-duty handover'
        Harness = Join-Path $PSScriptRoot 'fw129_unit_domain_host.c'
        # The whole assist arithmetic against the shipped modules: sensor calibration ->
@@ -441,6 +456,19 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
         Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward",
                     "-DASSIST_DYNAMICS_C_PATH=$assistDynamicsCPathForward", "-DMOTOR_CORE_C_PATH=$motorCoreCPathForward") },
+    @{ Name = 'QZERO Quiet Zero PI integral fade at Iq_ref=0 (real quiet_zero.c + real 16 kHz slew owner + PI_control replica + wiring guards)'
+       Harness = Join-Path $PSScriptRoot 'qzero_quiet_zero_host.c'
+       # Links the REAL state machine and the REAL 16 kHz slew owner, so the entry edge is the
+       # production definition of "Iq_ref first became exactly 0" rather than a hand-written one.
+       # The effect on the regulators is measured against a byte-faithful PI_control() replica
+       # (main.c/FOC.c are the ARM entry point/ISR core - same reasoning as
+       # stopclick_c1_pi_integral_host.c, whose replica this suite reuses); the wiring is proven
+       # by source-text guards over main.c and ride_control.c.
+       Modules = @((Join-Path $root 'src\quiet_zero.c'),
+                   (Join-Path $root 'src\fast_iq_slew.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DFOC_C_PATH=$focCPathForward",
+                   "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
     @{ Name = 'QS-3D 16 kHz final Iq slew parity (real 16 kHz owner + real 4 kHz owner, lockstep)'
        Harness = Join-Path $PSScriptRoot 'qs3d_16khz_slew_host.c'
        # Links the REAL 16 kHz slew owner (fast_iq_slew.c) and the REAL legacy 4 kHz owner

@@ -43,6 +43,8 @@ src/fast_iq_slew.c
 src/pas_raw.c
 src/pas_trace.c
 src/power_curve.c
+src/quiet_zero.c
+src/rotor_angle.c
 src/ride_control.c
 src/ride_episode.c
 src/ride_session.c

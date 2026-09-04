@@ -91,6 +91,19 @@
 #endif
 #define R_TEMP_PULLUP 3500
 #define SIXSTEPTHRESHOLD 10000
+// FW-131: one canonical rotor angle (see inc/rotor_angle.h for the defect and the mechanism).
+// 1 = canonical base + bumpless handover + bounded extrapolation; 0 = the legacy two-formula
+// branch in main.c, byte for byte. This is commutation, so the A/B is two .bin files.
+#ifndef CANONICAL_ANGLE_ENABLE
+#define CANONICAL_ANGLE_ENABLE 1
+#endif
+#if (CANONICAL_ANGLE_ENABLE != 0) && (CANONICAL_ANGLE_ENABLE != 1)
+#error "CANONICAL_ANGLE_ENABLE must be 0 (legacy two-formula angle) or 1 (FW-131 canonical angle)"
+#endif
+// FW-131: how long without a Hall edge counts as "the rotor has stopped, no edge is coming".
+// Expressed in multiples of the filtered sector period, so it scales with speed instead of being
+// a fixed time that means different things at 5 and at 50 electrical rev/s.
+#define CANONICAL_ANGLE_STALL_PERIODS 4U
 #define SPEED_PLL 0 //1 for using PLL, 0 for angle extrapolation
 #define P_FACTOR_PLL 10
 #define I_FACTOR_PLL 10
@@ -211,10 +224,67 @@
 #define WA_KP_SHIFT  4      //   3/16 ~= 0.19 i_q per 0.01km/h error: full error (~600) saturates ceiling => kick from standstill
 #define WA_KI_SHIFT  11     // I gain: integral term = wa_integral >> WA_KI_SHIFT (larger = slower trim @4kHz). TUNE.
 #define WA_KICK_SPEED 50    // Speedx100 < 0.5 km/h at engage = standstill -> apply kick; above -> resume without kick
-#define WALK_ASSIST_CURRENT_DEFAULT 30 // % of phase_current_max stored in Para1[36]
-#define WALK_ASSIST_RPM_DEFAULT     20 // raw chainring RPM stored in Para1[60..61]
+// FW-130: 30 -> 15 -> 25. The byte finally reaches the motor (it had no reader since FW-060), so
+// the number now means something. Owner decision 2026-09-03, after the first walk test under load
+// reported "no force": 25 % of PH_CURRENT_MAX is 175 Iq, which the module clamps to its absolute
+// WA ceiling WA_MOTOR_IQ_ABS_MAX = 157 Iq (~15 A). So the default now sits AT that hard ceiling -
+// deliberately: everything from ~23 % up resolves to the same 157, and the setting only has room
+// to go DOWN from here. Raising the force further means raising WA_MOTOR_IQ_ABS_MAX, which is a
+// separate safety decision, not a slider.
+// A controller with an older value stored in Para1[36] keeps it until it is changed in Canable.
+#define WALK_ASSIST_CURRENT_DEFAULT 25 // % of phase_current_max stored in Para1[36]
+// FW-130 zamknięcie 2026-09-03: 20 -> 30. 20 było domyślne od FW-051, ale jazda pokazała, że pod
+// obciążeniem silnik przy celu 20 nie dociąga (18-19 ERPS z pełnym prądem, poniżej pasa regulacji)
+// i pracuje nierówno. 30 jest wartością potwierdzoną jazdą razem z Walk current 25 %.
+#define WALK_ASSIST_RPM_DEFAULT     30 // raw chainring RPM stored in Para1[60..61]
 #define WALK_ASSIST_RPM_MIN         20
 #define WALK_ASSIST_RPM_MAX         60
+
+//---------------------------------------------------------------------
+// FW-130: Walk Assist in the G532 character - one ramped demand limited by two soft ceilings.
+//
+// The FW-060..082 law was a speed PI on the motor current. Three measured consequences:
+// a fixed 40 Iq ceiling (5.7 % of PH_CURRENT_MAX) that no setting could raise, a ramp that rose
+// in 427 ms but fell in 1280 ms (stock G532 falls 5x FASTER than it rises, we fell 3x slower),
+// and a wheel-speed limit that was an on/off switch which zeroed the current and restarted the
+// session from scratch. FW-130 replaces the law: no integrator, a demand ramped at a constant
+// rate, and speed held by continuously lowering the current ceiling.
+//
+// 1 = FW-130 governor (B), 0 = the FW-060..082 speed PI (A). Both laws are compiled from
+// src/walk_speed_controller.c so an A/B ride is two .bin files, not two branches.
+// Overridable from the command line so the host suite can run BOTH laws in one pass.
+#ifndef WALK_GOVERNOR_ENABLE
+#define WALK_GOVERNOR_ENABLE 1
+#endif
+#if (WALK_GOVERNOR_ENABLE != 0) && (WALK_GOVERNOR_ENABLE != 1)
+#error "WALK_GOVERNOR_ENABLE must be 0 (A: FW-060..082 speed PI) or 1 (B: FW-130 governor)"
+#endif
+
+// Ramp character taken from the G532 reverse, normalised to the walk ceiling (= full scale) and
+// expressed in 4 kHz control ticks. Deliberately NOT a fixed time to full current: at a lower
+// ceiling the same rate reaches the target proportionally sooner, exactly as the stock does.
+#define WA_RISE_FULL_SCALE_TICKS  2200  // 550 ms full-scale rise
+// FW-130.1: 440 (110 ms) -> 1000 (250 ms). The stock figure is 110 ms, but the stock has a
+// separate downstream slew after it and we do not: Walk Assist bypasses the 16 kHz final slew
+// entirely, so this IS the motor current's own fall. At 110 ms any momentary interruption became
+// a complete collapse to zero, the rotor stopped behind the freewheel, and the recovery had to
+// rebuild over a 550 ms rise - felt on the bike as on/off pulsing. 250 ms is still five times
+// faster than the FW-060..082 law's 1280 ms, so the anti-overshoot property is kept.
+#define WA_FALL_FULL_SCALE_TICKS  1000  // 250 ms full-scale fall
+
+// Gear-RPM governor. The band is CENTRED on the bank's own target (owner requirement
+// 2026-09-03: "sterowanie ma oscylowac wokol ustawionej predkosci rpm"), and proportional so the
+// feel is the same at 20 and at 60 chainring rpm. Full current up to target-band, zero at
+// target+band, linear between. Start wide (FW-130 card SS34/43): a narrow band without an
+// integrator is high gain and invites hunting. Tighten only after a ride log.
+#define WA_GOV_BAND_PCT             15  // % of the target ERPS
+#define WA_GOV_BAND_MIN_ERPS         4  // floor so the low end of the 20..60 rpm range stays sane
+
+// Wheel speed is the fuse, never the controlled value: it tapers the ceiling below the per-bank
+// cut-off, forces an immediate zero AT the cut-off (a safety limit may clamp without a ramp),
+// and only above cut-off + margin is the whole session torn down and the start re-armed.
+#define WA_WHEEL_TAPER_X100        150  // 1.50 km/h of taper below the cut-off
+#define WA_WHEEL_HARD_MARGIN_X100  100  // 1.00 km/h above it before the session is dropped
 // Start boost: raised current ceiling at low speed so the initial shove actually moves the bike.
 // Ride test 0.0133: launch too weak at the very first moment, then runaway until the overspeed cut.
 // Requested: launch x2, hold power /2. Launch is now an ABSOLUTE % of phase current (independent of the
@@ -307,6 +377,63 @@
 #else
 #define POWER_STAGE_STOP_TICKS 4000   // production: ~1 s
 #endif
+/*
+ * QZERO (Quiet Zero) - A/B switch and safety bound. Mechanism and rationale: inc/quiet_zero.h.
+ *
+ * QUIET_ZERO_ENABLE is the whole A/B axis of this card, and it gates ONE thing: whether the
+ * 16 kHz FOC ISR applies the Quiet Zero action. The zero-policy word is published either way, so
+ * the two images differ only in the consumer.
+ *
+ *   0 = A, baseline: STOP-CLICK-C1 as it ships today. After Iq_ref reaches 0 the integrators
+ *       keep regulating measured current to zero, PI_iq parks at u_q ~= BEMF and the rotor
+ *       free-wheels for a long time.
+ *   1 = B, Quiet Zero: on a normal rider release or a reverse/safety release the integrators are
+ *       faded to exact zero over QZERO_BLEND_TICKS and held there while the reference is zero.
+ *
+ * QZERO_ABORT_CURRENT bounds the P-only hold. During the hold nothing but the proportional term
+ * limits winding current, so measured |Iq|/|Id| at or above this ends the hold and returns the
+ * full zero-current PI (see quiet_zero_tick()). Half of PH_CURRENT_MAX: comfortably inside the
+ * current the drive is allowed to COMMAND on any ordinary pull, an eighth of FOC.c's own
+ * hard-fault trip (PH_CURRENT_MAX<<2), and far above what a decoupled rotor spinning down
+ * through the freewheel should ever draw. If a ride log shows the abort counter climbing, this
+ * constant - not the fade - is the first thing to look at.
+ */
+#ifndef QUIET_ZERO_ENABLE
+#define QUIET_ZERO_ENABLE 1
+#endif
+#if (QUIET_ZERO_ENABLE != 0) && (QUIET_ZERO_ENABLE != 1)
+#error "QUIET_ZERO_ENABLE must be 0 (A: baseline) or 1 (B: Quiet Zero)"
+#endif
+#define QZERO_ABORT_CURRENT (PH_CURRENT_MAX >> 1)
+/*
+ * QZERO-3 note: the seeded low-speed handback has NO compile switch on purpose. src/quiet_zero.c
+ * is deliberately free of config.h - every input arrives by value so the state machine runs on a
+ * host - and a macro it cannot see would have been a switch that silently did nothing. The A/B is
+ * build against build: 0.498 is the same firmware WITHOUT the seed.
+ */
+
+/*
+ * Rotor speed below which the drive must not produce ANY q-axis current, in erps.
+ *
+ * Moved here from ride_control.c so the two mechanisms that depend on it cannot drift apart.
+ * FW-048 owns the reason: below ~5.56 erps main.c switches the commutation angle from the
+ * interpolated formula to the fixed six-step one (SIXSTEPTHRESHOLD, TIMER2 at 500 kHz, six Hall
+ * events per electrical revolution; hysteresis puts the up-switch at 8.33 erps). The two formulas
+ * do not agree, so the angle JUMPS - and any current still flowing jumps with it. That step, not
+ * the assist fade, is the clunk historically heard exactly at standstill, which is also why
+ * stretching the release ramp never removed it.
+ *
+ * 10 erps = 7.5 chainring rpm (erps = chainring rpm x 4/3), i.e. a deliberate margin above the
+ * 5.56 switch. Two consumers, one number:
+ *   - ride_control.c: FW-048 coast release forces the REFERENCE to exact zero below it;
+ *   - quiet_zero.c:   QZERO ends the P-only hold below it. This one is not optional - QZERO
+ *     produces current from the ABSENCE of the back-EMF-matching voltage, so a zero reference
+ *     alone would no longer keep the angle-switch zone current-free. Nothing is lost: energy
+ *     scales with the square of speed, so at 4-7 chainring rpm the drivetrain holds well under
+ *     1 % of its cruise energy and electromagnetic braking there buys no measurable time.
+ */
+#define RIDE_COAST_RELEASE_ERPS 10
+
 // FW-117.1: zakaz laczenia dwoch oddzielnych eksperymentow FW-117 w jednym obrazie. Obraz
 // diagnostyczny (CAN_DIAGNOSTICS_ENABLE=1) zbiera lifecycle trace mostka wokol jednej,
 // wybranej krawedzi (FW117_TRACE_TRIGGER_EVENT w inc/fw117_trace.h); FW117_BRIDGE_TIMING_TEST

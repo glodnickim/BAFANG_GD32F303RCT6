@@ -59,6 +59,8 @@ OF SUCH DAMAGE.
 #include "sample_window.h"       /* FW-127C: sampling window from APPLIED geometry     */
 #include "current_feedback.h"    /* FW-127D: validity, last-valid and sample age       */
 #include "iq_chain.h"            /* FW-128A: named q-current demand stages             */
+#include "quiet_zero.h"          /* QZERO: controlled PI integral fade at Iq_ref == 0  */
+#include "rotor_angle.h"         /* FW-131: one canonical rotor angle, bumpless handover */
 #include "pas_sampler.h"         /* PRE-FW128: PAS sampled in the 4 kHz ISR, not main  */
 #include "pas_cadence.h"         /* PRE-FW128: cadence period, epoch and validity      */
 #include "battery_current.h"     /* FW-128B1: battery-current filter on the sample clock */
@@ -205,7 +207,11 @@ float default_wh_km_for_level(uint8_t lvl);
 void Speed_processing(void);
 int16_t T_NTC(uint16_t ADC);
 float u32_to_deg=0.00000008381903171539;
+//FW-132: the 40 ms slow-loop period in 4 kHz control ticks. Named because two places now depend
+//on it meaning the same thing: the branch threshold and the backlog recovery below it.
+#define SLOW_LOOP_TICKS 160U
 uint16_t slow_loop_counter=0;
+volatile uint16_t slow_loop_peak=0;   //FW-132: worst observed backlog at branch entry (diagnostics)
 #if CAN_DIAGNOSTICS_ENABLE
 uint16_t t3100_counter=0;
 #endif
@@ -336,6 +342,16 @@ PI_control_t PI_speed;
  * foc_aw_tracking_reset(); read by diagnostics. See inc/main.h. */
 volatile uint8_t  foc_aw_saturated = 0;
 volatile uint32_t foc_aw_sat_ticks = 0;
+
+/*
+ * QZERO: Quiet Zero state, deliberately declared right beside the regulators it acts on.
+ *
+ * Written by runPIcontrol() (16 kHz FOC ISR) and by quiet_zero_reset() at the three bridge-off
+ * reset points foc_aw_tracking_reset() already names. It is NOT written on ordinary zero torque
+ * from the foreground - that is the STOP-CLICK-C1 defect, and this card does not reintroduce it
+ * through a new field. See inc/quiet_zero.h.
+ */
+static quiet_zero_t quiet_zero_state;
 
 /*
  * FOC-AW1: derive this controller's Q15 tracking gain Kaw = 1/gain_p, once, at boot.
@@ -666,6 +682,7 @@ uint16_t pwm_cutoff_tick=0;
 int32_t q31_angle_per_tic=0;
 //Rotor angle scaled from degree to q31 for arm_math. -180Ã‚Â°-->-2^31, 0Ã‚Â°-->0, +180Ã‚Â°-->+2^31
 const int32_t deg_30 = 357913941;
+static rotor_angle_state_t rotor_angle_state;   //FW-131: ISR-owned, see inc/rotor_angle.h
 int32_t  switchtime[3];   /* FW-127A: REQUESTED SVPWM geometry (signed, may be illegal) */
 uint16_t pwm_applied[3];  /* FW-127A: APPLIED geometry - what the timer actually got     */
 //FW-042: written in TIMER2_IRQHandler (Hall capture), read in the main loop and by Walk
@@ -691,6 +708,9 @@ int32_t bat_current_offset=CAL_BAT_I_OFFSET; //zero-current ADC offset, calibrat
 float soc_mAs_acc=0;                 //charge accumulator [mA*s] within current 1s window
 uint16_t soc_tick_counter=0;        //counts reg_ADC ticks (~4kHz) towards 1s
 uint8_t soc_one_second_flag=0;
+//FW-134: seconds the bike has actually been MOVING this session. Serialized into CAN 0x3210
+//bytes 4..5 - see the increment in the 1 Hz block and sendCAN_3210().
+volatile uint16_t ride_seconds=0;
 uint32_t rest_seconds=0;            //consecutive seconds with |I| < I_REST_MA
 uint32_t soc_save_seconds=0;        //seconds since last flash save
 float soc_last_saved=0;            //SOC_real at last save
@@ -796,6 +816,8 @@ float soc_anchor_start_mah=0;     //remaining_mah captured when the anchor was s
 uint32_t idle_ticks_slow=0;       //auto-off: slow-loop (40 ms) ticks with no rider/comms activity
 volatile uint16_t comm_lost_ticks=0; //comms watchdog: slow-loop ticks since last HMI frame (reset in processCAN_Rx)
 volatile uint8_t comm_seen=0;     //comms watchdog: 1 after first HMI frame -> arms the watchdog (grace period at boot)
+extern volatile uint16_t cmd3005_seen;      //FW-132: 0x3005 frames seen (CAN_Display.c)
+extern volatile uint8_t  cmd3005_last_target; //FW-132: whom the last one was addressed to
 uint8_t auto_off_minutes=AUTO_OFF_MINUTES; //runtime auto-off timeout [min]; overwritten by HMI 0x6303
 uint32_t Speedx100_cumulated=0;
 uint16_t last_valid_speed_x100=0;          //FW-036: baseline for false-pulse (impossible-rise) rejection
@@ -1305,7 +1327,10 @@ int main(void)
             } //40/4000Hz=10ms torque sensor emulation (dev telemetry - OFF by default, own flag, own best-effort path outside can_tx_queue - FW-110)
 #endif
 
-            if (slow_loop_counter > 160){ //slow loop base tick 40ms (160/4000Hz); CAN messages use own counters
+            if (slow_loop_counter > SLOW_LOOP_TICKS){ //slow loop base tick 40ms (160/4000Hz); CAN messages use own counters
+            	//FW-132: how late this pass actually was, kept as a running worst case. Without it
+            	//"the heartbeat rhythm slips" stays an argument; with it, it is a number in the log.
+            	if(slow_loop_counter > slow_loop_peak) slow_loop_peak = slow_loop_counter;
             	gd_eval_led_toggle(LED2);
 #ifdef PRINTDEBUG_UART
 
@@ -1321,12 +1346,40 @@ int main(void)
  */
             	p++;
 
-            	static uint8_t hb_tick=0, speed_tick=0, cad_tick=0, misc_tick=0, s202_tick=0;
-            	if(++hb_tick    >=12){hb_tick=0;    sendCAN_status_broadcast(&MS);}     //12x40ms=480ms  (orig 490ms)
-            	if(++speed_tick >= 7){speed_tick=0; sendCAN_Poll(&MP,&MS,0x3201);}   // 7x40ms=280ms  (orig 280ms)
-            	if(++cad_tick   >=37){cad_tick=0;   sendCAN_Poll(&MP,&MS,0x3200);}   //37x40ms=1480ms (orig 1500ms)
-            	if(++misc_tick  >= 8){misc_tick=0;  sendCAN_Poll(&MP,&MS,0x3205);}
-            	if(++s202_tick >= 3){s202_tick=0;  sendCAN_3202();}              // 3x40ms=120ms  (orig 100ms)
+            	/*
+            	 * FW-133: cyclic frames to the HMI, now on the STOCK periods.
+            	 *
+            	 * The reference table in BAFANG_CAN_STOCK_VERIFIED_REFERENCE.md SS10 is read out of the
+            	 * factory firmware's own descriptor table, not estimated from a capture, so these are
+            	 * the numbers the display was designed around. We were sending 0x3000 twenty times
+            	 * and 0x3205 twelve times more often than the factory does, and 0x1200/0x320F/0x3000
+            	 * all in one tick - three frames at once into a 16-slot queue that drops silently
+            	 * when full (FW-132). Net effect of this change is roughly a quarter less traffic
+            	 * from us, and normally one frame offered per pass instead of a burst.
+            	 *
+            	 * The counts below are the stock period divided by this branch's 40 ms, rounded to
+            	 * the nearest whole tick. Two cannot be hit exactly on a 40 ms base and are called
+            	 * out honestly:
+            	 *
+            	 *   0x3202  stock 99 ms  -> 3 ticks = 120 ms (+21 %). 2 ticks would be 80 ms, i.e.
+            	 *                          FASTER than stock and more traffic - the wrong direction.
+            	 *   0x3201  stock 247 ms -> 6 ticks = 240 ms (-3 %), better than the old 7 (280 ms).
+            	 *
+            	 * uint16_t on purpose: 0x3000's divider is 248, which is close enough to a uint8_t's
+            	 * ceiling that a future edit could silently wrap it.
+            	 */
+            	static uint16_t hb1200_tick=0, hb320F_tick=0, hb3000_tick=0,
+            	                speed_tick=0, cad_tick=0, misc_tick=0, s202_tick=0, s3210_tick=0;
+            	if(++hb1200_tick >= 12){hb1200_tick=0; sendCAN_status_frame(&MS,0);} //  480 ms (stock  495)
+            	if(++hb320F_tick >= 50){hb320F_tick=0; sendCAN_status_frame(&MS,1);} // 2000 ms (stock 1980)
+            	if(++hb3000_tick >=248){hb3000_tick=0; sendCAN_status_frame(&MS,2);} // 9920 ms (stock 9900)
+            	if(++speed_tick  >=  6){speed_tick=0;  sendCAN_Poll(&MP,&MS,0x3201);} //  240 ms (stock  247)
+            	if(++cad_tick    >= 50){cad_tick=0;    sendCAN_Poll(&MP,&MS,0x3200);} // 2000 ms (stock 1980)
+            	if(++misc_tick   >= 99){misc_tick=0;   sendCAN_Poll(&MP,&MS,0x3205);} // 3960 ms (stock 3960, exact)
+            	if(++s202_tick   >=  3){s202_tick=0;   sendCAN_3202();}               //  120 ms (stock   99)
+            	//FW-134: the frame whose bytes 4..5 the stock controller steps once per second while
+            	//moving. 25 x 40 ms = 1000 ms; stock table says 990 ms. See sendCAN_3210().
+            	if(++s3210_tick  >= 25){s3210_tick=0;  sendCAN_3210();}               // 1000 ms (stock  990)
             	// filtr EMA /16 surowego ADC temperatury (wzorzec jak filtr napiecia), tlumi szum/glitch
             	// TODO(temp-sensor): detekcja rozwartego (ADC~4095) / zwartego (ADC~0) NTC i fail-safe
             	static uint32_t temp_adc_cumulated = 0;
@@ -1336,6 +1389,24 @@ int main(void)
             	MS.int_Temperature = (int16_t)(T_NTC(temp_adc_cumulated >> 4) / 10) + TEMP_OFFSET_C; //T_NTC returns 0.1 C (stock M820 LUT); /10 -> degC; offset at source -> affects CAN/thermal/HMI
             	if(soc_one_second_flag){
             		soc_one_second_flag=0;
+            		/*
+            		 * FW-134: seconds of MOTION, for CAN frame 0x3210 bytes 4..5.
+            		 *
+            		 * The factory M510 capture (ON/WA/OFF, same display) shows this counter stepping
+            		 * +1 exactly once per second while the bike moves and standing still otherwise -
+            		 * including while Walk Assist is held but the bike is stationary. Its window
+            		 * matched the reported Walk Assist icon behaviour precisely: the icon appears
+            		 * when the MODE is selected (the display knows that by itself, it sent 6300)
+            		 * and BLINKS while the bike is moving.
+            		 *
+            		 * "Moving" is taken from the wheel OR the motor on purpose. At walking pace one
+            		 * wheel pulse can be ~2.6 s apart, which is right at the speed-stop timeout, so
+            		 * wheel speed alone would flicker to zero exactly during Walk Assist - the one
+            		 * case this counter exists for. The motor is unambiguous there.
+            		 */
+            		if(MS.Speedx100 > 0 || ui16_erps >= RIDE_COAST_RELEASE_ERPS){
+            			if(ride_seconds < 0xFFFFU) ride_seconds++;
+            		}
             		soc_update(); //1 Hz: coulomb -> SOC_real, OCV correction, SOC_display, range, periodic save
             		//apply limp-mode power scaling to the phase current limit (recompute base to avoid compounding)
             		limp_factor = compute_limp_factor(MS.soc_display);
@@ -1373,7 +1444,26 @@ int main(void)
             		uint32_t implied_x100 = (uint32_t)MP.wheel_cirumference*(SPEED_TIMEBASE_HZ/1000U)*360/((uint32_t)MP.pulses_per_revolution*speed_silence_ticks); //FW-103: same formula as Speed_processing(), same named rate
             		if((uint32_t)MS.Speedx100*100 > implied_x100*(100+SPEED_DECAY_MARGIN_PCT)){ MS.Speedx100=(uint16_t)implied_x100; last_valid_speed_x100=MS.Speedx100; } //FW-036: track decayed baseline
             	}
-				slow_loop_counter = 0;
+				/*
+				 * FW-132: the 40 ms rhythm used to be reset to zero here, which THREW AWAY every
+				 * period the main loop was late by. The counter itself is exact (it is stepped by
+				 * the 4 kHz control tick), but this branch only runs when the main loop gets to
+				 * it, so a 100 ms stall used to cost two whole periods of every frame the display
+				 * needs - permanently, because nothing ever caught up.
+				 *
+				 * Subtracting the period instead recovers ordinary jitter: the next pass simply
+				 * comes early by however much this one was late, and the AVERAGE rate is the
+				 * nominal one again.
+				 *
+				 * The cap is what keeps that from becoming a burst. If the backlog is a whole
+				 * period or less, subtracting leaves the counter below the threshold, so the
+				 * branch cannot fire twice in a row. A bigger backlog is DISCARDED on purpose:
+				 * catching up four missed periods by sending four bursts of frames would flood a
+				 * 16-slot queue and drop the very frames it was trying to recover. Slips that
+				 * large are recorded in slow_loop_peak instead of being papered over.
+				 */
+				if(slow_loop_counter < 2U*SLOW_LOOP_TICKS) slow_loop_counter -= SLOW_LOOP_TICKS;
+				else slow_loop_counter = 0;
 
 				if(adc_value[5]<2800)shutoffcounter++; //raw value is 4095 without button pressed, about 3300 with "down" button pressed and about 2400 with on/off button pressed.
 				else shutoffcounter=0;
@@ -1449,6 +1539,11 @@ int main(void)
             		//would be the same kind of stale carry-over FW-035 zeroes .out for. This is one
             		//of the three allowed reset points - see foc_aw_tracking_reset() in inc/main.h.
             		foc_aw_tracking_reset();
+            		//QZERO: same reset domain, same reasoning - the regulators are being zeroed
+            		//here with the bridge off, so a held Quiet Zero from the PREVIOUS run must not
+            		//outlive it. Legal here because FOC cannot run: ui_8_PWM_ON_Flag is 0.
+            		quiet_zero_reset(&quiet_zero_state);
+            		rotor_angle_reset(&rotor_angle_state); //FW-131: same reset domain as the regulators
             		switchtime[0]=_T>>1; switchtime[1]=_T>>1; switchtime[2]=_T>>1;
             		pwm_applied[0]=_T>>1; pwm_applied[1]=_T>>1; pwm_applied[2]=_T>>1;
             		timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
@@ -1559,6 +1654,8 @@ int main(void)
             			PI_iq.integral_part=0;
             			PI_id.integral_part=0;
             			foc_aw_tracking_reset(); //FOC-AW1: bridge going IDLE, regulators zeroed with it
+            			quiet_zero_reset(&quiet_zero_state); //QZERO: same reset domain - MOE was disabled two lines above
+            			rotor_angle_reset(&rotor_angle_state); //FW-131: same reset domain
             			bridge_lifecycle = BRIDGE_LIFECYCLE_IDLE;
             			neutral_dwell_active = 0;
             			dwell_timeout_counter=0;
@@ -2881,11 +2978,21 @@ void reg_ADC_processing(void)
 
     //--- wheel-speed safety pause; resume automatically 0.5 km/h below the cut-off ---
     uint16_t wa_speed_limit=assist_modes_get_wa_max_wheel_x100();
-    uint16_t wa_speed_resume=(wa_speed_limit>WA_SPEED_RESUME_HYST_X100) ?
-        wa_speed_limit-WA_SPEED_RESUME_HYST_X100 : 0;
+#if (WALK_GOVERNOR_ENABLE != 0)
+    //FW-130: the cut-off itself no longer pauses the session. walk_assist_motor tapers the
+    //ceiling below it and clamps to zero AT it, both without losing the ramp, so the return is
+    //one rise ramp instead of a fresh start. Dropping pushassist_flag is the heavy action - it
+    //re-arms everything - so it is reserved for the margin above the cut-off.
+    uint32_t wa_speed_stop32=(uint32_t)wa_speed_limit+WA_WHEEL_HARD_MARGIN_X100;
+    uint16_t wa_speed_stop=(wa_speed_stop32>0xFFFFUL)?0xFFFFU:(uint16_t)wa_speed_stop32;
+#else
+    uint16_t wa_speed_stop=wa_speed_limit;
+#endif
+    uint16_t wa_speed_resume=(wa_speed_stop>WA_SPEED_RESUME_HYST_X100) ?
+        wa_speed_stop-WA_SPEED_RESUME_HYST_X100 : 0;
     if(ui8_wa_speed_paused){
         if(MS.Speedx100<wa_speed_resume)ui8_wa_speed_paused=0;
-    }else if(MS.Speedx100>=wa_speed_limit){
+    }else if(MS.Speedx100>=wa_speed_stop){
         ui8_wa_speed_paused=1;
     }
     uint8_t walk_speed_ok=!ui8_wa_speed_paused;
@@ -3075,6 +3182,9 @@ void reg_ADC_processing(void)
             .walk_active = MS.pushassist_flag != RESET,
 			.position_calibration_active = MS.hall_angle_detect_flag > 1,
             .safety_cut_non_direction = non_direction_safety_cut,
+            //QZERO: the SERVICE subset of the line above, for the zero-policy only. It changes no
+            //cut decision - a load calibration still hard-cuts through safety_cut_non_direction.
+            .service_cut_active = torque_input_calibration_active(),
             //FW-030: throttle ported to the ride core. map() returns 0 while ADC < throttle_offset,
             //so a disconnected/unused throttle contributes nothing (offset is the natural gate).
 			//Scaled to full phase_current_max (throttle is level-independent, like a real throttle).
@@ -3728,11 +3838,80 @@ static void pi_iq_apply_inputs(void)
 void runPIcontrol(void){
 
 	pi_iq_apply_inputs();
+#if QUIET_ZERO_ENABLE
+	/*
+	 * QZERO: PHASE B of the release, decided here - after pi_iq_apply_inputs() has produced this
+	 * tick's Iq_ref and BEFORE either regulator runs, so the integral state the regulators use is
+	 * the commanded one and there is exactly one writer of it (this ISR).
+	 *
+	 * What this does NOT do, deliberately: it does not touch PI.out, does not turn MOE off, does
+	 * not run a cold PREPARE, does not jump the CCR to neutral, does not reseed theta and does not
+	 * command a negative Iq. The reference stays exactly 0; only the integrators are ramped down
+	 * and then pinned, which stops the integrator from holding u_q at the back-EMF and lets the
+	 * armed bridge brake the rotor again - the side effect the old foreground reset had, without
+	 * the step that made it audible.
+	 */
+	quiet_zero_action_t qz;
+	{
+		quiet_zero_input_t qz_in = {
+			.iq_ref = MS.i_q_setpoint,
+			/* Only a rider release or a reverse/safety release may arm it - see ride_control.c. */
+			.zero_policy_quiet =
+				fast_iq_slew_current_zero_policy() == FIS_ZERO_POLICY_QUIET,
+			.iq_measured = MS.i_q,
+			.id_measured = MS.i_d,
+			.abort_current = QZERO_ABORT_CURRENT,
+			/*
+			 * The hold must end before the commutation angle changes formula, because current
+			 * flowing through that jump is the step FW-048 identified as the clunk at
+			 * standstill. Same fact and same threshold FW-048 itself reads, so the two cannot
+			 * disagree - see RIDE_COAST_RELEASE_ERPS in inc/config.h.
+			 */
+			.rotor_erps = (int32_t)ui16_erps,
+			.min_brake_erps = RIDE_COAST_RELEASE_ERPS,
+			.iq_integral = PI_iq.integral_part,
+			.id_integral = PI_id.integral_part
+		};
+		quiet_zero_tick(&quiet_zero_state, &qz_in, &qz);
+	}
+	if(qz.apply_integral){
+		PI_iq.integral_part = qz.iq_integral;
+		PI_id.integral_part = qz.id_integral;
+	}
+	if(qz.freeze_aw || qz.clear_aw_edge){
+		/*
+		 * FOC-AW1 must not move the integral while it is commanded, and the residual published by
+		 * the previous cycle must not survive the entry/exit edge - a correction measured against
+		 * the held vector would show up as a step the first time the rider pulls again. This is
+		 * NOT foc_aw_tracking_reset(): that one is the foreground bridge-off hook and also clears
+		 * the requested vector and the saturation counter. Here only the two tracking inputs are
+		 * zeroed, in the ISR that owns them, on the cycle that owns them.
+		 */
+		PI_iq.aw_sat_error = 0;
+		PI_id.aw_sat_error = 0;
+		MS.u_q_sat_err = 0;
+		MS.u_d_sat_err = 0;
+	}
+#endif
 	q31_u_q_temp =  PI_control(&PI_iq);
 	//control id
 	  PI_id.recent_value = MS.i_d;
 	  PI_id.setpoint = MS.i_d_setpoint;
 	  q31_u_d_temp = -PI_control(&PI_id); //control direct current to zero
+#if QUIET_ZERO_ENABLE
+	if(qz.apply_integral){
+		/*
+		 * Re-assert the commanded integral AFTER the regulators ran. PI_control() adds one
+		 * gain_i*error increment of its own every call; overwriting it here means the fade
+		 * trajectory (and the exact zero of the hold) is what the integrator actually holds and
+		 * what a trace observes, and that single increment can never accumulate back into a
+		 * back-EMF-compensating voltage. PI.out keeps the increment - the P path is meant to
+		 * stay live - and is not touched.
+		 */
+		PI_iq.integral_part = qz.iq_integral;
+		PI_id.integral_part = qz.id_integral;
+	}
+#endif
 
 	  /* FOC-AW1: the REQUESTED vector, recorded before the limiter can touch it. This is the
 	   * split the whole card rests on - "what the regulators asked for" and "what the bridge
@@ -4012,6 +4191,7 @@ void ADC0_1_IRQHandler(void)
     // extrapolate rotorposition from filtered speed reading
     if(MS.hall_angle_detect_flag){//q31_rotorposition_absolute = q31_rotorposition_hall + (q31_t) ((float)(i8_recent_rotor_direction * (deg_30<<1) * ui16_tim2_recent)/(float)(uint32_tics_filtered>>3));//
 //Speed PLL not implemented yet.
+#if (CANONICAL_ANGLE_ENABLE == 0)
     	if(!ui8_6step_flag){
     	q31_rotorposition_absolute = q31_rotorposition_hall + MP.angle_correction +
     									+ (q31_t) (i8_recent_rotor_direction
@@ -4019,6 +4199,36 @@ void ADC0_1_IRQHandler(void)
     													/ (uint32_tics_filtered>>3)) << 16);//interpolate angle between two hallevents by scaling timer2 tics, 10923<<16 is 715827883 = 60deg
     	}
     	else q31_rotorposition_absolute = q31_rotorposition_hall - MP.reverse * deg_30; //offset of 30 degree to get the middle of the sector
+#else
+    	/*
+    	 * FW-131: the same two regimes, but as ONE angle - a shared base plus an offset that is
+    	 * either interpolated or held, handed over only where the two agree. See inc/rotor_angle.h
+    	 * for what the legacy pair above actually did (24 deg apart even ON a Hall edge, up to
+    	 * 36 deg mid-sector) and why any current flowing at that instant stepped with it.
+    	 */
+    	{
+    		uint32_t ra_period = uint32_tics_filtered >> 3;
+    		rotor_angle_input_t ra_in = {
+    			.hall_angle = q31_rotorposition_hall,
+    			.angle_correction = MP.angle_correction,
+    			.direction = i8_recent_rotor_direction,
+    			.tim2_recent = ui16_tim2_recent,
+    			.tics_filtered_8 = uint32_tics_filtered,
+    			.want_untrusted = ui8_6step_flag != 0,
+    			/* No edge for several sector periods: the rotor has stopped, none is coming. */
+    			.stalled = (ra_period > 0U) &&
+    				((uint32_t)ui16_tim2_recent >
+    					ra_period * CANONICAL_ANGLE_STALL_PERIODS),
+    			/*
+    			 * FW-131.1: the sign the legacy six-step branch used, for a cold boot that has
+    			 * not measured a direction yet. The first MEASURED direction latches inside the
+    			 * module and rules from then on, so this is a cold-start answer only.
+    			 */
+    			.fallback_sign = -MP.reverse
+    		};
+    		q31_rotorposition_absolute = rotor_angle_update(&rotor_angle_state, &ra_in);
+    	}
+#endif
 
     }
 
@@ -4325,7 +4535,7 @@ static const diag_can_ops_t diag_can_ops = { diag_can_transmit, diag_can_state }
  * were dropped between the builder and the wire with no error, no counter and nothing in the log.
  * Adding a frame below without bumping this number now fails the build instead.
  */
-#define DIAG_AGGREGATE_FIXED_FRAMES   16U   /* 0x10203..0x1020F, 0x10219, 0x10228, 0x10229, 0x1022A */
+#define DIAG_AGGREGATE_FIXED_FRAMES   17U   /* 0x10203..0x1020F, 0x10219, 0x10228, 0x10229, 0x1022A, 0x1022B */
 #define DIAG_AGGREGATE_FRAME_COUNT    (DIAG_AGGREGATE_FIXED_FRAMES)
 _Static_assert(DIAG_AGGREGATE_FRAME_COUNT <= DIAG_AGGREGATE_SNAPSHOT_MAX,
 	"diag_build_aggregate() builds more frames than diag_session can snapshot - the extra ones "
@@ -4746,6 +4956,41 @@ static void diag_build_aggregate(void){
 		transmit_message.tx_data[5] = (uint8_t)br;
 		transmit_message.tx_data[6] = (uint8_t)bi;
 		transmit_message.tx_data[7] = (uint8_t)bo;
+		DIAG_EMIT();
+	}
+
+	/*
+	 * FW-132 diag (ID 0x0001022B): IS THE HMI HEARTBEAT ACTUALLY GOING OUT, AND ON TIME?
+	 *
+	 * Every number here is CUMULATIVE, which is the whole point: the aggregate is one snapshot per
+	 * recorded session, not a stream, so a running total still answers the question while an
+	 * instantaneous value would not. See WALK_ASSIST_DZIALANIE.md for that trap.
+	 *
+	 *   Data1 = frames the TX queue DROPPED since boot (u16). The counter already existed in
+	 *           can_tx_queue.c and nothing read it, so a heartbeat lost to a full 16-slot queue
+	 *           left no trace anywhere. This is that trace.
+	 *   Data2 = worst slow-loop backlog (u16, 4 kHz ticks). 160 = on time; 320 = a whole period
+	 *           late. Turns "the rhythm slips" into a number.
+	 *   Data3 = 0x3005 frames seen (u16) - evidence for tightening that ownership later.
+	 *   Data4 hi = target of the last 0x3005 (31 = the display-update broadcast we now ignore)
+	 *           lo = comms-watchdog state: bit0 armed, bit1 past the assist cut, bit2 past the
+	 *                power-off threshold.
+	 */
+	{
+		uint32_t dropped = can_tx_queue_dropped_count(); if(dropped>65535U) dropped=65535U;
+		uint16_t peak = slow_loop_peak;
+		uint8_t wd = (uint8_t)((comm_seen?0x01:0) |
+			((comm_seen && comm_lost_ticks>=COMM_CUT_TICKS)?0x02:0) |
+			((comm_seen && comm_lost_ticks>=COMM_OFF_TICKS)?0x04:0));
+		transmit_message.tx_efid = 0x0001022B;
+		transmit_message.tx_data[0] = (uint8_t)((dropped>>8)&0xFF);
+		transmit_message.tx_data[1] = (uint8_t)(dropped&0xFF);
+		transmit_message.tx_data[2] = (uint8_t)((peak>>8)&0xFF);
+		transmit_message.tx_data[3] = (uint8_t)(peak&0xFF);
+		transmit_message.tx_data[4] = (uint8_t)((cmd3005_seen>>8)&0xFF);
+		transmit_message.tx_data[5] = (uint8_t)(cmd3005_seen&0xFF);
+		transmit_message.tx_data[6] = cmd3005_last_target;
+		transmit_message.tx_data[7] = wd;
 		DIAG_EMIT();
 	}
 }
@@ -6203,7 +6448,14 @@ uint16_t walk_assist_iq_request(void){
 			//It was x100 (km/h), but that made every value above 6 unreachable: Canable
 			//clamped at 6. Raw rpm now uses a validated 20..60 range; stale stored
 			//values such as 600 are repaired to the default.
-			.target_chainring_rpm = assist_modes_get_wa_target_rpm()
+			.target_chainring_rpm = assist_modes_get_wa_target_rpm(),
+			//FW-130: the bank's Walk current percentage finally reaches the motor. It had
+			//no reader at all between FW-060 and here, so the card in Canable looked like a
+			//working strength control while the ceiling was a fixed 40 Iq (5.7% of the
+			//phase current the ride path may use). Resolved here because main.c owns
+			//PH_CURRENT_MAX; walk_assist_motor clamps it to WA_MOTOR_IQ_ABS_MAX.
+			.walk_iq_max = ((int32_t)PH_CURRENT_MAX *
+				(int32_t)assist_modes_get_wa_current_pct())/100
 		};
 		wa_iq=(int32_t)walk_motor_update(&wa_in, &wa_diag);
 	}
@@ -6272,6 +6524,8 @@ uint16_t hall_calibration_iq_request(void){
 			PI_iq.integral_part=0;
 			PI_id.integral_part=0;
 			foc_aw_tracking_reset(); //FOC-AW1: service path, disabling the bridge in the same breath
+			quiet_zero_reset(&quiet_zero_state); //QZERO: same service path, same breath
+				rotor_angle_reset(&rotor_angle_state); //FW-131: same service path
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_0,_T>>1);
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_1,_T>>1);
 			timer_channel_output_pulse_value_config(TIMER0,TIMER_CH_2,_T>>1);

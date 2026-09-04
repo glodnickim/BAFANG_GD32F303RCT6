@@ -40,7 +40,20 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "config.h"
 #include "walk_assist_motor.h"
+
+/*
+ * FW-130.1: law B keeps a small keepalive current while a REAL speed reading exists, so the
+ * rotor cannot stop and take the Hall signal with it (owner requirement 2026-09-03). That
+ * deliberately supersedes this card's "true zero above target" for law B only - the requirement
+ * itself is unchanged for law A, which is still compiled and still checked against 0 here.
+ */
+#if (WALK_GOVERNOR_ENABLE == 0)
+#define RUN_FLOOR_IQ 0
+#else
+#define RUN_FLOOR_IQ 2
+#endif
 
 #define TARGET_RPM 30U
 #define TARGET_ERPS_REF 40U
@@ -267,12 +280,12 @@ int main(void)
 		bool lim_false = true, stall_false = true;
 		for (uint32_t i = 0; i < 20000U; i++) {
 			drive_tick(&d, &out);
-			if (out.iq_target == 0) descended = true;
+			if (out.iq_target <= RUN_FLOOR_IQ) descended = true;
 			if (is_state(&out, WA_STATE_LIMIT)) lim_false = false;
 			if (is_state(&out, WA_STATE_STALL)) stall_false = false;
 		}
-		CHECK(descended, "S6: overspeed descended to a TRUE iq_cmd == 0");
-		CHECK(out.iq_target == 0, "S6: iq == 0 with measured > target");
+		CHECK(descended, "S6: overspeed descended to the law's floor (0 in law A, keepalive in law B)");
+		CHECK(out.iq_target == RUN_FLOOR_IQ, "S6: iq rests on the floor with measured > target");
 		CHECK(is_state(&out, WA_STATE_REGULATE), "S6: still REGULATE after the descent");
 		CHECK(lim_false, "S6: no false LIMIT on the overspeed descent");
 		CHECK(stall_false, "S6: no false STALL on the overspeed descent");
@@ -287,7 +300,7 @@ int main(void)
 		run_session(&d, &out);
 		drive_set_erps(&d, 90U);
 		for (uint32_t i = 0; i < 20000U; i++) drive_tick(&d, &out);
-		CHECK(out.iq_target == 0, "S7: settled at true 0 above target (setup)");
+		CHECK(out.iq_target == RUN_FLOOR_IQ, "S7: settled on the floor above target (setup)");
 		drive_set_erps(&d, 10U);
 		int32_t before = 0, after = 0;
 		for (uint32_t i = 0; i < 4000U; i++) {

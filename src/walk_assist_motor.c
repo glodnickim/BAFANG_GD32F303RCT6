@@ -11,10 +11,10 @@
 #define WA_MOTOR_SAFE_LIMIT_IQ           15
 #define WA_MOTOR_START_MAX_IQ            40
 
-#define WA_MOTOR_TARGET_RPM_DEFAULT      20
+#define WA_MOTOR_TARGET_RPM_DEFAULT      30  /* fallback dla wejścia spoza zakresu; zgodny z bankiem */
 #define WA_MOTOR_TARGET_RPM_MIN          20
 #define WA_MOTOR_TARGET_RPM_MAX          60
-#define WA_MOTOR_TARGET_ERPS_DEFAULT     27
+#define WA_MOTOR_TARGET_ERPS_DEFAULT     40  /* 30 obr/min x 4/3 */
 #define WA_MOTOR_MAX_WHEEL_X100         700
 
 /* M820: 80 electrical revolutions per crank revolution -> rpm * 4 / 3. */
@@ -25,7 +25,15 @@
 #define WA_MOTOR_HALL_AVG_SAMPLES        12
 #define WA_MOTOR_ERPS_TIMEOUT_TICKS     800  /* 200 ms @ 4 kHz */
 
-#define WA_MOTOR_JAM_GRACE_TICKS       6000  /* 1.5 s for energetic start */
+/*
+ * FW-130: 6000 -> 12000. The grace has to outlast the start, and the start got longer in two
+ * ways at once: the demand now ramps over 550 ms instead of 427 ms, and it climbs to a ceiling
+ * that the rider can raise well above the old fixed 40 Iq. A heavy bike on a slope legitimately
+ * spends longer below 15 % of target while the ramp is still building, and the old 1.5 s window
+ * would have called that a jam and latched STALL. Everything after the grace is unchanged: a
+ * genuinely stalled rotor under current still latches LIMIT and then STALL.
+ */
+#define WA_MOTOR_JAM_GRACE_TICKS      12000  /* 3 s for energetic start */
 #define WA_MOTOR_JAM_NO_HALL_TICKS      400  /* 100 ms */
 #define WA_MOTOR_JAM_MIN_ERPS             2
 #define WA_MOTOR_JAM_CMD_IQ              24
@@ -43,7 +51,24 @@
 #define WA_MOTOR_HALL_LOSS_DRIVE_IQ        30
 #define WA_MOTOR_RUN_MIN_IQ                   0
 #define WA_MOTOR_RUN_MAX_IQ                  40
+/*
+ * FW-130.1 keepalive, law B only. Owner requirement 2026-09-03: "as soon as it stops it cannot
+ * read speed from the Hall, because there will not be one." The governor's own zero is reachable,
+ * and a mid-drive rotor behind an open freewheel stops within a few hundred ms of losing current.
+ * Once it stops there is no signal, the bounded recovery has to nudge it back, and the speed it
+ * then reports is genuinely low - which the governor answers with full current. That round trip
+ * is a self-sustaining on/off cycle that needs no help from the bike.
+ *
+ * The cure is to not enter it: while a walk session is actually running and a speed is actually
+ * being measured, keep a current small enough to be no drive at all but enough that the rotor
+ * keeps producing edges. FW-079 removed a 5 Iq floor because it made different targets converge;
+ * this is well under half of that, and unlike FW-079's floor it is gated on a live speed reading,
+ * so it can never be what holds the bike above target. Every safety zero stays a true zero: the
+ * wheel cut-off, brake, release, fault, LIMIT and STALL all pass 0 here.
+ */
+#define WA_MOTOR_KEEPALIVE_IQ                 2
 #define WA_MOTOR_COAST_EXIT_IQ                2
+#define WA_MOTOR_FACTOR_ONE                 256  /* FW-130: Q8 unity for the governor factors */
 
 static walk_motor_state_t wa_state;
 static walk_speed_controller_t wa_controller;
@@ -68,11 +93,45 @@ static uint8_t wa_coast_expected;
 static uint8_t wa_coast_recovery_active;
 static uint16_t wa_reacquire_ticks;
 static int32_t wa_iq_cap_last;
+static int32_t wa_wheel_factor_q8 = WA_MOTOR_FACTOR_ONE;   /* FW-130 */
+static uint8_t wa_wheel_cut;                               /* FW-130 */
 
 static int32_t abs32(int32_t value)
 {
 	return (value < 0) ? -value : value;
 }
+
+/*
+ * FW-130: wheel speed is the fuse, never the controlled value.
+ *
+ * Below cut-off - taper it takes nothing away. Across the last WA_WHEEL_TAPER_X100 before the
+ * cut-off it lowers the ceiling continuously, so a lighter gear (where the same chainring speed
+ * drives the wheel faster) simply gets less current instead of the pre-FW-130 on/off switch that
+ * zeroed the current and restarted the session. AT the cut-off the factor is 0 and *cut is set:
+ * that is a safety limit, so the controller clamps in the same tick without the fall ramp. The
+ * session itself is only torn down further up, at cut-off + WA_WHEEL_HARD_MARGIN_X100.
+ */
+#if (WALK_GOVERNOR_ENABLE != 0)
+static int32_t wheel_factor_q8(uint16_t speed_x100, uint16_t cut_x100, uint8_t *cut)
+{
+	*cut = (speed_x100 >= cut_x100) ? 1U : 0U;
+	if (*cut) {
+		return 0;
+	}
+	int32_t full = (int32_t)cut_x100 - WA_WHEEL_TAPER_X100;
+	if (full < 0) {
+		full = 0;
+	}
+	if ((int32_t)speed_x100 <= full) {
+		return WA_MOTOR_FACTOR_ONE;
+	}
+	int32_t span = (int32_t)cut_x100 - full;
+	if (span <= 0) {
+		return 0;
+	}
+	return (WA_MOTOR_FACTOR_ONE * ((int32_t)cut_x100 - (int32_t)speed_x100)) / span;
+}
+#endif /* WALK_GOVERNOR_ENABLE */
 
 static uint16_t rpm_to_erps(uint16_t chainring_rpm)
 {
@@ -155,6 +214,8 @@ void walk_motor_reset(void)
 	wa_coast_recovery_active = 0;
 	wa_reacquire_ticks = 0;
 	wa_iq_cap_last = 0;
+	wa_wheel_factor_q8 = WA_MOTOR_FACTOR_ONE;
+	wa_wheel_cut = 0;
 	wa_control_output = (walk_speed_controller_output_t){0};
 	walk_speed_controller_reset(&wa_controller);
 	hall_estimator_reset();
@@ -183,6 +244,8 @@ static void publish_output(walk_motor_output_t *output, uint16_t target_erps,
 	output->iq_cap = wa_iq_cap_last;
 	output->integral_iq = wa_control_output.integral_iq;
 	output->startup_iq = wa_control_output.startup_iq;
+	output->gear_factor_q8 = wa_control_output.gear_factor_q8;   //FW-130
+	output->wheel_factor_q8 = (int16_t)wa_wheel_factor_q8;       //FW-130
 	output->flags = (uint8_t)
 		((hall_valid ? WA_FLAG_HALL_VALID : 0) |
 		(wa_jam_active ? WA_FLAG_JAM : 0) |
@@ -198,6 +261,9 @@ static void publish_output(walk_motor_output_t *output, uint16_t target_erps,
 	 */
 	output->reason = (uint16_t)
 		((hall_valid ? 0 : WA_REASON_HALL) |
+		/* FW-130: the fuse names itself the moment it actually takes everything away,
+		 * whether that is the in-session clamp at the cut-off or the hard stop above it. */
+		(wa_wheel_cut ? WA_REASON_SPEED_GATE : 0) |
 		(wa_jam_active ? WA_REASON_JAM : 0) |
 		(wa_blocked ? WA_REASON_STALL : 0) |
 		((wa_state == WA_STATE_STALL) ? WA_REASON_STALL : 0) |
@@ -228,8 +294,26 @@ int32_t walk_motor_update(const walk_motor_input_t *input,
 	uint16_t max_wheel_x100 =
 		(input != 0 && input->max_wheel_speed_x100 > 0U) ?
 		input->max_wheel_speed_x100 : WA_MOTOR_MAX_WHEEL_X100;
+	/*
+	 * FW-130: the cut-off itself no longer kills the session. Reaching it clamps the current
+	 * to zero (handled below, in the same tick), but the state machine, the Hall estimate and
+	 * the ramp all stay alive so that dropping back below it is a single rise ramp instead of
+	 * a fresh start. Only this margin above the cut-off is a real stop.
+	 */
+#if (WALK_GOVERNOR_ENABLE != 0)
+	uint32_t hard_stop_x100 =
+		(uint32_t)max_wheel_x100 + WA_WHEEL_HARD_MARGIN_X100;
+	if (hard_stop_x100 > 0xFFFFUL) {
+		hard_stop_x100 = 0xFFFFUL;
+	}
+#else
+	/* Law A keeps the pre-FW-130 behaviour exactly: the cut-off itself stops the session. */
+	uint32_t hard_stop_x100 = (uint32_t)max_wheel_x100;
+#endif
+	bool wheel_hard_stop = input != 0 &&
+		(uint32_t)input->wheel_speed_x100 >= hard_stop_x100;
 	if (input == 0 || !input->active || input->brake || input->fault ||
-		input->wheel_speed_x100 >= max_wheel_x100) {
+		wheel_hard_stop) {
 		walk_motor_reset();
 		publish_output(output, target_erps, false);
 		/* FW-113.2: name which real gate stopped the drive. publish_output already set
@@ -238,10 +322,25 @@ int32_t walk_motor_update(const walk_motor_input_t *input,
 			output->reason |= (uint16_t)
 				((input->brake ? WA_REASON_BRAKE : 0) |
 				(input->fault ? WA_REASON_ERROR : 0) |
-				((input->wheel_speed_x100 >= max_wheel_x100) ?
-					WA_REASON_SPEED_GATE : 0));
+				(wheel_hard_stop ? WA_REASON_SPEED_GATE : 0));
 		}
 		return 0;
+	}
+
+#if (WALK_GOVERNOR_ENABLE != 0)
+	/* FW-130: recomputed every tick; publish_output and the controller both read it. */
+	wa_wheel_factor_q8 =
+		wheel_factor_q8(input->wheel_speed_x100, max_wheel_x100, &wa_wheel_cut);
+#endif
+	/*
+	 * FW-130: the configured walk strength, clamped to the module's absolute WA ceiling.
+	 * 0 keeps the pre-FW-130 fixed 40 Iq, so a caller that does not fill the field in still
+	 * gets exactly the old behaviour.
+	 */
+	int32_t walk_iq_max = (input->walk_iq_max > 0) ?
+		input->walk_iq_max : WA_MOTOR_START_MAX_IQ;
+	if (walk_iq_max > WA_MOTOR_IQ_ABS_MAX) {
+		walk_iq_max = WA_MOTOR_IQ_ABS_MAX;
 	}
 	if (wa_blocked) {
 		wa_iq_cmd = 0;
@@ -367,8 +466,18 @@ int32_t walk_motor_update(const walk_motor_input_t *input,
 		WA_MOTOR_SAFE_LIMIT_IQ :
 		(wa_coast_recovery_active ? WA_MOTOR_COAST_RECOVERY_IQ :
 		(wa_reacquire_active ? WA_MOTOR_REACQUIRE_IQ :
+#if (WALK_GOVERNOR_ENABLE == 0)
 		(!wa_controller.startup_complete ? WA_MOTOR_START_MAX_IQ :
 		WA_MOTOR_IQ_ABS_MAX)));
+#else
+		/*
+		 * FW-130: no separate START ceiling. The ramp is the soft start, and the
+		 * configured walk strength (walk_iq_max, applied inside the controller) is the
+		 * one number that says how hard WA may push. This stays the absolute safety
+		 * ceiling above it.
+		 */
+		WA_MOTOR_IQ_ABS_MAX));
+#endif
 	walk_speed_controller_input_t control_input = {
 		.target_erps = target_erps,
 		.measured_erps = (uint16_t)
@@ -378,9 +487,24 @@ int32_t walk_motor_update(const walk_motor_input_t *input,
 		.iq_ceiling = wa_iq_cap_last,
 		.run_iq_min = (wa_state == WA_STATE_REGULATE &&
 			wa_controller.startup_complete && !wa_reacquire_active) ?
+#if (WALK_GOVERNOR_ENABLE == 0)
 			WA_MOTOR_RUN_MIN_IQ : 0,
+#else
+			WA_MOTOR_KEEPALIVE_IQ : 0,   //FW-130.1, see the constant
+#endif
 		.run_iq_max = WA_MOTOR_RUN_MAX_IQ,
-		.downstream_iq = input->motor_iq_reference
+		.downstream_iq = input->motor_iq_reference,
+		.iq_walk_max = walk_iq_max,                 //FW-130
+		.wheel_factor_q8 = wa_wheel_factor_q8,      //FW-130
+		.wheel_cut = wa_wheel_cut != 0U,            //FW-130
+		/*
+		 * FW-130.1: a REAL speed reading, not merely a fresh edge. hall_valid only says an edge
+		 * arrived inside the timeout; the estimator needs a measured PERIOD before it can report
+		 * a speed, so right after a gap hall_valid is true while wa_erps_filtered is still 0.
+		 * Passing that on as "0 rpm" is exactly the lie the owner asked to be removed: a stopped
+		 * rotor emits nothing, so silence must never be read as a speed.
+		 */
+		.speed_known = hall_valid && wa_erps_filtered > 0
 	};
 	wa_iq_cmd = walk_speed_controller_update(
 		&wa_controller, &control_input, &wa_control_output);

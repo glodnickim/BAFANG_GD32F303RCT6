@@ -1,5 +1,10 @@
 #include "walk_speed_controller.h"
 
+/*
+ * Every WA_SPEED_* constant below is kept defined for BOTH laws on purpose:
+ * tests/fw060_walk_speed_controller.js reads this file as TEXT and models law A from
+ * these numbers. Removing one under #if would break that model rather than the code.
+ */
 #define WA_SPEED_IQ_Q_SHIFT             8
 #define WA_SPEED_CONTROL_DIV           20  /* 200 Hz PI inside the 4 kHz caller */
 
@@ -21,6 +26,10 @@
 #define WA_SPEED_TRACK_MARGIN_IQ         6
 #define WA_SPEED_HALL_LOSS_UNWIND_Q     64
 
+/* FW-130 (law B). */
+#define WA_GOV_FACTOR_ONE              256  /* Q8 unity for both governor factors */
+#define WA_GOV_FALLBACK_IQ              40  /* ceiling when the caller passes iq_walk_max 0 */
+
 static int32_t clamp32(int32_t value, int32_t low, int32_t high)
 {
 	if (value < low) {
@@ -28,6 +37,46 @@ static int32_t clamp32(int32_t value, int32_t low, int32_t high)
 	}
 	return (value > high) ? high : value;
 }
+
+static void clear_output(walk_speed_controller_output_t *output)
+{
+	if (output == 0) {
+		return;
+	}
+	output->iq_target = 0;
+	output->error_erps = 0;
+	output->controlled_error_erps = 0;
+	output->p_iq = 0;
+	output->integral_iq = 0;
+	output->startup_iq = 0;
+	output->gear_factor_q8 = 0;
+	output->wheel_factor_q8 = 0;
+	output->startup_active = false;
+	output->above_target = false;
+	output->saturated = false;
+}
+
+void walk_speed_controller_reset(walk_speed_controller_t *controller)
+{
+	if (controller == 0) {
+		return;
+	}
+	controller->iq_command_q = 0;
+	controller->desired_iq = 0;
+	controller->session_ticks = 0;
+	controller->last_gear_q8 = WA_GOV_FACTOR_ONE;   /* FW-130.1 */
+	controller->startup_complete = false;
+	controller->reacquire_active = false;
+#if (WALK_GOVERNOR_ENABLE == 0)
+	controller->integral_q = 0;
+	controller->control_divider = 0;
+#endif
+}
+
+#if (WALK_GOVERNOR_ENABLE == 0)
+/* ========================================================================
+ * LAW A - FW-060..082 speed PI. Unchanged; kept as the A side of the A/B ride.
+ * ======================================================================== */
 
 static int16_t control_error(int32_t raw_error)
 {
@@ -45,36 +94,6 @@ static int16_t control_error(int32_t raw_error)
 static int32_t startup_floor_iq(const walk_speed_controller_t *controller)
 {
 	return controller->startup_complete ? 0 : WA_SPEED_START_IQ;
-}
-
-static void clear_output(walk_speed_controller_output_t *output)
-{
-	if (output == 0) {
-		return;
-	}
-	output->iq_target = 0;
-	output->error_erps = 0;
-	output->controlled_error_erps = 0;
-	output->p_iq = 0;
-	output->integral_iq = 0;
-	output->startup_iq = 0;
-	output->startup_active = false;
-	output->above_target = false;
-	output->saturated = false;
-}
-
-void walk_speed_controller_reset(walk_speed_controller_t *controller)
-{
-	if (controller == 0) {
-		return;
-	}
-	controller->integral_q = 0;
-	controller->iq_command_q = 0;
-	controller->desired_iq = 0;
-	controller->session_ticks = 0;
-	controller->control_divider = 0;
-	controller->startup_complete = false;
-	controller->reacquire_active = false;
 }
 
 int32_t walk_speed_controller_update(
@@ -282,6 +301,8 @@ int32_t walk_speed_controller_update(
 			controller->integral_q >> WA_SPEED_IQ_Q_SHIFT, 0, 32767);
 		output->startup_iq =
 			(int16_t)clamp32(start_floor, 0, 32767);
+		output->gear_factor_q8 = WA_GOV_FACTOR_ONE;
+		output->wheel_factor_q8 = WA_GOV_FACTOR_ONE;
 		output->startup_active = !controller->startup_complete;
 		output->above_target = raw_error < 0;
 		output->saturated =
@@ -289,3 +310,207 @@ int32_t walk_speed_controller_update(
 	}
 	return current_iq;
 }
+
+#else /* WALK_GOVERNOR_ENABLE */
+/* ========================================================================
+ * LAW B - FW-130. G532 character: one ramped demand, two soft ceilings, no
+ * integrator anywhere. Speed is held by taking current AWAY as the gear speed
+ * approaches the target, never by integrating an error - which is precisely the
+ * mechanism that produced the reported overshoot in law A.
+ * ======================================================================== */
+
+/*
+ * Gear-RPM governor. The band is centred on the bank's own target and scales with it,
+ * so 20 and 60 chainring rpm feel the same. Full ceiling at or below target-band, zero
+ * at or above target+band, linear between. 2*band is at least 2*WA_GOV_BAND_MIN_ERPS,
+ * so the divisor can never be zero.
+ */
+static int32_t gear_factor_q8(uint16_t target_erps, uint16_t measured_erps)
+{
+	int32_t band = ((int32_t)target_erps * WA_GOV_BAND_PCT) / 100;
+	if (band < WA_GOV_BAND_MIN_ERPS) {
+		band = WA_GOV_BAND_MIN_ERPS;
+	}
+	int32_t full = (int32_t)target_erps - band;
+	int32_t zero = (int32_t)target_erps + band;
+	int32_t measured = (int32_t)measured_erps;
+	if (measured <= full) {
+		return WA_GOV_FACTOR_ONE;
+	}
+	if (measured >= zero) {
+		return 0;
+	}
+	return (WA_GOV_FACTOR_ONE * (zero - measured)) / (zero - full);
+}
+
+/*
+ * One ramp step in Q8. The RATE is normalised to the walk ceiling, exactly as the G532
+ * reverse describes: a lower ceiling therefore reaches its target proportionally sooner
+ * instead of always taking a fixed time. The floor of 1 keeps the ramp alive at very
+ * small ceilings, where the ideal step would round to zero and freeze the command.
+ */
+static int32_t ramp_step_q(int32_t full_scale_iq, int32_t ticks)
+{
+	int32_t step = (((full_scale_iq << WA_SPEED_IQ_Q_SHIFT) + (ticks / 2)) / ticks);
+	return (step < 1) ? 1 : step;
+}
+
+int32_t walk_speed_controller_update(
+	walk_speed_controller_t *controller,
+	const walk_speed_controller_input_t *input,
+	walk_speed_controller_output_t *output)
+{
+	clear_output(output);
+	if (controller == 0 || input == 0 || input->target_erps == 0 ||
+		input->iq_ceiling <= 0) {
+		if (controller != 0) {
+			controller->iq_command_q = 0;
+			controller->desired_iq = 0;
+		}
+		return 0;
+	}
+
+	int32_t ceiling = input->iq_ceiling;
+	/*
+	 * The configured walk strength. The caller resolves the bank percentage into Iq;
+	 * 0 means "not configured" and keeps the pre-FW-130 fixed ceiling, so a caller that
+	 * has not been taught the new input still behaves exactly as before.
+	 */
+	int32_t walk_max = (input->iq_walk_max > 0) ?
+		input->iq_walk_max : WA_GOV_FALLBACK_IQ;
+	if (walk_max > ceiling) {
+		walk_max = ceiling;
+	}
+
+	int32_t downstream = clamp32(input->downstream_iq, 0, ceiling);
+	if (controller->session_ticks == 0) {
+		/* Enter WA without stepping away from an already active motor command. */
+		controller->iq_command_q = downstream << WA_SPEED_IQ_Q_SHIFT;
+	}
+	if (controller->session_ticks < 0xFFFFFFFFUL) {
+		controller->session_ticks++;
+	}
+	controller->reacquire_active = input->reacquire;
+
+	int32_t current_iq =
+		(controller->iq_command_q + (1 << (WA_SPEED_IQ_Q_SHIFT - 1))) >>
+		WA_SPEED_IQ_Q_SHIFT;
+	bool downstream_limited =
+		downstream + WA_SPEED_TRACK_MARGIN_IQ < current_iq;
+	if (downstream_limited) {
+		/*
+		 * Voltage/temperature limits are downstream of WA. Follow their actual
+		 * output so current cannot jump when a temporary limit disappears.
+		 */
+		controller->iq_command_q =
+			(downstream + WA_SPEED_TRACK_MARGIN_IQ) << WA_SPEED_IQ_Q_SHIFT;
+		current_iq = downstream + WA_SPEED_TRACK_MARGIN_IQ;
+	}
+
+	/*
+	 * Law B has no separate start phase - the ramp IS the start. startup_complete is kept
+	 * with the narrower meaning the CALLER relies on: "the rotor has been seen turning in
+	 * this session". walk_assist_motor.c uses it for the coast/keepalive decisions.
+	 */
+	if (!controller->startup_complete && input->hall_valid &&
+		input->measured_erps >= WA_SPEED_START_DONE_ERPS) {
+		controller->startup_complete = true;
+	}
+
+	int32_t raw_error =
+		(int32_t)input->target_erps - (int32_t)input->measured_erps;
+
+	/*
+	 * FW-130.1. Three cases, and they are deliberately NOT the same thing:
+	 *
+	 *   reacquire       the caller has already lowered iq_ceiling to its own small bounded value
+	 *                   and is trying to get the rotor turning again so a speed can exist at
+	 *                   all. Ask for that ceiling; it is what limits the attempt.
+	 *   before START    the rotor IS stopped and we know it - that is what a start is. Full
+	 *                   ceiling is the honest answer here and only here.
+	 *   running         govern on a REAL reading. If there is no reading, hold the last verdict.
+	 *
+	 * The last case is the FW-130.1 fix. v1 asked for the FULL ceiling whenever the reading was
+	 * missing or still zero, so every time the governor took the current away, the rotor stopped,
+	 * the reading vanished, and the controller answered "not moving - full power". That closed a
+	 * loop with no input from the bike at all: full power -> overshoot -> zero -> rotor stops ->
+	 * full power. Holding the last verdict breaks it, and it is also simply the truthful answer:
+	 * nothing has been measured, so nothing has changed our mind.
+	 */
+	int32_t gear_q8;
+	if (input->reacquire) {
+		gear_q8 = WA_GOV_FACTOR_ONE;
+	} else if (!controller->startup_complete) {
+		gear_q8 = WA_GOV_FACTOR_ONE;
+	} else if (input->speed_known) {
+		gear_q8 = gear_factor_q8(input->target_erps, input->measured_erps);
+		controller->last_gear_q8 = gear_q8;
+	} else {
+		gear_q8 = controller->last_gear_q8;
+	}
+	int32_t wheel_q8 = clamp32(input->wheel_factor_q8, 0, WA_GOV_FACTOR_ONE);
+	int32_t factor_q8 = (gear_q8 < wheel_q8) ? gear_q8 : wheel_q8;
+
+	int32_t desired = (walk_max * factor_q8) >> WA_SPEED_IQ_Q_SHIFT;
+	if (input->run_iq_min > desired && input->speed_known && !input->reacquire &&
+		!input->wheel_cut) {
+		/*
+		 * FW-130.1 keepalive: keep the rotor turning so a speed keeps EXISTING to govern on.
+		 * Gated on a real reading (not merely hall_valid) so it can never be applied blind, and
+		 * dropped the moment the wheel fuse or any safety state asks for zero - those pass 0 in
+		 * run_iq_min anyway, and wheel_cut clamps below regardless.
+		 */
+		desired = input->run_iq_min;
+	}
+	desired = clamp32(desired, 0, walk_max);
+	controller->desired_iq = desired;
+
+	int32_t target_q = desired << WA_SPEED_IQ_Q_SHIFT;
+	if (controller->iq_command_q < target_q) {
+		int32_t step = ramp_step_q(walk_max, WA_RISE_FULL_SCALE_TICKS);
+		int32_t delta = target_q - controller->iq_command_q;
+		controller->iq_command_q += (delta > step) ? step : delta;
+	} else if (controller->iq_command_q > target_q) {
+		int32_t step = ramp_step_q(walk_max, WA_FALL_FULL_SCALE_TICKS);
+		int32_t delta = controller->iq_command_q - target_q;
+		controller->iq_command_q -= (delta > step) ? step : delta;
+	}
+
+	/*
+	 * The wheel cut-off is a safety limit and clamps in the same tick, with no ramp. The
+	 * accumulator goes with it, so the return below the cut-off ramps back up from zero
+	 * instead of stepping - and, unlike the pre-FW-130 gate, it does NOT tear the session
+	 * down, so nothing re-arms and the recovery is one rise ramp rather than a fresh start.
+	 */
+	if (input->wheel_cut) {
+		controller->iq_command_q = 0;
+	}
+	int32_t ceiling_q = ceiling << WA_SPEED_IQ_Q_SHIFT;
+	if (controller->iq_command_q > ceiling_q) {
+		controller->iq_command_q = ceiling_q;
+	}
+	if (controller->iq_command_q < 0) {
+		controller->iq_command_q = 0;
+	}
+	current_iq =
+		(controller->iq_command_q + (1 << (WA_SPEED_IQ_Q_SHIFT - 1))) >>
+		WA_SPEED_IQ_Q_SHIFT;
+
+	if (output != 0) {
+		output->iq_target = current_iq;
+		output->error_erps = (int16_t)clamp32(raw_error, -32768, 32767);
+		output->controlled_error_erps = (int16_t)clamp32(raw_error, -32768, 32767);
+		output->p_iq = 0;               /* law B has no proportional term */
+		output->integral_iq = 0;        /* and no integrator at all */
+		output->startup_iq = 0;         /* and no separate start floor */
+		output->gear_factor_q8 = (int16_t)gear_q8;
+		output->wheel_factor_q8 = (int16_t)wheel_q8;
+		output->startup_active = !controller->startup_complete;
+		output->above_target = raw_error < 0;
+		output->saturated =
+			factor_q8 < WA_GOV_FACTOR_ONE || current_iq != desired;
+	}
+	return current_iq;
+}
+
+#endif /* WALK_GOVERNOR_ENABLE */

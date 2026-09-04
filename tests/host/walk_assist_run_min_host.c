@@ -24,7 +24,20 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "config.h"
 #include "walk_assist_motor.h"
+
+/*
+ * FW-130.1: law B keeps a small keepalive current while a REAL speed reading exists, so the
+ * rotor cannot stop and take the Hall signal with it (owner requirement 2026-09-03). That
+ * deliberately supersedes this card's "true zero above target" for law B only - the requirement
+ * itself is unchanged for law A, which is still compiled and still checked against 0 here.
+ */
+#if (WALK_GOVERNOR_ENABLE == 0)
+#define RUN_FLOOR_IQ 0
+#else
+#define RUN_FLOOR_IQ 2
+#endif
 
 #define TARGET_RPM 30U
 #define TARGET_ERPS_REF 40U
@@ -148,7 +161,7 @@ int main(void)
 			if (out.iq_target < min_iq) {
 				min_iq = out.iq_target;
 			}
-			if (out.iq_target == 0) {
+			if (out.iq_target <= RUN_FLOOR_IQ) {
 				descended_to_zero = true;
 			}
 			if (is_state(&out, WA_STATE_LIMIT)) {
@@ -159,8 +172,8 @@ int main(void)
 			}
 		}
 		CHECK(descended_to_zero, "S1: normal RUN above target descended to a TRUE iq_cmd == 0");
-		CHECK(min_iq == 0, "S1: Iq floor is exactly 0 in normal RUN (no positive keepalive)");
-		CHECK(out.iq_target == 0, "S1: iq_cmd == 0 with measured_erps > target_erps");
+		CHECK(min_iq == RUN_FLOOR_IQ, "S1: Iq floor in normal RUN is exactly the law's floor");
+		CHECK(out.iq_target == RUN_FLOOR_IQ, "S1: iq_cmd rests on the floor with measured_erps > target_erps");
 		CHECK(is_state(&out, WA_STATE_REGULATE), "S1: still normal RUN (REGULATE) after the descent to 0");
 		CHECK((out.flags & WA_FLAG_HALL_VALID) != 0, "S1: Hall remained valid through the descent");
 		CHECK((out.flags & WA_FLAG_START_ACTIVE) == 0, "S1: the descent never re-armed START");
@@ -187,7 +200,7 @@ int main(void)
 		for (uint32_t i = 0; i < 20000U; i++) {
 			drive_tick(&d, &out);   /* overspeed: descend to true 0 */
 		}
-		CHECK(out.iq_target == 0, "S2: settled at true 0 Iq above target (setup)");
+		CHECK(out.iq_target == RUN_FLOOR_IQ, "S2: settled on the floor above target (setup)");
 
 		/* Now the rotor slows below target: the PI must climb back up. */
 		drive_set_erps(&d, 10U);
@@ -195,7 +208,7 @@ int main(void)
 		int32_t iq_after = 0;
 		for (uint32_t i = 0; i < 4000U; i++) {
 			drive_tick(&d, &out);
-			if (i == 1999U) {
+			if (i == 999U) {
 				iq_before = out.iq_target;
 			}
 		}

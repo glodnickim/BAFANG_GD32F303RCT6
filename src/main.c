@@ -711,26 +711,30 @@ uint8_t soc_one_second_flag=0;
 //FW-134: seconds the bike has actually been MOVING this session. Serialized into CAN 0x3210
 //bytes 4..5 - see the increment in the 1 Hz block and sendCAN_3210().
 volatile uint16_t ride_seconds=0;
-
 /*
  * FW-136.0: four numbers that turn "I can hear a click" into something falsifiable.
  *
  * Every verdict on the stop click so far came from the ear, and on that evidence three cards
  * (FW-131, FW-131.1, QZERO-3) were shipped without changing anything. The whole hypothesis is
- * "click = current x commutation-angle jump", and it is decided by ONE number: whether any
- * current flows at all in the speed zone where the angle jumps.
+ * "click = current x commutation-angle jump", and it turns on ONE question: whether any current
+ * flows at all while the rotor is slow enough for the angle to step.
  *
  * Deliberately NOT diagnostics-gated. The build that clicks is the build that must be measured,
  * and DIAG adds bus traffic that has already been reported as disturbing the HMI readings. The
  * cost is 8 bytes of RAM and a read handler that produces no traffic until asked.
  *
+ * WHAT MOVES THE RELEASE COUNTER: a PEDAL release only. Walk Assist cannot move it - ride_control
+ * returns FIS_MODE_BYPASS for walk_active BEFORE the zero policy is granted, so a WA stop is
+ * FIS_ZERO_POLICY_NONE by construction. A bench check that presses Walk Assist therefore proves
+ * nothing about this counter, which is exactly the mistake the first bench instruction made.
+ *
  * Read them with CAN READ 0x6032 (see send_click_zone_status() in CAN_Display.c). Cumulative
  * since power-on, so neither the number of stops nor the order of them matters.
  */
-volatile uint16_t click_release_count=0;   //quiet descents to exact zero Iq reference - the DENOMINATOR
-volatile uint16_t click_handback_count=0;  //times QZERO handed the axis back to the zero-current PI
-volatile uint16_t click_zone_peak_iq=0;    //peak |measured Iq| with the reference at zero and erps below the switch
-volatile uint16_t click_handback_erps=0;   //erps at the last handback; 0 = it never happened
+volatile uint16_t click_release_count=0;   //quiet descents to an exact zero Iq reference - the DENOMINATOR
+volatile uint16_t coast_peak_iq=0;         //peak |measured Iq| over the whole coast (reference zero, rotor moving)
+volatile uint16_t coast_peak_erps=0;       //rotor speed at that peak - says WHERE the current was, not just that it existed
+volatile uint16_t coast_min_erps=0xFFFF;   //lowest erps ever reported during a coast; >= RIDE_COAST_RELEASE_ERPS means the reading freezes
 uint32_t rest_seconds=0;            //consecutive seconds with |I| < I_REST_MA
 uint32_t soc_save_seconds=0;        //seconds since last flash save
 float soc_last_saved=0;            //SOC_real at last save
@@ -3881,18 +3885,25 @@ static void pi_iq_apply_inputs(void)
 void runPIcontrol(void){
 
 	pi_iq_apply_inputs();
-
 	/*
-	 * FW-136.0 measurement. Placed here, OUTSIDE the QUIET_ZERO_ENABLE block, so both A/B images
-	 * measure the same two things the same way - otherwise the comparison would be worthless.
+	 * FW-136.0 measurement, revision 2. Placed here, OUTSIDE the QUIET_ZERO_ENABLE block, so both
+	 * A/B images measure the same things the same way - otherwise the comparison is worthless.
 	 *
-	 * The release edge is the tick the reference reaches exact zero on a QUIET policy, which is
-	 * the same fact QZERO arms on and is published whether or not QZERO consumes it.
+	 * REVISION 2 removed the low-speed gate, and that correction matters more than the code.
+	 * Revision 1 captured the peak only while ui16_erps was below RIDE_COAST_RELEASE_ERPS - i.e.
+	 * it hung the whole measurement on the one signal this card exists to doubt. ui16_erps is a
+	 * 32-edge moving average updated ONLY on Hall edges and never forced to zero, so as the rotor
+	 * stops the reading can freeze ABOVE that threshold. The window would then never open and the
+	 * peak would read 0 whether or not any current flowed - the one result the card calls
+	 * decisive would have been the one result that proves nothing.
 	 *
-	 * The peak is gated on BOTH the reference being zero and the rotor being below the
-	 * commutation-angle switch. Without the first gate it would just record ordinary slow riding
-	 * under power; without the second it would record the whole ride. Together they are exactly
-	 * the coast through the zone where FW-048 says the angle steps - the click zone.
+	 * So: capture over the whole coast (reference at zero, rotor still reporting motion) and
+	 * record WHERE the peak happened instead of filtering by where it happened. coast_min_erps
+	 * then measures the doubted signal directly: if it never goes below RIDE_COAST_RELEASE_ERPS,
+	 * the freeze is real, and QZERO's handback - which uses exactly that test - can never fire.
+	 *
+	 * erps > 0 excludes the state before the first Hall edge after boot, where the reading is a
+	 * genuine zero rather than a slow rotor.
 	 */
 	{
 		static uint8_t click_prev_ref_nonzero = 0;
@@ -3903,11 +3914,15 @@ void runPIcontrol(void){
 		}
 		click_prev_ref_nonzero = ref_nonzero;
 
-		if(!ref_nonzero && (int32_t)ui16_erps < (int32_t)RIDE_COAST_RELEASE_ERPS){
+		if(!ref_nonzero && ui16_erps > 0U){
 			int32_t meas = MS.i_q;
 			if(meas < 0) meas = -meas;
 			if(meas > 0xFFFF) meas = 0xFFFF;
-			if((uint16_t)meas > click_zone_peak_iq) click_zone_peak_iq = (uint16_t)meas;
+			if((uint16_t)meas > coast_peak_iq){
+				coast_peak_iq = (uint16_t)meas;
+				coast_peak_erps = ui16_erps;
+			}
+			if(ui16_erps < coast_min_erps) coast_min_erps = ui16_erps;
 		}
 	}
 #if QUIET_ZERO_ENABLE
@@ -3944,29 +3959,7 @@ void runPIcontrol(void){
 			.iq_integral = PI_iq.integral_part,
 			.id_integral = PI_id.integral_part
 		};
-		static uint32_t qz_prev_state = (uint32_t)QZERO_INACTIVE;
 		quiet_zero_tick(&quiet_zero_state, &qz_in, &qz);
-		/*
-		 * FW-136.0: count the SLOW handback - the axis given back to the full zero-current PI
-		 * because the rotor fell below the commutation-angle switch. Detected at the call site
-		 * rather than by changing the module's output: leaving INACTIVE-bound while the
-		 * reference is still zero AND the rotor is below the threshold is precisely the SLOW
-		 * branch's own condition (quiet_zero.c).
-		 *
-		 * Known, accepted ambiguity: the abort branch could in principle land in the same tick,
-		 * but that needs |Iq| >= QZERO_ABORT_CURRENT (half of PH_CURRENT_MAX, ~33 A) below 10
-		 * erps - not something a freewheeling rotor can produce.
-		 *
-		 * If this stays 0 across a ride while click_release_count climbs, the handback NEVER
-		 * HAPPENS: the erps reading freezes above the threshold as the rotor stops, QZERO brakes
-		 * all the way to standstill, and QZERO-3 was fixing a path that does not execute.
-		 */
-		if(qz_prev_state != (uint32_t)QZERO_INACTIVE && qz.state == (uint32_t)QZERO_INACTIVE &&
-		   MS.i_q_setpoint == 0 && (int32_t)ui16_erps < (int32_t)RIDE_COAST_RELEASE_ERPS){
-			if(click_handback_count < 0xFFFFU) click_handback_count++;
-			click_handback_erps = ui16_erps;
-		}
-		qz_prev_state = qz.state;
 	}
 	if(qz.apply_integral){
 		PI_iq.integral_part = qz.iq_integral;

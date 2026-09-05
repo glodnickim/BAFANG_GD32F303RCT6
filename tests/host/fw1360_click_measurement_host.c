@@ -1,32 +1,38 @@
 /*
- * FW-136.0: the four numbers that turn "I can hear a click" into something falsifiable.
+ * FW-136.0: the numbers that turn "I can hear a click" into something falsifiable.
  *
  * Three cards (FW-131, FW-131.1, QZERO-3) shipped on the strength of the ear alone and none of
  * them changed anything. The hypothesis under test is "click = current x commutation-angle jump",
- * and it is decided by whether ANY current flows in the speed zone where the angle steps.
+ * and it turns on whether ANY current flows while the rotor is slow enough for the angle to step.
  *
- * A measurement is only worth the ride it costs if it cannot quietly measure nothing. Two of this
- * project's diagnostics already failed that way - FW-121.0's frames were dropped between the
- * builder and the wire, and FW-106's aggregate turned out to be one snapshot per session when the
- * instruction said "capture it live". Both cost a ride. So the guards below are aimed less at the
- * arithmetic than at the ways this measurement could silently produce nothing useful.
+ * A measurement is only worth the ride it costs if it cannot quietly measure nothing. This suite
+ * is therefore aimed less at arithmetic than at the ways this measurement could produce a
+ * confident zero that means nothing - because that has now happened three times in this project:
+ *
+ *   - FW-121.0: frames were built and then silently dropped, because the snapshot cap was never
+ *     raised. Cost a ride.
+ *   - FW-106: the instruction said to capture the aggregate live, but it is one snapshot per
+ *     session. Cost a second ride.
+ *   - FW-136.0 revision 1, caught by a bench log before it cost anything: the peak was captured
+ *     only while ui16_erps was below RIDE_COAST_RELEASE_ERPS - hanging the whole measurement on
+ *     the one signal this card exists to doubt. If that reading freezes above the threshold as
+ *     the rotor stops, the window never opens and the peak reads 0 whether or not current flowed.
+ *     T2 and T8 exist so that specific mistake cannot come back.
  *
  * main.c and CAN_Display.c are the ARM entry point and the CAN receive path and cannot be linked
  * on a host (same reasoning as armed_zero_lifecycle_host.c), so the wiring is proven against the
  * production source text and the gating arithmetic against a replica pinned to it.
  *
- *   T1  BOTH GATES              the peak needs a zero reference AND a rotor below the switch.
- *                               Either gate alone measures the wrong thing entirely.
- *   T2  SAME IN A AND B         the measurement sits OUTSIDE QUIET_ZERO_ENABLE. If it did not,
- *                               the A/B comparison it exists for would be meaningless.
- *   T3  CUMULATIVE              nothing resets the counters, so the number of stops and their
- *                               order cannot change the answer.
- *   T4  PRESENT IN EVERY BUILD  READ 0x6032 is answered outside CAN_DIAGNOSTICS_ENABLE - the
- *                               image that clicks is the image that gets measured.
- *   T5  READ IS INERT           a status read must not disturb what it reports.
- *   T6  WIRE FORMAT             one 8-byte frame, little-endian, on the documented id.
- *   T7  REPLICA BEHAVIOUR       the gating actually does what T1 claims, including that a peak
- *                               never decreases.
+ *   T1  ZERO-REFERENCE GATE     the coast is where the reference is zero, nothing else.
+ *   T2  NO SPEED GATE ON CAPTURE  the doubted signal must not be able to close the window.
+ *   T3  SAME IN A AND B         the measurement sits OUTSIDE QUIET_ZERO_ENABLE, or the A/B
+ *                               comparison it exists for would be meaningless.
+ *   T4  CUMULATIVE              nothing resets the counters between stops.
+ *   T5  PRESENT IN EVERY BUILD  READ 0x6032 is answered outside CAN_DIAGNOSTICS_ENABLE.
+ *   T6  READ IS INERT           a status read must not disturb what it reports.
+ *   T7  WIRE FORMAT             one 8-byte frame, little-endian, on the documented id.
+ *   T8  REPLICA BEHAVIOUR       including the case that broke revision 1: a coast whose reported
+ *                               speed never falls below the threshold must still be measured.
  */
 
 #include "../common/check.h"
@@ -133,19 +139,25 @@ static int count_occurrences(const char *hay, const char *needle)
 }
 
 /* ------------------------------------------------------------------------------------------- */
-/* Replica of the production gating (main.c, runPIcontrol()). Pinned to the real text by T1.     */
+/* Replica of the production capture (main.c, runPIcontrol()). Pinned to the real text by T1/T2.  */
 /* ------------------------------------------------------------------------------------------- */
-
-#define REPLICA_COAST_RELEASE_ERPS 10
 
 typedef struct {
 	uint16_t release_count;
 	uint16_t peak_iq;
+	uint16_t peak_erps;
+	uint16_t min_erps;
 	uint8_t  prev_ref_nonzero;
 } replica_t;
 
+static void replica_reset(replica_t *r)
+{
+	memset(r, 0, sizeof *r);
+	r->min_erps = 0xFFFFU;
+}
+
 static void replica_tick(replica_t *r, int32_t iq_ref, int32_t iq_measured,
-	int32_t erps, bool policy_quiet)
+	uint16_t erps, bool policy_quiet)
 {
 	uint8_t ref_nonzero = (iq_ref != 0) ? 1U : 0U;
 	if (r->prev_ref_nonzero && !ref_nonzero && policy_quiet) {
@@ -153,17 +165,21 @@ static void replica_tick(replica_t *r, int32_t iq_ref, int32_t iq_measured,
 	}
 	r->prev_ref_nonzero = ref_nonzero;
 
-	if (!ref_nonzero && erps < REPLICA_COAST_RELEASE_ERPS) {
+	if (!ref_nonzero && erps > 0U) {
 		int32_t meas = iq_measured;
 		if (meas < 0) meas = -meas;
 		if (meas > 0xFFFF) meas = 0xFFFF;
-		if ((uint16_t)meas > r->peak_iq) r->peak_iq = (uint16_t)meas;
+		if ((uint16_t)meas > r->peak_iq) {
+			r->peak_iq = (uint16_t)meas;
+			r->peak_erps = erps;
+		}
+		if (erps < r->min_erps) r->min_erps = erps;
 	}
 }
 
 int main(void)
 {
-	printf("FW-136.0 click-zone measurement - wiring guards + gating replica\n");
+	printf("FW-136.0 coast current measurement - wiring guards + capture replica\n");
 
 	char *mainc = load(STRINGIZE(MAIN_C_PATH));
 	char *canc  = load(STRINGIZE(CAN_DISPLAY_C_PATH));
@@ -173,140 +189,165 @@ int main(void)
 		return 1;
 	}
 
-	/* ==== T1: both gates, and the replica above matches the production text ==== */
+	/* ==== T1: the coast is defined by the reference, and the peak is a magnitude ==== */
 	{
-		const char *gate = strstr(mainc,
-			"if(!ref_nonzero && (int32_t)ui16_erps < (int32_t)RIDE_COAST_RELEASE_ERPS){");
-		CHECK(gate != NULL,
-			"T1: the peak is gated on a ZERO reference AND a rotor below the commutation switch");
+		CHECK(strstr(mainc, "if(!ref_nonzero && ui16_erps > 0U){") != NULL,
+			"T1: capture runs while the Iq reference is ZERO and the rotor still reports motion");
 		CHECK(strstr(mainc, "if(meas < 0) meas = -meas;") != NULL,
 			"T1: the peak is of the MAGNITUDE - a braking current is negative and must still count");
-		CHECK(strstr(mainc, "if((uint16_t)meas > click_zone_peak_iq) click_zone_peak_iq = (uint16_t)meas;")
-			!= NULL,
-			"T1: and it is a running maximum, matching the replica in this file");
+		CHECK(strstr(mainc, "if((uint16_t)meas > coast_peak_iq){") != NULL &&
+			strstr(mainc, "coast_peak_erps = ui16_erps;") != NULL,
+			"T1: it is a running maximum and it records WHERE the peak happened");
 	}
 
-	/* ==== T2: the measurement must be identical in both A/B images ==== */
+	/* ==== T2: the doubted signal must not be able to close the capture window ==== */
 	{
 		const char *fn = strstr(mainc, "void runPIcontrol(void){");
 		CHECK(fn != NULL, "T2: runPIcontrol() found");
+		const char *cap = fn ? strstr(fn, "if(!ref_nonzero && ui16_erps > 0U){") : NULL;
+		const char *end = cap ? strstr(cap, "if(ui16_erps < coast_min_erps)") : NULL;
+		CHECK(cap != NULL && end != NULL, "T2: the capture block is present");
+		if (cap && end) {
+			size_t span = (size_t)(end - cap);
+			char *body = (char *)malloc(span + 1U);
+			memcpy(body, cap, span);
+			body[span] = '\0';
+			CHECK(strstr(body, "RIDE_COAST_RELEASE_ERPS") == NULL,
+				"T2: the CAPTURE must not be gated on RIDE_COAST_RELEASE_ERPS. Revision 1 was, and "
+				"that hangs the measurement on the very reading this card doubts - if erps freezes "
+				"above the threshold the window never opens and a zero peak proves nothing");
+			free(body);
+		}
+		CHECK(strstr(mainc, "if(ui16_erps < coast_min_erps) coast_min_erps = ui16_erps;") != NULL,
+			"T2: and the doubted reading is MEASURED instead - the lowest erps ever seen on a coast "
+			"says directly whether it ever gets below the threshold");
+	}
+
+	/* ==== T3: the measurement must be identical in both A/B images ==== */
+	{
+		const char *fn = strstr(mainc, "void runPIcontrol(void){");
 		const char *meas = fn ? strstr(fn, "static uint8_t click_prev_ref_nonzero = 0;") : NULL;
 		const char *qz_gate = fn ? strstr(fn, "#if QUIET_ZERO_ENABLE") : NULL;
-		CHECK(meas != NULL, "T2: the measurement block is inside runPIcontrol()");
-		CHECK(qz_gate != NULL, "T2: the QZERO A/B gate is still there");
+		CHECK(meas != NULL, "T3: the measurement block is inside runPIcontrol()");
+		CHECK(qz_gate != NULL, "T3: the QZERO A/B gate is still there");
 		CHECK(meas != NULL && qz_gate != NULL && meas < qz_gate,
-			"T2: the measurement sits BEFORE the QUIET_ZERO_ENABLE gate, so variant A and variant B "
+			"T3: the measurement sits BEFORE the QUIET_ZERO_ENABLE gate, so variant A and variant B "
 			"measure the same thing the same way - otherwise the comparison is worthless");
 	}
 
-	/* ==== T3: cumulative - the only assignment to zero is the definition ==== */
+	/* ==== T4: cumulative - the only assignment to a start value is the definition ==== */
 	{
-		CHECK(count_occurrences(mainc, "click_zone_peak_iq=0") == 1,
-			"T3: click_zone_peak_iq is zeroed exactly once, at its definition - nothing resets it "
-			"between stops, so neither the number of stops nor their order changes the answer");
+		CHECK(count_occurrences(mainc, "coast_peak_iq=0") == 1,
+			"T4: coast_peak_iq is initialised exactly once - nothing resets it between stops");
 		CHECK(count_occurrences(mainc, "click_release_count=0") == 1,
-			"T3: same for the release counter");
-		CHECK(count_occurrences(mainc, "click_handback_count=0") == 1,
-			"T3: same for the handback counter");
-		CHECK(strstr(mainc, "if(click_release_count < 0xFFFFU) click_release_count++;") != NULL &&
-			strstr(mainc, "if(click_handback_count < 0xFFFFU) click_handback_count++;") != NULL,
-			"T3: both counters saturate instead of wrapping - a wrapped counter reads as a small "
-			"number and would be believed");
+			"T4: same for the release counter");
+		CHECK(count_occurrences(mainc, "coast_min_erps=0xFFFF") == 1,
+			"T4: the minimum starts at 0xFFFF, which is also how 'no coast sampled yet' reads on "
+			"the wire - a 0 there would be indistinguishable from a genuine stop");
+		CHECK(strstr(mainc, "if(click_release_count < 0xFFFFU) click_release_count++;") != NULL,
+			"T4: the release counter saturates instead of wrapping - a wrapped counter reads as a "
+			"small number and would be believed");
 	}
 
-	/* ==== T4: answered in every build, not only DIAG ==== */
+	/* ==== T5: answered in every build, not only DIAG ==== */
 	{
 		const char *rd = strstr(canc, "case READ_CMD:");
-		CHECK(rd != NULL, "T4: the READ dispatch exists");
+		CHECK(rd != NULL, "T5: the READ dispatch exists");
 		const char *ours = rd ? strstr(rd, "Ext_ID_Rx.command==0x6032") : NULL;
 		const char *diag_gate = rd ? strstr(rd, "#if CAN_DIAGNOSTICS_ENABLE") : NULL;
-		CHECK(ours != NULL, "T4: READ 0x6032 is dispatched");
+		CHECK(ours != NULL, "T5: READ 0x6032 is dispatched");
 		CHECK(ours != NULL && (diag_gate == NULL || ours < diag_gate),
-			"T4: and it is dispatched BEFORE the diagnostics gate, so the NORMAL image - the one "
-			"that actually clicks - answers it too");
+			"T5: and dispatched BEFORE the diagnostics gate, so the NORMAL image - the one that "
+			"actually clicks - answers it too");
 		CHECK(strstr(canc, "Ext_ID_Rx.command==0x6032 && Ext_ID_Rx.source==5U && receive_message.rx_dlen==0U")
 			!= NULL,
-			"T4: tool only and zero-length, like every other side-effect-free status read here");
+			"T5: tool only and zero-length, like every other side-effect-free status read here");
 	}
 
-	/* ==== T5: reading must not disturb what it reports ==== */
+	/* ==== T6: reading must not disturb what it reports ==== */
 	{
 		const char *fn = strstr(canc, "static void send_click_zone_status(void)");
-		CHECK(fn != NULL, "T5: the responder exists");
+		CHECK(fn != NULL, "T6: the responder exists");
 		const char *end = fn ? strstr(fn, "can_tx_queue_enqueue(0x022A6032U, 8U, d);") : NULL;
-		CHECK(end != NULL, "T5: and it enqueues exactly one frame");
+		CHECK(end != NULL, "T6: and it enqueues exactly one frame");
 		if (fn && end) {
 			size_t span = (size_t)(end - fn);
 			char *body = (char *)malloc(span + 1U);
 			memcpy(body, fn, span);
 			body[span] = '\0';
 			CHECK(strstr(body, "++") == NULL && strstr(body, "= 0") == NULL,
-				"T5: the responder only reads the counters - a status read that alters what it "
-				"reports cannot be trusted twice in one session");
+				"T6: the responder only reads - a status read that alters what it reports cannot be "
+				"trusted twice in one session");
 			free(body);
 		}
 	}
 
-	/* ==== T6: the documented wire format ==== */
+	/* ==== T7: the documented wire format ==== */
 	{
 		CHECK(strstr(canc, "d[0] = (uint8_t)(click_release_count & 0xFFU);") != NULL &&
 			strstr(canc, "d[1] = (uint8_t)((click_release_count >> 8) & 0xFFU);") != NULL,
-			"T6: little-endian, low byte first - the 0x60xx family convention, NOT the big-endian "
+			"T7: little-endian, low byte first - the 0x60xx family convention, NOT the big-endian "
 			"diag logger frames");
-		CHECK(strstr(canc, "d[4] = (uint8_t)(click_zone_peak_iq & 0xFFU);") != NULL,
-			"T6: the peak current is in bytes 4..5, where the card says it is");
-		CHECK(strstr(canc, "d[6] = (uint8_t)(click_handback_erps & 0xFFU);") != NULL,
-			"T6: and the handback speed in bytes 6..7");
+		CHECK(strstr(canc, "d[2] = (uint8_t)(coast_peak_iq & 0xFFU);") != NULL,
+			"T7: the peak current is in bytes 2..3");
+		CHECK(strstr(canc, "d[4] = (uint8_t)(coast_peak_erps & 0xFFU);") != NULL,
+			"T7: the speed at the peak in bytes 4..5");
+		CHECK(strstr(canc, "d[6] = (uint8_t)(coast_min_erps & 0xFFU);") != NULL,
+			"T7: and the lowest coast speed in bytes 6..7");
 	}
 
-	/* ==== T7: the gating behaves as claimed ==== */
+	/* ==== T8: the capture behaves as claimed, including revision 1's blind spot ==== */
 	{
 		replica_t r;
-		memset(&r, 0, sizeof r);
+		replica_reset(&r);
 
-		/* Riding: current under power, well above the switch. Must not be recorded. */
+		/* Riding under power: not a coast. */
 		replica_tick(&r, 200, 180, 90, false);
-		replica_tick(&r, 200, 195, 85, false);
-		CHECK(r.peak_iq == 0,
-			"T7: current drawn while RIDING is not click-zone current - the reference is not zero");
+		replica_tick(&r, 40, 38, 20, false);
+		CHECK(r.peak_iq == 0 && r.min_erps == 0xFFFFU,
+			"T8: current drawn while RIDING is not coast current - the reference is not zero");
 
-		/* Crawling under power below the switch: still a demand, still not the click zone. */
-		replica_tick(&r, 40, 38, 4, false);
-		CHECK(r.peak_iq == 0,
-			"T7: crawling under power below the switch is not the click zone either - without the "
-			"zero-reference gate this would record ordinary slow riding");
-
-		/* The release: reference reaches zero on a quiet policy. */
+		/* Release, then a coast whose reported speed NEVER falls below the 10 erps threshold -
+		 * exactly what a frozen ui16_erps looks like, and exactly what revision 1 could not see. */
 		replica_tick(&r, 0, 30, 60, true);
-		CHECK(r.release_count == 1, "T7: the release edge is counted once");
-		CHECK(r.peak_iq == 0,
-			"T7: and current still flowing ABOVE the switch is not click-zone current");
+		CHECK(r.release_count == 1, "T8: the release edge is counted once");
+		replica_tick(&r, 0, 44, 40, true);
+		replica_tick(&r, 0, 51, 22, true);
+		replica_tick(&r, 0, 33, 12, true);
+		CHECK(r.peak_iq == 51,
+			"T8: a coast that never reports below the threshold is STILL measured - this is the "
+			"case revision 1 would have reported as a confident zero");
+		CHECK(r.peak_erps == 22, "T8: and the peak is stamped with where it happened");
+		CHECK(r.min_erps == 12,
+			"T8: the lowest reported speed is 12 - above RIDE_COAST_RELEASE_ERPS, which is the "
+			"reading that would confirm the freeze");
 
-		/* Coasting down through the switch with current still flowing - the click zone. */
-		replica_tick(&r, 0, 12, 9, true);
-		CHECK(r.peak_iq == 12, "T7: current below the switch with a zero reference IS recorded");
+		/* A second, deeper coast: the peak must not fall, the minimum must. */
+		replica_tick(&r, 180, 170, 80, false);
+		replica_tick(&r, 0, 20, 30, true);
+		replica_tick(&r, 0, 9, 4, true);
+		CHECK(r.release_count == 2, "T8: the next release is counted too");
+		CHECK(r.peak_iq == 51 && r.peak_erps == 22,
+			"T8: a later smaller sample never lowers the peak - one reading has to survive "
+			"everything that happened before it");
+		CHECK(r.min_erps == 4,
+			"T8: but the minimum does fall, which is how a WORKING speed reading looks");
 
-		replica_tick(&r, 0, -25, 5, true);
-		CHECK(r.peak_iq == 25, "T7: a negative (braking) current counts by magnitude");
-
-		replica_tick(&r, 0, 3, 2, true);
-		CHECK(r.peak_iq == 25,
-			"T7: a later smaller sample never lowers the peak - one snapshot per session has to "
-			"survive everything that happened before it");
-
-		/* A second stop keeps accumulating rather than starting over. */
-		replica_tick(&r, 150, 140, 70, false);
-		replica_tick(&r, 0, 0, 60, true);
-		CHECK(r.release_count == 2, "T7: the next release is counted too");
-		CHECK(r.peak_iq == 25, "T7: and the peak survives into the next stop");
+		/* Standing still before the first Hall edge: a genuine zero, not a slow rotor. */
+		replica_t cold;
+		replica_reset(&cold);
+		replica_tick(&cold, 0, 7, 0, false);
+		CHECK(cold.peak_iq == 0 && cold.min_erps == 0xFFFFU,
+			"T8: erps 0 is 'no Hall edge yet', not 'stopped' - sampling it would put a false floor "
+			"under the minimum on every power-on");
 	}
 
 	free(mainc); free(canc);
 
 	if (host_test_failures == 0) {
-		printf("All FW-136.0 click-zone measurement checks passed.\n");
+		printf("All FW-136.0 coast measurement checks passed.\n");
 		return 0;
 	}
-	printf("\n%d FW-136.0 click-zone measurement check(s) FAILED.\n", host_test_failures);
+	printf("\n%d FW-136.0 coast measurement check(s) FAILED.\n", host_test_failures);
 	return 1;
 }

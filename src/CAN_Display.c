@@ -136,9 +136,9 @@ extern volatile uint8_t  bus_seen;          //FW-135 power watchdog arm flag (ma
 extern volatile uint16_t update_hold_ticks; //FW-135 update session hold (main.c) - suspends the silence power-off
 extern volatile uint16_t ride_seconds;    //FW-134: seconds of motion (defined in main.c)
 extern volatile uint16_t click_release_count;   //FW-136.0 (main.c) - quiet descents to zero Iq reference
-extern volatile uint16_t click_handback_count;  //FW-136.0 (main.c) - QZERO handbacks to the zero-current PI
-extern volatile uint16_t click_zone_peak_iq;    //FW-136.0 (main.c) - peak |Iq| in the click zone
-extern volatile uint16_t click_handback_erps;   //FW-136.0 (main.c) - erps at the last handback
+extern volatile uint16_t coast_peak_iq;         //FW-136.0 (main.c) - peak |Iq| over the whole coast
+extern volatile uint16_t coast_peak_erps;       //FW-136.0 (main.c) - rotor speed at that peak
+extern volatile uint16_t coast_min_erps;        //FW-136.0 (main.c) - lowest erps ever reported during a coast
 //FW-132: evidence for tightening the 0x3005 ownership later - how many arrived and whom the last
 //one was addressed to. Diagnostics only; nothing in the control path reads these.
 volatile uint16_t cmd3005_seen=0;
@@ -300,15 +300,21 @@ static void current_cal_serialize_dump(uint8_t out[66])
  * FW-136.0: READ 0x6032 -> NORMAL_ACK 0x022A6032, DLC 8. Four little-endian u16s, cumulative
  * since power-on:
  *
- *   0..1  quiet descents to an exact zero Iq reference   (the denominator)
- *   2..3  QZERO handbacks to the zero-current PI          (0 while release count climbs = the
- *                                                          handback never fires, see FW-136 10.3)
- *   4..5  peak |measured Iq| in the click zone           (1 unit = CAL_I = 95 mA)
- *   6..7  erps at the last handback                      (0 = never happened)
+ *   0..1  quiet descents to an exact zero Iq reference  (the denominator - and note that Walk
+ *                                                        Assist can NEVER move this: ride_control
+ *                                                        returns BYPASS before the zero policy is
+ *                                                        granted, so only a PEDAL release counts)
+ *   2..3  peak |measured Iq| over the whole coast       (1 unit = CAL_I = 95 mA)
+ *   4..5  rotor erps at that peak                       (says WHERE the current was)
+ *   6..7  lowest erps ever reported during a coast      (0xFFFF = no coast sampled yet; a value
+ *                                                        that never drops below
+ *                                                        RIDE_COAST_RELEASE_ERPS means the speed
+ *                                                        reading freezes as the rotor stops, and
+ *                                                        QZERO's handback can never fire)
  *
  * Little-endian to match the 0x60xx command family this lives in, NOT the big-endian diag
  * logger frames - the two conventions exist side by side and mixing them up is how a reading
- * gets misinterpreted. Example: bytes "32 00" in 4..5 are 0x0032 = 50 units = ~4,75 A.
+ * gets misinterpreted. Example: bytes "32 00" in 2..3 are 0x0032 = 50 units = ~4,75 A.
  *
  * Present in EVERY build, not only DIAG: the image that clicks is the image that has to be
  * measured, and it produces no bus traffic at all until something asks for it.
@@ -318,12 +324,12 @@ static void send_click_zone_status(void)
 	uint8_t d[8];
 	d[0] = (uint8_t)(click_release_count & 0xFFU);
 	d[1] = (uint8_t)((click_release_count >> 8) & 0xFFU);
-	d[2] = (uint8_t)(click_handback_count & 0xFFU);
-	d[3] = (uint8_t)((click_handback_count >> 8) & 0xFFU);
-	d[4] = (uint8_t)(click_zone_peak_iq & 0xFFU);
-	d[5] = (uint8_t)((click_zone_peak_iq >> 8) & 0xFFU);
-	d[6] = (uint8_t)(click_handback_erps & 0xFFU);
-	d[7] = (uint8_t)((click_handback_erps >> 8) & 0xFFU);
+	d[2] = (uint8_t)(coast_peak_iq & 0xFFU);
+	d[3] = (uint8_t)((coast_peak_iq >> 8) & 0xFFU);
+	d[4] = (uint8_t)(coast_peak_erps & 0xFFU);
+	d[5] = (uint8_t)((coast_peak_erps >> 8) & 0xFFU);
+	d[6] = (uint8_t)(coast_min_erps & 0xFFU);
+	d[7] = (uint8_t)((coast_min_erps >> 8) & 0xFFU);
 	can_tx_queue_enqueue(0x022A6032U, 8U, d);
 }
 

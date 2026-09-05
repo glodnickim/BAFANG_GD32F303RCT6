@@ -172,29 +172,16 @@ void quiet_zero_tick(
 			handback_erps = relative;
 		}
 	}
-	if (in->rotor_erps < handback_erps) {
-		qz->state = (uint32_t)QZERO_INACTIVE;
+	/*
+	 * FW-136.2: START the handback, once. The fade itself runs below, after the abort guard, so
+	 * a genuine overcurrent can still cut it short.
+	 */
+	if (qz->state != (uint32_t)QZERO_HANDBACK && in->rotor_erps < handback_erps) {
+		qz->state = (uint32_t)QZERO_HANDBACK;
 		qz->blend_tick = 0U;
 		qz->low_speed_exits++;
 		out->low_speed_release = true;
 		out->clear_aw_edge = true;
-		if (qz->erps_entry > 0 && in->rotor_erps > 0) {
-			int32_t erps_now = in->rotor_erps;
-			/* Only ever handed back at a lower speed; clamp so a bad reading cannot amplify. */
-			if (erps_now > qz->erps_entry) {
-				erps_now = qz->erps_entry;
-			}
-			float ratio = (float)erps_now / (float)qz->erps_entry;
-			out->apply_integral = true;
-			out->iq_integral = qz->iq_integral_entry * ratio;
-			/*
-			 * The d axis is NOT scaled: with the q current already at zero there is no
-			 * cross-coupling term left for u_d to cancel, so zero is the value that nulls it.
-			 */
-			out->id_integral = 0.0f;
-		}
-		out->state = qz->state;
-		return;
 	}
 
 	/*
@@ -213,6 +200,49 @@ void quiet_zero_tick(
 		qz->aborts++;
 		out->aborted = true;
 		out->clear_aw_edge = true;
+		out->state = qz->state;
+		return;
+	}
+
+	/*
+	 * FW-136.2 HANDBACK FADE. The value that nulls the current is the one matching the back-EMF,
+	 * and back-EMF is proportional to speed - so the integral captured at entry, scaled by how
+	 * much the rotor has slowed since, IS that value to a first order. The target is recomputed
+	 * every tick rather than latched at the start, because the rotor keeps slowing throughout the
+	 * fade and a latched target would be handing back a voltage for a speed the motor no longer
+	 * has.
+	 *
+	 * What ramps is the BLEND, not the target: 0 -> 1 over QZERO_HANDBACK_FADE_TICKS. The braking
+	 * current therefore decays smoothly to zero instead of being switched off, which is the whole
+	 * point - a torque that disappears in one tick is a torque step, and a torque step is a click.
+	 *
+	 * The d axis is NOT scaled: with the q current already at zero there is no cross-coupling
+	 * term left for u_d to cancel, so zero is the value that nulls it.
+	 */
+	if (qz->state == (uint32_t)QZERO_HANDBACK) {
+		float target = 0.0f;
+		if (qz->erps_entry > 0 && in->rotor_erps > 0) {
+			int32_t erps_now = in->rotor_erps;
+			/* Only ever handed back at a lower speed; clamp so a bad reading cannot amplify. */
+			if (erps_now > qz->erps_entry) {
+				erps_now = qz->erps_entry;
+			}
+			target = qz->iq_integral_entry *
+				((float)erps_now / (float)qz->erps_entry);
+		}
+		qz->blend_tick++;
+		out->apply_integral = true;
+		out->id_integral = 0.0f;
+		if (qz->blend_tick >= QZERO_HANDBACK_FADE_TICKS) {
+			/* Fully handed back. freeze_aw is deliberately NOT set: the PI owns the axis now. */
+			qz->state = (uint32_t)QZERO_INACTIVE;
+			qz->blend_tick = 0U;
+			out->iq_integral = target;
+			out->state = qz->state;
+			return;
+		}
+		out->iq_integral = target * ((float)qz->blend_tick * QZERO_HANDBACK_RECIP);
+		out->freeze_aw = true;
 		out->state = qz->state;
 		return;
 	}

@@ -431,24 +431,51 @@ static void low_speed_handback_checks(void)
 		/* One erps below the threshold: the angle is about to change formula. */
 		in.rotor_erps = MODEL_MIN_BRAKE_ERPS - 1;
 		quiet_zero_tick(&qz, &in, &out);
-		CHECK(out.state == (uint32_t)QZERO_INACTIVE && out.low_speed_release &&
-			!out.freeze_aw && out.clear_aw_edge && qz.low_speed_exits == 1U,
-			"T15a: below the threshold the axis goes back to the full zero-current PI");
+		CHECK(out.state == (uint32_t)QZERO_HANDBACK && out.low_speed_release &&
+			out.clear_aw_edge && qz.low_speed_exits == 1U,
+			"T15a: below the threshold the handback BEGINS - reported once, on the tick the rotor "
+			"enters the zone");
 		/*
-		 * QZERO-3: the handback must leave the axis in the FREE-COAST state, not merely heading
-		 * for it. Back-EMF is proportional to speed, so the integral that nulls the current at the
-		 * handback speed is the entry integral scaled by how much the rotor has slowed. Handing
-		 * back a zero instead leaves the applied voltage far below the back-EMF, and braking
-		 * current keeps flowing down through the 60-degree stepping zone - which is the click the
-		 * rider still heard after FW-131, and which a currentless coast provably does not produce.
+		 * FW-136.2 changed this from a step into a fade, and the assertions changed with it.
+		 *
+		 * QZERO-3 still decides WHAT to hand back: back-EMF is proportional to speed, so the
+		 * integral that nulls the current is the entry integral scaled by how much the rotor has
+		 * slowed. Handing back a zero instead leaves the applied voltage far below the back-EMF
+		 * and braking current keeps flowing through the 60-degree stepping zone.
+		 *
+		 * What FW-136.2 adds is HOW. Handing the whole value over in one tick removes a real
+		 * braking torque instantaneously, and a torque step is a click - which is exactly what
+		 * the rider reported hearing at the handback point once FW-136 moved it up to half the
+		 * release speed, where there is still torque to remove. So the value is now faded in,
+		 * and what this test proves is that the ramp is monotonic and ends on the right value.
 		 */
 		{
 			float expected = 900.0f * (float)(MODEL_MIN_BRAKE_ERPS - 1) /
 				(float)MODEL_CRUISE_ERPS;
-			CHECK(out.apply_integral,
-				"T15a: QZERO-3 hands the integral back explicitly instead of leaving it at zero");
+			CHECK(out.apply_integral && out.iq_integral > 0.0f && out.iq_integral < expected * 0.05f,
+				"T15a: the first tick of the fade applies only a sliver of the target, not the lot");
+
+			float prev = out.iq_integral;
+			bool monotonic = true;
+			int fade_ticks = 1;
+			while (out.state == (uint32_t)QZERO_HANDBACK && fade_ticks < 5000) {
+				quiet_zero_tick(&qz, &in, &out);
+				fade_ticks++;
+				if (out.iq_integral < prev) monotonic = false;
+				prev = out.iq_integral;
+			}
+			printf("  T15a handback fade completed in %d ticks (%.1f ms at 16 kHz)\n",
+				fade_ticks, (double)fade_ticks / 16.0);
+			CHECK(monotonic,
+				"T15a: the fade only ever rises - a dip would be a torque reversal, audible for "
+				"the same reason the step was");
+			CHECK(fade_ticks == (int)QZERO_HANDBACK_FADE_TICKS,
+				"T15a: and it takes exactly the configured fade, so changing the constant changes "
+				"the behaviour rather than being absorbed somewhere");
+			CHECK(out.state == (uint32_t)QZERO_INACTIVE && !out.freeze_aw,
+				"T15a: at the end the axis belongs to the full zero-current PI again");
 			CHECK(out.iq_integral > expected * 0.99f && out.iq_integral < expected * 1.01f,
-				"T15a: and the value handed back is the back-EMF match for the handback speed");
+				"T15a: and the value it ends on is the back-EMF match for the handback speed");
 			CHECK(out.id_integral == 0.0f,
 				"T15a: the d axis is handed back at zero - with Iq already null there is nothing to cancel");
 			CHECK(out.iq_integral < 900.0f && out.iq_integral > 0.0f,
@@ -456,7 +483,6 @@ static void low_speed_handback_checks(void)
 		}
 		CHECK(!out.aborted && qz.aborts == 0U,
 			"T15a: this is a normal end of the release, not the overcurrent abort");
-
 		/* And it does not re-arm while the rotor coasts out - there is no new release edge. */
 		bool rearmed = false;
 		for (int i = 0; i < 4000; ++i) {
@@ -537,9 +563,11 @@ static void low_speed_handback_checks(void)
 		CHECK(handback_tick > expected_handback - 600 && handback_tick < expected_handback + 600,
 			"T15d: the handback lands at QZERO_HANDBACK_PCT of the release speed, not just above "
 			"standstill");
-		CHECK(braked_ticks > expected_handback - 600 && braked_ticks < expected_handback + 600,
-			"T15d: braking covers the ramp down to that point - half the speed is still 75 % of "
-			"the energy, so the stop stays short while the whole low-speed zone goes current-free");
+		CHECK(braked_ticks > expected_handback + (int)QZERO_HANDBACK_FADE_TICKS - 600 &&
+			braked_ticks < expected_handback + (int)QZERO_HANDBACK_FADE_TICKS + 600,
+			"T15d: the module acts from the release until the handback fade completes - half the "
+			"speed is still 75 % of the energy, so the stop stays short while the whole low-speed "
+			"zone goes current-free");
 		CHECK(qz.entries == 1U && qz.aborts == 0U && qz.low_speed_exits == 1U,
 			"T15d: one release, one entry, one handback, no abort");
 	}

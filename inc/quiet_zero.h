@@ -54,7 +54,16 @@
 typedef enum {
 	QZERO_INACTIVE = 0,
 	QZERO_BLEND    = 1,   /* linear fade of both integrals toward exact zero */
-	QZERO_HOLD      = 2   /* both integrals held at exact zero, P path still live */
+	QZERO_HOLD      = 2,  /* both integrals held at exact zero, P path still live */
+	/*
+	 * FW-136.2: the mirror of QZERO_BLEND. Entry fades the integral OUT over 10 ms precisely so
+	 * the start of braking is inaudible; until FW-137 unfroze the speed reading the exit never
+	 * ran at all, so nobody noticed it had no fade of its own and handed the axis back in ONE
+	 * tick. That is a real braking torque removed instantaneously - the owner heard it as "you
+	 * can hear it disconnect" once FW-136 moved the handback to half the release speed, where
+	 * there is still torque to remove. This state fades it back IN instead.
+	 */
+	QZERO_HANDBACK  = 3
 } qzero_state_t;
 
 /*
@@ -79,6 +88,16 @@ typedef enum {
  * the module stays linkable in the host suite without dragging the firmware's configuration in.
  */
 #define QZERO_HANDBACK_PCT 50
+
+/*
+ * FW-136.2: how long the handback takes. The entry fade is 10 ms; this is deliberately longer,
+ * because entry removes nothing (current is already zero at the reference) while the exit removes
+ * a real braking torque. 50 ms is four times the entry fade and still far below what a leg can
+ * feel, and there is plenty of room for it: after FW-136 the handback happens at half the release
+ * speed, with the whole rest of the run-down still to come.
+ */
+#define QZERO_HANDBACK_FADE_TICKS 800U
+#define QZERO_HANDBACK_RECIP (1.0f / (float)QZERO_HANDBACK_FADE_TICKS)
 
 /* ISR-owned state. One instance, in main.c, beside the regulators it acts on. */
 typedef struct {

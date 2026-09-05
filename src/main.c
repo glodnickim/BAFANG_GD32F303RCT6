@@ -2992,6 +2992,7 @@ void reg_ADC_processing(void)
 			.cadence_rpm = MS.cadence,
 			.wheel_speed_x100 = MS.Speedx100,
 			.motor_erps = ui16_erps,
+			.motor_erps_age_ticks = ui16_erps_counter,   //FW-136.1: movement is an edge, not a speed
 			.motor_voltage_utilization = (MS.u_abs > 2048) ? 2048U :
 				(MS.u_abs > 0 ? (uint16_t)MS.u_abs : 0U),
 			.pas_forward = ride_core_pedaling,

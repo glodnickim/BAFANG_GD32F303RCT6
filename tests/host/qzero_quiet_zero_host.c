@@ -516,9 +516,30 @@ static void low_speed_handback_checks(void)
 		}
 		CHECK(handback_tick > 0,
 			"T15d: the handback happens once, during the coast, not at the release edge");
-		/* 93 -> 10 erps is 89.2 % of the ramp; the hold must cover essentially all of it. */
-		CHECK(braked_ticks > 20000 && braked_ticks < 22000,
-			"T15d: braking covers the fast part of the spin-down (~89 % of it), which is where the energy is");
+		/*
+		 * FW-136 changed what "enough braking" means, so this assertion changed with it.
+		 *
+		 * Before: the hold ran from 93 erps all the way down to 10, i.e. 89 % of the ramp, and
+		 * only the last sliver coasted. That sliver sits exactly where the speed reading is least
+		 * trustworthy, so the decision to let go arrived late - measured on the bike, about 30 ms
+		 * after the last Hall edge, sometimes before the final commutation steps and sometimes
+		 * after. That is the "clicks about half the time" the owner reported.
+		 *
+		 * Now: the handback is taken at QZERO_HANDBACK_PCT of the speed the release started from,
+		 * which is a decision made where Hall edges are dense and nothing arrives late. Braking
+		 * therefore covers the ramp down to half speed - and because energy goes as the square of
+		 * speed, HALF THE SPEED IS STILL THREE QUARTERS OF THE ENERGY. The bike loses almost
+		 * nothing in stopping distance and gains a completely current-free low-speed zone.
+		 */
+		int expected_handback = (24000 * (100 - QZERO_HANDBACK_PCT)) / 100;
+		printf("  T15d handback at tick %d of 24000 (expected ~%d), braked %d\n",
+			handback_tick, expected_handback, braked_ticks);
+		CHECK(handback_tick > expected_handback - 600 && handback_tick < expected_handback + 600,
+			"T15d: the handback lands at QZERO_HANDBACK_PCT of the release speed, not just above "
+			"standstill");
+		CHECK(braked_ticks > expected_handback - 600 && braked_ticks < expected_handback + 600,
+			"T15d: braking covers the ramp down to that point - half the speed is still 75 % of "
+			"the energy, so the stop stays short while the whole low-speed zone goes current-free");
 		CHECK(qz.entries == 1U && qz.aborts == 0U && qz.low_speed_exits == 1U,
 			"T15d: one release, one entry, one handback, no abort");
 	}

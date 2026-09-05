@@ -67,6 +67,19 @@ typedef enum {
 /* Compile-time reciprocal so the fade needs a multiply, never a division, in the ISR. */
 #define QZERO_BLEND_RECIP (1.0f / (float)QZERO_BLEND_TICKS)
 
+/*
+ * FW-136: the handback threshold as a PERCENTAGE of the speed the release started from.
+ *
+ * The floor (min_brake_erps, RIDE_COAST_RELEASE_ERPS) stays; this only ever raises the point at
+ * which the brake lets go. 50 leaves 75 % of the kinetic energy to the brake - energy goes as the
+ * square of speed - so the run-down stays short while the entire low-speed zone, where the
+ * commutation angle steps, becomes current-free.
+ *
+ * It is here rather than in config.h on purpose: quiet_zero.c includes only its own header, so
+ * the module stays linkable in the host suite without dragging the firmware's configuration in.
+ */
+#define QZERO_HANDBACK_PCT 50
+
 /* ISR-owned state. One instance, in main.c, beside the regulators it acts on. */
 typedef struct {
 	uint32_t state;          /* qzero_state_t */

@@ -1,6 +1,6 @@
 # FW-136 — najpierw hamowanie, potem wolny wybieg
 
-**Status: KARTA DO AKCEPTACJI. Kodu nie zmieniałem.**
+**Status: ZAAKCEPTOWANE (próg 50 %) I WDROŻONE. NIE NA ROWERZE.**
 Data: 2026-09-04. Pomysł właściciela: *„pierwsza część jest hamowana, a potem puszczamy jako
 wybieg — powiedzmy 50 %, nie w punkcie przed samym zatrzymaniem"*.
 
@@ -199,3 +199,44 @@ erps w chwili oddania            (gdzie realnie wypada prog)
 
 To rozstrzyga §10.3 jednym logiem i jest **warunkiem wstępnym** do strojenia progu — bez tego
 dobieralibyśmy liczbę do mechanizmu, o którym nie wiemy, czy w ogóle się uruchamia.
+
+---
+
+## 11. Wdrożone — próg 50 %
+
+Decyzja właściciela 2026-09-05: **`QZERO_HANDBACK_PCT 50`**.
+
+Stała mieszka w `inc/quiet_zero.h`, nie w `config.h` — `quiet_zero.c` włącza wyłącznie własny
+nagłówek, żeby moduł dał się linkować w zestawie hostowym bez wciągania konfiguracji firmware'u.
+
+```c
+handback_erps = MAX( min_brake_erps , erps_entry * 50 / 100 )
+```
+
+Podłoga `min_brake_erps` (czyli `RIDE_COAST_RELEASE_ERPS`) zostaje: zwolnienie rozpoczęte poniżej
+niej nigdy nie dostaje progu jeszcze niższego, a FW-048 zachowuje swoje znaczenie bez zmian.
+
+### 11.1 Co pokazał test
+
+Zjazd 93 → 0 erps przez 24000 tików: **oddanie osi przy tiku 12388**, czyli przy ~48 % zjazdu —
+zgodnie z projektem. Hamowanie obejmuje ramp do tego punktu.
+
+### 11.2 Asercja, którą trzeba było zmienić — i dlaczego to nie jest naginanie testu
+
+T15d w `qzero_quiet_zero_host.c` twierdziło, że hamowanie ma obejmować **89 % zjazdu** (93 → 10
+erps). To była **definicja starego projektu**, nie własność fizyczna, więc razem ze zmianą projektu
+musiała się zmienić.
+
+Nowa asercja mówi to, co FW-136 faktycznie obiecuje: oddanie osi ląduje przy
+`QZERO_HANDBACK_PCT` prędkości zwolnienia. A rachunek energii tłumaczy, dlaczego to nie jest
+strata: **połowa prędkości to wciąż trzy czwarte energii**, więc droga zatrzymania prawie się nie
+zmienia, a cała strefa niskich obrotów staje się bezprądowa.
+
+Test drukuje teraz zmierzony punkt oddania obok oczekiwanego, więc zmiana progu jest widoczna
+w wyniku, a nie ukryta w zakresie.
+
+### 11.3 Stan weryfikacji
+
+- kompilacja **Developer** NORMAL `RESULT: PASS`, numer wersji **nie zużyty**;
+- zestaw QZERO **ALL CHECKS PASSED** (linkuje prawdziwy moduł, nie replikę);
+- pełny przebieg hostowy bez **nowych** awarii — zostaje znana `rolling_no_assist_diag_host`.

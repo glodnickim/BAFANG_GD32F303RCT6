@@ -147,7 +147,32 @@ void quiet_zero_tick(
 	 * free-coast state directly, with no transient to hear. Energy scales with the square of
 	 * speed, so surrendering the last few rev/s of braking costs well under 1 % of the run-on.
 	 */
-	if (in->rotor_erps < in->min_brake_erps) {
+	/*
+	 * FW-136: hand the axis back at a FRACTION OF THE RELEASE SPEED, not just above standstill.
+	 *
+	 * min_brake_erps alone means the whole run-down is braked and only the last sliver coasts -
+	 * and that sliver sits in the speed zone where the reading is least trustworthy and where
+	 * the decision therefore arrives late. Measured on the bike: the cut fires about 30 ms after
+	 * the last Hall edge, sometimes before the last commutation steps and sometimes after, which
+	 * is exactly the "clicks about half the time" the owner reported.
+	 *
+	 * Taking the threshold as a fraction of the speed the release started from moves the decision
+	 * to where Hall edges are dense and the estimate is fresh, so there is nothing left to arrive
+	 * late for. Energy goes as the square of speed, so handing back at half the speed still lets
+	 * the brake take 75 % of it - the run-down stays short, and the whole low-speed zone becomes
+	 * current-free, which is the condition already known to be silent.
+	 *
+	 * min_brake_erps stays as the floor. A release that began below it never gets a relative
+	 * threshold under it, and FW-048 keeps its own meaning untouched.
+	 */
+	int32_t handback_erps = in->min_brake_erps;
+	if (qz->erps_entry > 0) {
+		int32_t relative = ((int32_t)qz->erps_entry * QZERO_HANDBACK_PCT) / 100;
+		if (relative > handback_erps) {
+			handback_erps = relative;
+		}
+	}
+	if (in->rotor_erps < handback_erps) {
 		qz->state = (uint32_t)QZERO_INACTIVE;
 		qz->blend_tick = 0U;
 		qz->low_speed_exits++;

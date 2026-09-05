@@ -30,6 +30,13 @@ typedef struct {
 	uint8_t cadence_rpm;
 	uint32_t wheel_speed_x100;
 	uint16_t motor_erps;
+	/*
+	 * FW-136.1: 4 kHz ticks since the last Hall edge (ui16_erps_counter). "Has the rotor moved
+	 * at all" is an EVENT, and an averaged speed can never answer it - the same lesson FW-130.1
+	 * learned in Walk Assist and FW-137 in the estimator itself. A consumer detects movement by
+	 * this value DROPPING, because only an edge resets it.
+	 */
+	uint16_t motor_erps_age_ticks;
 	uint16_t motor_voltage_utilization;
 
 	bool pas_forward;

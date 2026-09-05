@@ -2313,9 +2313,28 @@ void TIMER2_IRQHandler(void)
             /* read channel 0 capture value */
 
         	ui16_timertics=timer_channel_capture_value_register_read(TIMER2,TIMER_CH_0);
-        	ui32_erps_cumulated-=ui32_erps_cumulated>>5;
-        	ui32_erps_cumulated+=500000/(ui16_timertics*6);
+        	{
+        	/*
+        	 * FW-137: one fresh interval, then either blend it or START FROM it.
+        	 *
+        	 * The 32-edge average is only worth having while the rotor keeps turning. After the
+        	 * ceiling below has declared the rotor stopped, the accumulator holds nothing worth
+        	 * averaging with, and blending into it would make the first reading after a restart
+        	 * one thirty-second of the truth - a brand new bug in place of the old one. So a
+        	 * re-acquire SEEDS the accumulator with this sample instead (32x the sample is the
+        	 * average's own steady state, so the very first reading is already correct).
+        	 *
+        	 * Same shape as FW-131.1's angle trust: history from before a standstill is not
+        	 * evidence about the speed after it.
+        	 */
+        	uint32_t erps_sample = 500000/(ui16_timertics*6);
+        	if(ui16_erps == 0U) ui32_erps_cumulated = erps_sample << 5;
+        	else {
+        		ui32_erps_cumulated-=ui32_erps_cumulated>>5;
+        		ui32_erps_cumulated+=erps_sample;
+        	}
         	ui16_erps=ui32_erps_cumulated>>5;
+        	}
         	ui16_erps_counter=0; //FW-029: age of the last Hall event. Without this reset the
         	                     //counter only ever grew, so a "motor stopped" timeout was
         	                     //impossible and ui16_erps could report a stale speed forever.
@@ -3012,6 +3031,44 @@ void reg_ADC_processing(void)
     //FW-103/104: control_time_ticks replaces Speed_counter - incremented in TIMER1_IRQHandler itself.
     if(uint16_half_rotation_counter<64000)uint16_half_rotation_counter++;
     if(ui16_erps_counter<64000)ui16_erps_counter++;
+    /*
+     * FW-137: the edge-age ceiling. THE fix for "the speed reading freezes above every threshold
+     * that was supposed to catch a stop".
+     *
+     * Three Hall sensors 120 degrees apart give six states per electrical revolution, so every
+     * edge is exactly 60 degrees. That makes the time SINCE the last edge a measurement in its
+     * own right: if 60 degrees have not been completed in the elapsed time, the rotor cannot be
+     * turning faster than one edge per that time. This is not a filter and not an estimate - it
+     * is an upper bound that follows from the edge NOT having arrived.
+     *
+     * Why it was needed: ui16_erps only ever changes inside the Hall ISR, so a stopping rotor
+     * stops updating it and the last value survives forever. Measured on the bike (FW-136.0,
+     * 2026-09-05): the lowest value ever reported during a coast was 24, against thresholds of
+     * 10 (FW-048 coast release, QZERO handback), 3 (FW-041 gear preload) and 0 (smooth start).
+     * All four were unreachable. They were not broken - they were never called.
+     *
+     * Two properties make this safe to put under everything at once:
+     *   - it can only ever LOWER the reading, and only when an edge is overdue;
+     *   - with the 2x guard band it cannot bind at a steady speed, where the next edge always
+     *     arrives within one expected interval. Without that band it would sit exactly on the
+     *     boundary and nibble at every reading through ordinary jitter.
+     *
+     * The accumulator is pulled down with the output on purpose. Clamping only the reported value
+     * would let the stale 32-edge average put it straight back on the next edge, and threshold
+     * tests would then chatter instead of latching.
+     */
+    if(ui16_erps > 0U){
+        uint32_t edges_per_s = (uint32_t)ui16_erps * 6U;
+        uint32_t expected_ticks = (uint32_t)CONTROL_TIMEBASE_HZ / edges_per_s;
+        if((uint32_t)ui16_erps_counter > (2U * expected_ticks) + 1U){
+            uint32_t ceiling = (uint32_t)CONTROL_TIMEBASE_HZ /
+                ((uint32_t)ui16_erps_counter * 6U);
+            if(ceiling < (uint32_t)ui16_erps){
+                ui16_erps = (uint16_t)ceiling;
+                ui32_erps_cumulated = (uint32_t)ui16_erps << 5;
+            }
+        }
+    }
 
     //--- Walk Assist physical button (PA4), debounce z histereza (press + release) ---
     uint8_t wa_btn_in_range=(adc_value[5]>=WA_BUTTON_THRESHOLD_LOW && adc_value[5]<=WA_BUTTON_THRESHOLD_HIGH);

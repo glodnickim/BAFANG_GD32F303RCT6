@@ -49,6 +49,7 @@ $sampleWindowCPathForward = (Join-Path $root 'src\sample_window.c') -replace '\\
 $armMathHPathForward = (Join-Path $root 'Firmware\CMSIS\arm_math.h') -replace '\\', '/'
 $configHPathForward = (Join-Path $root 'inc\config.h') -replace '\\', '/'
 $batteryCurrentCPathForward = (Join-Path $root 'src\battery_current.c') -replace '\\', '/'
+$walkAssistMotorCPathForward = (Join-Path $root 'src\walk_assist_motor.c') -replace '\\', '/'
 
 # Every harness and the module(s) it links. Add new ones here.
 $suites = @(
@@ -79,6 +80,17 @@ $suites = @(
        Harness = Join-Path $PSScriptRoot 'fw131_rotor_angle_host.c'
        Modules = @(Join-Path $root 'src\rotor_angle.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+
+    @{ Name = 'FW-137 edge-age speed ceiling (estimator replica + production wiring guards)'
+       Harness = Join-Path $PSScriptRoot 'fw137_erps_edge_age_host.c'
+       # No modules linked - the estimator lives in main.c's Hall ISR and 4 kHz path. The replica
+       # reproduces both halves; the guards prove the ceiling is in the PERIODIC path (an ISR that
+       # is not firing cannot fix a value that is stale because it is not firing) and that
+       # walk_assist_motor.c never touches ui16_erps at all.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward",
+                   "-DWALK_ASSIST_MOTOR_C_PATH=$walkAssistMotorCPathForward") },
 
     @{ Name = 'FW-136.0 click-zone measurement (wiring guards + gating replica)'
        Harness = Join-Path $PSScriptRoot 'fw1360_click_measurement_host.c'

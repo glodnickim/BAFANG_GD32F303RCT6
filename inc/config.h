@@ -445,9 +445,9 @@
 #error "FW-117.1: CAN_DIAGNOSTICS_ENABLE=1 and FW117_BRIDGE_TIMING_TEST=1 together are forbidden - the bridge trace image and the 12000-tick timing test must not be combined in one build."
 #endif
 // FW-117: bridge start is gated solely by positive Iq + current calibration safety.
-// The old BRIDGE_START_IQ_DEADZONE (=10) created a deadzone where preload (PRELOAD_IQ_CAP=10)
-// could never start the bridge. Removed: ride_control owns the Iq decision, the power stage
-// responds to any positive demand.
+// The old BRIDGE_START_IQ_DEADZONE (=10) created a deadzone where a small legitimate positive
+// current request could never start the bridge. Removed: ride_control owns the Iq decision and
+// the power stage responds to any positive demand.
 
 // FW-126 FOC START TRACE reuses the small FW-117 recorder infrastructure, but has its own
 // deliberately bounded 250 Hz / 280 ms capture and is compiled only in a diagnostic image.

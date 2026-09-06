@@ -497,6 +497,10 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DFOC_C_PATH=$focCPathForward") },
+    @{ Name = 'FW-139 startup has one current-trajectory owner (no Hall-gated preload)'
+       Harness = Join-Path $PSScriptRoot 'fw139_start_trajectory_host.c'
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
     @{ Name = 'QS-3 final Iq slew parity (real final ramp + lifecycle wiring)'
        Harness = Join-Path $PSScriptRoot 'qs3_final_iq_slew_host.c'
        Modules = @((Join-Path $root 'src\assist_dynamics.c'),

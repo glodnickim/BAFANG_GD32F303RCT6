@@ -235,27 +235,20 @@ _Static_assert(RIDE_HARD_CUT_RAMP_MS <= 250,
 	"the hard-cut ramp is a safety bound, not a comfort setting");
 
 /*
- * FW-041: gear preload. Starting from standstill the drivetrain has backlash and
- * static friction: current builds up with the wheel still held, then the rotor breaks
- * away all at once and the gears slap ("wyrwanie" at engage). The Iq ramp controls
- * current, not speed, so it cannot smooth that breakaway on its own.
+ * FW-139: the former FW-041 Hall-gated gear preload was removed.
  *
- * Fix (simple variant): while the motor is standing still at a fresh start, cap the
- * assist target at a small preload level. The existing ramp walks up to that cap
- * gently, taking up the backlash quietly. As soon as the rotor actually moves — or the
- * timeout expires so a stiff drivetrain can never stall here — the cap is released and
- * the normal ramp continues from the current value (bumpless, no reset).
+ * It capped a fresh standstill start at ~1 A and released that cap only after a Hall edge or a
+ * 300 ms timeout. Once FW-137 made standstill detection truthful, the cap finally became active
+ * and exposed its architectural defect: if static drivetrain load needed more than the cap, the
+ * controller itself prevented the rotor motion whose Hall edge it was waiting for. The result
+ * was load-dependent dead time followed by a release of the cap - exactly the delay/grab pattern
+ * a bounded final-Iq trajectory is supposed to avoid.
+ *
+ * Start torque is now shaped only by the ONE final 16 kHz Iq trajectory. It begins from the live
+ * accumulator (zero on a cold start), so first current is small and grows continuously; no Hall
+ * event is allowed to unlock a second torque authority. Hall remains position/motion evidence,
+ * not a permission signal for a larger current step.
  */
-#define PRELOAD_IQ_CAP        10   /* ~1 A phase at CAL_I=95: enough to take up backlash */
-#define PRELOAD_ERPS_MOVING   3    /* rotor considered moving above this */
-#define PRELOAD_TIMEOUT_TICKS (300 * 4)  /* 300 ms @4 kHz: never hang if preload is too weak */
-/*
- * FW-136.1: how stale the last Hall edge must be before a start counts as "from a standstill"
- * and preload may arm again. 100 ms with no edge at all is a stopped rotor; anything fresher is
- * a rotor that is already turning, so a torque dip between pedal strokes can no longer restart
- * the cap. Same value the Walk Assist jam detector uses for the same judgement.
- */
-#define PRELOAD_STANDSTILL_TICKS 400
 
 /*
  * FW-048: coast-out threshold. main.c flips the commutation angle to the six-step formula
@@ -271,9 +264,6 @@ _Static_assert(RIDE_HARD_CUT_RAMP_MS <= 250,
 /* RIDE_COAST_RELEASE_ERPS now lives in inc/config.h - QZERO's low-speed handback needs the same
  * number, and two copies of a threshold whose whole job is a safety margin is how they drift. */
 
-static bool preload_active;
-static int32_t preload_ticks;
-static uint16_t preload_prev_age_ticks;   /* FW-136.1: only a Hall edge lowers this */
 static bool walk_was_active;
 
 /* FW-096: see ride_control.h. Written only, never read by any decision. */
@@ -354,9 +344,6 @@ void ride_control_init(void)
 {
 	/* --- ride-feel bookkeeping --- */
 	assist_hold_ticks = 0;
-	preload_active = false;
-	preload_ticks = 0;
-	preload_prev_age_ticks = 0;
 	walk_was_active = false;
 	/*
 	 * FW-129B: this is the one leaked field that fed a real DECISION rather than a
@@ -1008,48 +995,8 @@ void ride_control_update(const ride_control_input_t *input)
 			&level->smooth_start,
 			0);
 
-		/*
-		 * FW-041 gear preload, corrected by FW-136.1.
-		 *
-		 * It caps the target at ~1 A while the rotor is still standing, so the ramp takes up
-		 * drivetrain backlash quietly instead of breaking away in one slap. Written long ago,
-		 * it never ran once: its exit asked an AVERAGED speed whether the rotor was moving, and
-		 * that average froze at 24 - eight times the threshold - so "already moving" was true
-		 * before the rider had touched a pedal. FW-137 unfroze the reading and preload finally
-		 * started working, which is when it turned out to have a fault of its own: at ~1 A the
-		 * rotor cannot reach 3 erps under load, so every start waited out the full 300 ms
-		 * timeout, and because a torque dip between pedal strokes re-armed it, that repeated
-		 * stroke after stroke. The rider had to turn the cranks most of a revolution before
-		 * assist arrived.
-		 *
-		 * "Backlash is taken up" is not a speed. It is the rotor having MOVED AT ALL, which is
-		 * one Hall edge - and an edge only ever resets the age counter, so a drop in that
-		 * counter is the movement. Exact, immediate, and it needs no threshold to clear.
-		 *
-		 * Re-arming now also requires the age to be old enough that the rotor is genuinely
-		 * standing, so a torque dip mid-start can no longer start the cap over.
-		 */
-		bool rotor_moved =
-			rider->motor_erps_age_ticks < preload_prev_age_ticks;
-		preload_prev_age_ticks = rider->motor_erps_age_ticks;
-		if (hard_cut || iq_target <= 0) {
-			preload_active = false;          // no demand / cut -> arm for the next fresh start
-			preload_ticks = 0;
-		} else if (rotor_moved || rider->motor_erps > PRELOAD_ERPS_MOVING) {
-			preload_active = false;          // the rotor has moved: backlash is taken up
-			preload_ticks = 0;
-		} else if (!preload_active && input->current_iq == 0 &&
-			rider->motor_erps_age_ticks >= PRELOAD_STANDSTILL_TICKS) {
-			preload_active = true;           // fresh start from a genuine standstill
-			preload_ticks = 0;
-		}
-		if (preload_active) {
-			if (++preload_ticks >= PRELOAD_TIMEOUT_TICKS) {
-				preload_active = false;      // stiff drivetrain: release the cap, never hang
-			} else if (iq_target > PRELOAD_IQ_CAP) {
-				iq_target = PRELOAD_IQ_CAP;
-			}
-		}
+		/* FW-139: no standstill/Hall-gated preload here. The final 16 kHz Iq trajectory below
+		 * is the single owner of current build-up from zero. */
 
 		/*
 		 * FW-048: below ~5.5 erps main.c switches the commutation angle from the interpolated

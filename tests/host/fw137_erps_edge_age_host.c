@@ -12,12 +12,11 @@
  *
  *     10   FW-048 coast release      "stop feeding current before the angle jumps"
  *     10   QZERO handback            "give the axis back before the angle jumps"
- *      3   FW-041 gear preload       "take up backlash quietly instead of one slap"
- *      0   smooth start              "arm the launch envelope while stopped"
+ *      0   standstill consumers / diagnostics
  *
- * None of them could ever be reached. They were not broken; they were never called. Two of the
- * four exist specifically to remove a click - one at the stop, one at the start - which is
- * exactly the symptom that survived three cards of attempted fixes.
+ * At the time of FW-137 the old FW-041 gear preload also used threshold 3. FW-139 removed that
+ * Hall-gated preload after closed-loop SIL proved it could deadlock a loaded start behind its own
+ * 1 A cap. The edge-age estimator remains required by the remaining speed-confidence consumers.
  *
  * THE FIX is not a filter. Three Hall sensors 120 degrees apart give six states per electrical
  * revolution, so every edge is exactly 60 degrees, and the time SINCE the last edge is therefore
@@ -263,7 +262,7 @@ int main(void)
 			"T4: FW-048 and the QZERO handback (threshold 10) become reachable within 50 ms of "
 			"the last edge - they were unreachable at any time before this card");
 		CHECK(ticks_to_3 > 0 && ticks_to_3 < 800,
-			"T4: FW-041 gear preload (threshold 3) becomes reachable within 200 ms");
+			"T4: the speed-confidence estimate continues below 3 within 200 ms");
 	}
 
 	/* ==== T5: the first edge after a stop must be exact ==== */

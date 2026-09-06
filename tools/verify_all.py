@@ -40,6 +40,9 @@ def diff_gate():
 
 def target_build(require):
     gcc=shutil.which('arm-none-eabi-gcc') or shutil.which('arm-none-eabi-gcc.exe')
+    if not gcc and os.name == 'nt':
+        candidate=Path(r'C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\13.2 Rel1\bin\arm-none-eabi-gcc.exe')
+        if candidate.is_file(): gcc=str(candidate)
     if not gcc:
         msg='TARGET BUILD SKIP: arm-none-eabi-gcc not found'
         if require: print(msg,file=sys.stderr); raise SystemExit(3)

@@ -82,6 +82,13 @@ def find_tool(name: str, toolchain: str | None) -> str:
             return str(q2.resolve())
         raise SystemExit(f"tool not found under --toolchain: {exe}")
     found = shutil.which(exe) or shutil.which(name)
+    if not found and os.name == "nt":
+        # Same canonical location used by the original PowerShell build. This keeps the Python
+        # gate usable on a normal Windows install even when the Arm bin directory is not in PATH.
+        default_bin = Path(r"C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\13.2 Rel1\bin")
+        candidate = default_bin / exe
+        if candidate.is_file():
+            found = str(candidate)
     if not found:
         raise SystemExit(f"{name} not found; install Arm GNU Toolchain {EXPECTED_GCC} or pass --toolchain BIN_DIR")
     return found

@@ -1,0 +1,9 @@
+Parsed: 69
+Passed: 69
+Failed: 0
+Post-step skipped: 1
+
+
+SKIPPED POST-STEPS
+==================
+Rolling no-assist diagnostic (real rolling_no_assist_diag.c): PowerShell transport decoder post-step not run by Linux runner

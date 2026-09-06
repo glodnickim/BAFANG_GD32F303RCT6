@@ -28,6 +28,7 @@ void pas_sampler_init(uint32_t tick)
 	stats.forward_count = 0U;
 	stats.reverse_count = 0U;
 	stats.invalid_count = 0U;
+	stats.glitch_count = 0U;
 	stats.overflow_count = 0U;
 }
 
@@ -54,6 +55,20 @@ void pas_sampler_isr_tick(uint8_t ab, uint32_t tick)
 		 * elapsed count with no special case - see the host test's wrap scenario. */
 		const uint32_t gap32 = tick - last_transition_tick;
 		uint8_t next;
+
+		/* FW-139: the real-bike FW-097 capture showed 1..3-tick reverse events while the
+		 * rider was physically pedalling forward. A genuine 52 rpm quadrature step is about
+		 * 48 ticks; even at the supported high-cadence end a new physical crank transition
+		 * cannot reverse in under 1 ms. Treat only a NON-FORWARD transition in that refractory
+		 * window as line/contact bounce. Crucially, do not move qstate and do not move the
+		 * transition timestamp: if the input settles back, the glitch vanishes completely; if
+		 * it persists, the same state is reconsidered each ISR tick and becomes an accepted
+		 * reverse/INVALID at PAS_SAMPLER_GLITCH_TICKS, preserving the fail-safe behavior for a
+		 * real direction change or sustained wiring fault. Clean forward edges are never held. */
+		if (step <= 0 && gap32 < PAS_SAMPLER_GLITCH_TICKS) {
+			if (stats.glitch_count < 0xFFFFFFFFU) stats.glitch_count++;
+			return;
+		}
 
 		qstate = ab;
 		last_transition_tick = tick;

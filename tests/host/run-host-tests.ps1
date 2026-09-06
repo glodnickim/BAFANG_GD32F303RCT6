@@ -266,6 +266,12 @@ $suites = @(
        Harness = Join-Path $PSScriptRoot 'pas_quadrature_host.c'
        Modules = @(Join-Path $root 'src\pas_quadrature.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'PAS sampler physical-glitch filter (real sampler + direction safety)'
+       Harness = Join-Path $PSScriptRoot 'pas_sampler_glitch_filter_host.c'
+       Modules = @((Join-Path $root 'src\pas_sampler.c'),
+                   (Join-Path $root 'src\pas_quadrature.c'),
+                   (Join-Path $root 'src\pas_direction.c'))
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
     @{ Name = 'FW-109 v2 pas_direction automaton (exhaustive + property proof)'
        Harness = Join-Path $PSScriptRoot 'pas_direction_host.c'
        Modules = @(Join-Path $root 'src\pas_direction.c')

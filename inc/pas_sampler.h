@@ -25,11 +25,12 @@
  * moves the two things that must happen in real time - reading the pins and stamping the clock -
  * into the timer interrupt, and leaves everything else exactly where it was.
  *
- * WHAT THIS MODULE DELIBERATELY IS NOT. It is not a second decoder. It calls the SAME
- * pas_quadrature_step() the main loop used to call, and it makes no decision of any kind:
- * no cadence, no direction policy, no latch, no assist. It records what the lines did and when.
- * Every consequence of a step stays in main.c, which drains the events below in order and runs
- * the identical code it always ran, once per real transition instead of once per main-loop pass.
+ * WHAT THIS MODULE DELIBERATELY IS NOT. It is not a second ride-policy decoder. It calls the SAME
+ * pas_quadrature_step() the main loop used to call and owns only the physical plausibility layer:
+ * an immediate reverse/diagonal transition less than PAS_SAMPLER_GLITCH_TICKS after the last
+ * accepted edge is electrical/contact bounce, not a physically possible crank step, and is not
+ * published downstream. It makes no cadence, ride-direction, latch or assist decision. Every
+ * consequence of an ACCEPTED step stays in main.c, which drains the events below in order.
  *
  * THE RING IS THE WHOLE POINT. Replaying the decoder N times against a stale GPIO reading would
  * have reproduced the same sample N times; queueing the real events reproduces the real
@@ -43,6 +44,16 @@
  * magnitude longer than anything observed. Beyond that the overflow path takes over. */
 #define PAS_SAMPLER_RING 32U
 
+/* FW-139: physical plausibility/refractory window for PAS A/B. Production ride diagnostics
+ * measured genuine 52 rpm quadrature gaps around 48 control ticks, but false reverse events
+ * while pedalling forward arrived 1..3 ticks after the preceding edge. At 4 kHz, 4 ticks = 1 ms;
+ * even at the supported high cadence this is far shorter than a physical 3.75-degree crank step.
+ *
+ * Only non-forward transitions inside this window are suppressed. A clean forward sequence is
+ * never delayed. If a reverse/invalid state persists until this many ticks have elapsed from the
+ * last accepted edge, it is accepted and the existing fail-safe direction logic remains intact. */
+#define PAS_SAMPLER_GLITCH_TICKS 4U
+
 typedef struct {
 	uint32_t tick;    /* the 4 kHz tick this edge was OBSERVED on - the real clock, not main's */
 	uint16_t gap;     /* ticks since the previous edge of any direction, saturated at 65535     */
@@ -54,7 +65,8 @@ typedef struct {
 	uint32_t tick_total;       /* 4 kHz ticks seen by the sampler since init                  */
 	uint32_t forward_count;    /* physical edges classified forward                           */
 	uint32_t reverse_count;    /* ...reverse                                                  */
-	uint32_t invalid_count;    /* ...illegal two-bit jumps - see pas_sampler_isr_tick()        */
+	uint32_t invalid_count;    /* accepted illegal two-bit jumps - see pas_sampler_isr_tick() */
+	uint32_t glitch_count;     /* implausibly-fast reverse/invalid transitions rejected         */
 	uint32_t overflow_count;   /* events lost because main did not drain in time               */
 } pas_sampler_stats_t;
 

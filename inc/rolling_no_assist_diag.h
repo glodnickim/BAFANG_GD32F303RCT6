@@ -86,7 +86,7 @@
  * from v2 - see FW-122.1 report for the exact confirmation).
  *
  * HEADER 0x10248:
- *   [0] schema_version=3, [1] session_id, [2] data_fragment_count=6,
+ *   [0] schema_version=4, [1] session_id, [2] data_fragment_count=6,
  *   [3] capture_id, [4] trigger_case, [5] logical_sample_bytes=48,
  *   [6] sample_rate_hz=250, [7] confirmation_samples=8.
  *

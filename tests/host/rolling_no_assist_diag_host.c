@@ -151,8 +151,8 @@ static drain_result_t inspect_frozen_capture(uint8_t wanted_case)
 
 static void test_layout_constants(void)
 {
-	CHECK(sizeof(rolling_no_assist_sample_t) == 48U, "T1: logical sample is exactly 48 B (schema v3)");
-	CHECK(ROLLING_NO_ASSIST_DATA_FRAGMENTS == 6U, "T1: schema v3 still has six DATA fragments");
+	CHECK(sizeof(rolling_no_assist_sample_t) == 48U, "T1: logical sample is exactly 48 B (schema v4)");
+	CHECK(ROLLING_NO_ASSIST_DATA_FRAGMENTS == 6U, "T1: schema v4 still has six DATA fragments");
 	CHECK(ROLLING_NO_ASSIST_FRAMES_PER_SAMPLE == 7U, "T1: one HEADER + six DATA frames, unchanged from v2");
 }
 
@@ -252,7 +252,7 @@ static void setup_case_b_redemand_during_soft_cutoff(void)
 	in.iq_setpoint = 500; in.iq_actual = 0;
 	/* src/main.c SOFT_CUTOFF: ui_8_PWM_ON_Flag drops to 0 while hardware MOE stays 1 and
 	 * pwm_cutoff_active=1 for up to SOFT_CUTOFF_TICKS (production 40) control ticks - see
-	 * FW-124 section 6 (finding D2) and the schema v3 comment in rolling_no_assist_diag.h. */
+	 * FW-124 section 6 (finding D2) and the schema v4 comment in rolling_no_assist_diag.h. */
 	in.pwm_on = false;
 	in.moe = true;
 	in.bridge_lifecycle = 0U; /* main.c resets lifecycle to IDLE at soft-cutoff entry */
@@ -400,10 +400,10 @@ static void check_oracle(
 		bool last = false;
 		CHECK(rolling_no_assist_diag_encode_fragment(
 		      sample, 42U, capture_id, trigger_case, frag, &efid, data, &last),
-		      "T9: real C serializer accepts every schema v3 fragment");
+		      "T9: real C serializer accepts every schema v4 fragment");
 		CHECK(efid == (frag == 0U ? ROLLING_NO_ASSIST_EFID_HEADER :
 		      ROLLING_NO_ASSIST_EFID_DATA_BASE + frag - 1U),
-		      "T9: schema v3 EFID sequence is exact (unchanged from v2)");
+		      "T9: schema v4 EFID sequence is exact (unchanged from v2)");
 		CHECK(memcmp(data, expected[frag], 8U) == 0,
 		      "T9: real C serializer matches literal frozen wire bytes");
 		CHECK(last == (frag == 6U), "T9: only final DATA fragment has last=true");
@@ -413,7 +413,7 @@ static void check_oracle(
 static void test_real_c_serializer_literal_oracle(void)
 {
 	static const uint8_t expected_on[7][8] = {
-		{0x03,0x2A,0x06,0x07,0x03,0x30,0xFA,0x08},
+		{0x04,0x2A,0x06,0x07,0x03,0x30,0xFA,0x08},
 		{0xDE,0xAD,0xBE,0xEF,0xBC,0x07,0x03,0x05},
 		{0x06,0xB7,0xA5,0x5A,0x02,0xBC,0x02,0x8A},
 		{0x02,0x58,0x02,0x26,0x01,0xF4,0xFE,0x0C},
@@ -422,7 +422,7 @@ static void test_real_c_serializer_literal_oracle(void)
 		{0x01,0x02,0x04,0x00,0x00,0x05,0x00,0x00}
 	};
 	static const uint8_t expected_blocked[7][8] = {
-		{0x03,0x2A,0x06,0x08,0x02,0x30,0xFA,0x08},
+		{0x04,0x2A,0x06,0x08,0x02,0x30,0xFA,0x08},
 		{0x01,0x02,0x03,0x04,0xBA,0x00,0x02,0x01},
 		{0x02,0xB7,0x80,0x04,0x01,0xFF,0x01,0xF4},
 		{0x01,0xE0,0x01,0xC2,0x01,0x90,0xFF,0xEC},
@@ -541,10 +541,10 @@ static void check_transport_sequence(void)
 		      "T14: recorder EFIDs remain HEADER, DATA0..DATA5 for every sample");
 		per_efid[fragment]++;
 		if (fragment == 0U) {
-			CHECK(transport_frames[i].data[0] == 3U && transport_frames[i].data[1] == 1U &&
+			CHECK(transport_frames[i].data[0] == ROLLING_NO_ASSIST_DIAG_SCHEMA_VERSION && transport_frames[i].data[1] == 1U &&
 			      transport_frames[i].data[2] == 6U && transport_frames[i].data[5] == 48U &&
 			      transport_frames[i].data[6] == 250U && transport_frames[i].data[7] == 8U,
-			      "T14: every sample header carries the fixed schema-3 metadata");
+			      "T14: every sample header carries the fixed schema-4 metadata");
 		}
 	}
 	for (uint8_t fragment = 0U; fragment < ROLLING_NO_ASSIST_FRAMES_PER_SAMPLE; fragment++) {
@@ -588,7 +588,7 @@ static void test_explicit_repeatable_frozen_transport(void)
 
 int main(void)
 {
-	printf("rolling_no_assist_diag_host.c schema v3\n");
+	printf("rolling_no_assist_diag_host.c schema v4\n");
 	test_layout_constants();
 	test_no_trigger_inactive();
 	test_case_a();

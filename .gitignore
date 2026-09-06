@@ -1,0 +1,9 @@
+.build/
+*.o
+*.elf
+*.bin
+*.map
+__pycache__/
+*.pyc
+# Host-generated analysis outputs
+torque_asym_s1_s8.csv

@@ -5,17 +5,17 @@
  *   A. ELAPSED-TIME BEHAVIOUR   — a module that takes an explicit hardware tick count
  *                                  and computes elapsed time by subtraction. Correct
  *                                  under missed calls BY CONSTRUCTION.
- *   B. CONTROL-UPDATE BEHAVIOUR — a module that assumes "one call = one 4 kHz tick" and
- *                                  counts its OWN calls. Runs slower than its configured
- *                                  millisecond value whenever calls are skipped.
+ *   B. FILTER ELAPSED-TIME      — FW-141 passes the real hardware elapsed tick count into
+ *                                  torque_input, so the configured 35 ms/120 ms/250 ms
+ *                                  dynamics no longer stretch when foreground calls are skipped.
  *   C. LOST PHYSICAL SAMPLE     — information that cannot be recovered by ANY amount of
  *                                  elapsed-time bookkeeping, because the thing that would
  *                                  have been measured (a PAS quadrature transition, a
  *                                  torque sample) never got sampled while nothing was
  *                                  polling it.
  *
- * This program does NOT fix anything (card section 9: "NIE naprawiaj znalezionych
- * różnic"). It only measures and reports. See documentation/testing/TIMEBASES.md (via
+ * This program began as a measurement-only timebase probe. Under FW-141 category B is now a
+ * regression proof: dense and sparse processing of the same physical interval must agree. See documentation/testing/TIMEBASES.md (via
  * documentation/architecture/TIMEBASES.md) and the architecture audit's finding F1 for
  * the production-code background this test exists to make concrete and repeatable.
  *
@@ -84,9 +84,9 @@ static void run_episode_scenario(int dense_calls, uint16_t *out_t_latch_ms, uint
 	*out_t_recover_ms = result.t_recover_ms;
 }
 
-/* ---- B. CONTROL-UPDATE: torque_input.c's 35 ms FAST filter counts its OWN calls ---- */
+/* ---- B. ELAPSED-TIME FILTER: production FW141 consumes real 4 kHz elapsed ticks ---- */
 
-static uint16_t run_fast_filter_scenario(int call_count)
+static uint16_t run_fast_filter_scenario(int call_count, uint32_t elapsed_per_call)
 {
 	torque_input_init();
 	/* A step input: pedal load jumps from zero to a steady ~19 kg equivalent and holds. */
@@ -95,7 +95,7 @@ static uint16_t run_fast_filter_scenario(int call_count)
 	for (int i = 0; i < call_count; i++) {
 		int16_t corrected = torque_input_correct(raw_mv);
 		torque_input_coast_update(corrected, false, true);
-		torque_input_update(raw_mv, corrected, true);
+		torque_input_update_elapsed(raw_mv, corrected, true, elapsed_per_call);
 		fast = torque_input_get_snapshot()->assist_delta_filtered_native;
 	}
 	return fast;
@@ -165,16 +165,20 @@ int main(int argc, char **argv)
 
 	/* 140 calls = 35 ms of real ticks at the assumed 4 kHz rate
 	 * (TORQUE_ASSIST_FILTER_MS * TORQUE_INPUT_TICKS_PER_MS in inc/torque_input.h). */
-	uint16_t fast_normal = run_fast_filter_scenario(140);
+	uint16_t fast_normal = run_fast_filter_scenario(140, 1U);
 	/* Burst: only 35 of those 140 calls actually happen before the checkpoint - the
 	 * same "4x fewer calls than real ticks" ratio as the ride_episode burst above. */
-	uint16_t fast_burst = run_fast_filter_scenario(35);
-	printf("  B. torque_input FAST filter (35 ms, call-counted):\n");
+	uint16_t fast_burst = run_fast_filter_scenario(35, 4U);
+	printf("  B. torque_input FAST filter (35 ms, elapsed-time FW141):\n");
 	printf("     normal (140 calls): assist_delta_filtered_native=%u\n", fast_normal);
 	printf("     burst   (35 calls): assist_delta_filtered_native=%u\n", fast_burst);
 	printf("     %s\n", (fast_normal == fast_burst) ?
-		"IDENTICAL (unexpected for a call-counted filter)." :
-		"DIFFERENT - the filter is measurably LESS settled under the same nominal 35 ms (see finding F1).");
+		"IDENTICAL - filter response is tied to elapsed 4 kHz time, not call count." :
+		"DIFFERENT - elapsed-time catch-up regression.");
+	if (fast_normal != fast_burst) {
+		fprintf(stderr, "FW-141 FAIL: torque filter changed with call density\n");
+		return 1;
+	}
 
 	uint32_t true_steps, apparent_steps;
 	run_lost_sample_scenario(&true_steps, &apparent_steps);
@@ -191,7 +195,7 @@ int main(int argc, char **argv)
 		t_recover_normal, t_recover_burst);
 	fprintf(out, "A_elapsed_time,ride_episode.t_latch_ms,%u,%u,ms,later_not_wrong_edge_bounded_by_call_density\n",
 		t_latch_normal, t_latch_burst);
-	fprintf(out, "B_control_update,torque_input.assist_delta_filtered_native,%u,%u,native,diverges_under_burst\n",
+	fprintf(out, "B_elapsed_filter,torque_input.assist_delta_filtered_native,%u,%u,native,elapsed_time_invariant\n",
 		fast_normal, fast_burst);
 	fprintf(out, "C_lost_sample,pas_steps_in_400tick_gap,%u,%u,steps,aliased_not_recoverable\n",
 		true_steps, apparent_steps);

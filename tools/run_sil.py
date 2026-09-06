@@ -1,29 +1,60 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+import argparse, os, subprocess, sys
 from pathlib import Path
-import subprocess,sys
+
 R=Path(__file__).resolve().parents[1]
-out=R/'.build/sil'; out.mkdir(parents=True,exist_ok=True)
 mods=[
  'src/torque_input.c','src/rider_input.c','src/assist_modes.c','src/cadence_comp.c','src/cadence_filter.c',
  'src/power_curve.c','src/assist_start.c','src/assist_extended_boost.c','src/tuning_config.c',
  'src/ride_control.c','src/fast_iq_slew.c','src/battery_iq_cap.c','src/ride_session.c',
  'src/iq_chain.c','src/pedal_assist_gate.c','src/assist_dynamics.c','src/assist_limits.c',
- 'src/motor_core.c','src/pas_quadrature.c','src/pas_direction.c','src/pas_sampler.c','src/pas_cadence.c',
- 'tests/host/common/map_adapter.c','tests/host/common/motor_service_stub.c']
-cmd=['gcc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-type-limits',
-     '-Iinc','-Itests/host/common/host_stubs','-Itests/host/common','-o',str(out/'evist_sil'),
-     'sim/evist_sil.c']+mods+['-lm']
-p=subprocess.run(cmd,cwd=R,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-if p.returncode:
- print(p.stdout); sys.exit(p.returncode)
-r=subprocess.run([str(out/'evist_sil')],cwd=R,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-print(r.stdout,end='')
-if r.returncode:
- (R/'.build/sil/REPORT.txt').write_text(r.stdout)
- sys.exit(r.returncode)
-f=subprocess.run([str(out/'evist_sil'),'--fuzz','1000','0xE7157A39'],cwd=R,text=True,
-                 stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-print(f.stdout,end='')
-report=r.stdout+'\n'+f.stdout
-(R/'.build/sil/REPORT.txt').write_text(report)
-sys.exit(f.returncode)
+ 'src/motor_core.c','src/pas_quadrature.c','src/pas_direction.c','src/pas_liveness.c',
+ 'src/pas_sampler.c','src/pas_cadence.c','tests/host/common/map_adapter.c',
+ 'tests/host/common/motor_service_stub.c']
+
+def build(exe:Path, sanitize=False):
+    cc=os.environ.get('CC','gcc')
+    flags=['-std=c11','-Wall','-Wextra','-Werror','-Wno-type-limits']
+    if sanitize:
+        flags += ['-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer']
+    else:
+        flags += ['-O2']
+    cmd=[cc,*flags,'-Iinc','-Itests/host/common/host_stubs','-Itests/host/common',
+         '-o',str(exe),'sim/evist_sil.c',*mods,'-lm']
+    p=subprocess.run(cmd,cwd=R,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    if p.returncode:
+        print(p.stdout); raise SystemExit(p.returncode)
+
+def run(exe:Path,args,env=None):
+    p=subprocess.run([str(exe),*args],cwd=R,text=True,stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT,env=env)
+    print(p.stdout,end='')
+    if p.returncode: raise SystemExit(p.returncode)
+    return p.stdout
+
+def main():
+    ap=argparse.ArgumentParser()
+    ap.add_argument('--fuzz',type=int,default=1000,help='normal deterministic fuzz cases')
+    ap.add_argument('--seed',default='0xE7157A39')
+    ap.add_argument('--sanitize',action='store_true',help='also run ASan+UBSan fuzz gate')
+    ap.add_argument('--sanitize-fuzz',type=int,default=1000)
+    a=ap.parse_args()
+
+    out=R/'.build/sil'; out.mkdir(parents=True,exist_ok=True)
+    exe=out/'evist_sil'; build(exe)
+    fixed=run(exe,[])
+    fuzz=run(exe,['--fuzz',str(a.fuzz),a.seed])
+    report=fixed+'\n'+fuzz
+
+    if a.sanitize:
+        sout=R/'.build/sil-asan'; sout.mkdir(parents=True,exist_ok=True)
+        sexe=sout/'evist_sil_asan'; build(sexe,True)
+        env=os.environ.copy(); env['ASAN_OPTIONS']='detect_leaks=1:halt_on_error=1'; env['UBSAN_OPTIONS']='halt_on_error=1'
+        san=run(sexe,['--fuzz',str(a.sanitize_fuzz),a.seed],env)
+        report += '\nSANITIZERS ASan+UBSan\n'+san
+
+    (out/'REPORT.txt').write_text(report)
+    print(out/'REPORT.txt')
+
+if __name__=='__main__': main()

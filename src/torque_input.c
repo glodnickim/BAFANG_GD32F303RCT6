@@ -183,7 +183,24 @@ static uint16_t centikg_to_native_delta(uint16_t centikg)
 		TORQUE_SPAN_MAX_NATIVE : (uint16_t)delta;
 }
 
-static uint16_t update_assist_filter(uint16_t target_native)
+/* FW-141: missed foreground calls must not stretch a millisecond-configured filter.
+ * Applying the same observed target once for each elapsed 4 kHz hardware tick preserves the
+ * exact pre-FW141 arithmetic when elapsed_ticks==1 and exactly matches N dense updates when the
+ * target was constant across the missed interval. A pathological debugger/CPU stall is bounded
+ * to eight times the slowest filter constant; beyond that the useful filter memory is already
+ * negligible and spending unbounded foreground time catching up would be worse than settling. */
+#define TORQUE_FILTER_CATCHUP_MAX_TICKS \
+	((uint32_t)TORQUE_RUN_ASYM_FALL_MS * TORQUE_INPUT_TICKS_PER_MS * 8U)
+
+static uint32_t filter_elapsed_ticks(uint32_t elapsed_ticks)
+{
+	if (elapsed_ticks == 0U) return 1U;
+	if (elapsed_ticks > TORQUE_FILTER_CATCHUP_MAX_TICKS)
+		return TORQUE_FILTER_CATCHUP_MAX_TICKS;
+	return elapsed_ticks;
+}
+
+static uint16_t update_assist_filter_one(uint16_t target_native)
 {
 	const int32_t filter_ticks =
 		(int32_t)TORQUE_ASSIST_FILTER_MS * TORQUE_INPUT_TICKS_PER_MS;
@@ -191,9 +208,7 @@ static uint16_t update_assist_filter(uint16_t target_native)
 	int32_t error_q = target_q - assist_filter_q;
 	if (error_q != 0) {
 		int32_t step_q = error_q / filter_ticks;
-		if (step_q == 0) {
-			step_q = (error_q > 0) ? 1 : -1;
-		}
+		if (step_q == 0) step_q = (error_q > 0) ? 1 : -1;
 		assist_filter_q += step_q;
 	}
 	return (uint16_t)((assist_filter_q +
@@ -211,7 +226,7 @@ static uint16_t update_assist_filter(uint16_t target_native)
  * torque_input_update() — WAIT_FRESH_LOAD and TRACK_FAST publish their own values and never
  * reach this function.
  */
-static uint16_t update_run_asym_filter(uint16_t target_native)
+static uint16_t update_run_asym_filter_one(uint16_t target_native)
 {
 	int32_t target_q = (int32_t)target_native << TORQUE_ASSIST_FILTER_Q_SHIFT;
 	int32_t error_q = target_q - run_asym_q;
@@ -219,8 +234,6 @@ static uint16_t update_run_asym_filter(uint16_t target_native)
 		int32_t filter_ms = (error_q > 0) ?
 			(int32_t)TORQUE_RUN_ASYM_RISE_MS :
 			(int32_t)TORQUE_RUN_ASYM_FALL_MS;
-		/* A zero configured fall is a deliberate test bypass, not a zero
-		 * divisor: copy the current filtered torque target this control tick. */
 		if (filter_ms == 0) {
 			run_asym_q = target_q;
 			return target_native;
@@ -229,26 +242,6 @@ static uint16_t update_run_asym_filter(uint16_t target_native)
 		int32_t step_q = error_q / filter_ticks;
 		if (step_q == 0) {
 			if (target_native == 0U) {
-				/* FW-112.4: the target is genuinely, exactly ZERO - the rider has stopped
-				 * pushing. Snap the remaining crumb straight to 0 instead of crawling at
-				 * the same +-1 Q8-unit/tick floor update_assist_filter() uses: that floor
-				 * is harmless for AFILT (its target is essentially never held dead flat
-				 * for long), but a zero target here genuinely IS held for extended
-				 * periods, and the geometric tail never reaches it in bounded time -
-				 * measured ~2 s from a steady 300 down to an exact published 0
-				 * (tests/host/torque/torque_run_asym_host.c's zero-release check), long
-				 * after the signal is already physically negligible (snap fires within
-				 * ~5.5 native units of zero, under 2% of a typical steady value,
-				 * imperceptible). Existing regressions (fw112_run_rearm_recovery_host.c
-				 * S4/S12) depend on demand reaching EXACTLY 0 within a bounded step
-				 * count, exactly as it always did under the old window average (which
-				 * reaches an exact, deterministic zero the instant the whole window has
-				 * been overwritten). Deliberately NOT extended to a nonzero target: a
-				 * moving/oscillating target (S5's per-leg ripple) regularly passes within
-				 * one geometric step of the filter's current value at each swing's
-				 * extremum without ever being HELD there, and snapping on every such
-				 * transient crossing would defeat the fall smoothing this filter exists
-				 * for - see the host S5 regression this restriction is pinned against. */
 				run_asym_q = 0;
 				return 0U;
 			}
@@ -691,8 +684,8 @@ void torque_input_init(void)
 	snapshot.span_native = span_native;
 }
 
-void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
-	bool sensor_valid)
+void torque_input_update_elapsed(uint16_t raw_native, int16_t torque_corrected_native,
+	bool sensor_valid, uint32_t elapsed_ticks)
 {
 	int32_t delta = (int32_t)torque_corrected_native - REST_TARGET_NATIVE;
 	uint16_t assist_delta;
@@ -727,8 +720,20 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 		}
 	}
 	snapshot.assist_delta_native = assist_delta;
-	snapshot.assist_delta_filtered_native = update_assist_filter(
-		sensor_valid ? assist_delta : 0U);
+	/* FW-141: catch the FILTER CASCADE up in physical 4 kHz time, interleaved exactly as
+	 * dense calls would have executed it. Updating FAST N times and then RUN N times against
+	 * only the final FAST value is not equivalent to the real cascade on a changing signal. */
+	{
+		uint32_t n = filter_elapsed_ticks(elapsed_ticks);
+		uint16_t fast = snapshot.assist_delta_filtered_native;
+		bool ordinary_run = (recovery_state == TORQUE_RECOVERY_IDLE) &&
+			(run_window_steps != 0U);
+		while (n-- > 0U) {
+			fast = update_assist_filter_one(sensor_valid ? assist_delta : 0U);
+			if (ordinary_run) run_value_native = update_run_asym_filter_one(fast);
+		}
+		snapshot.assist_delta_filtered_native = fast;
+	}
 
 	/*
 	 * PATCH A: advance the rolling-rearm recovery AUTOMATON (see torque_input_begin_rolling_
@@ -812,7 +817,8 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 	} else if (run_window_steps == 0U) {
 		run_value_native = snapshot.assist_delta_filtered_native;
 	} else if (recovery_state == TORQUE_RECOVERY_IDLE) {
-		run_value_native = update_run_asym_filter(snapshot.assist_delta_filtered_native);
+		/* FW-141: ordinary RUN was already advanced interleaved with FAST above for every
+		 * elapsed hardware tick, preserving the real cascade under missed foreground calls. */
 	}
 	snapshot.assist_delta_run_native = run_value_native;
 	snapshot.load_centikg = native_delta_to_centikg((uint16_t)delta);
@@ -830,6 +836,12 @@ void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 		stuck_ticks = 0;
 		stuck_fault = false;
 	}
+}
+
+void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
+	bool sensor_valid)
+{
+	torque_input_update_elapsed(raw_native, torque_corrected_native, sensor_valid, 1U);
 }
 
 const torque_snapshot_t *torque_input_get_snapshot(void)

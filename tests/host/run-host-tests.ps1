@@ -506,6 +506,11 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @(Join-Path $root 'src\cadence_filter.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
+    @{ Name = 'FW-141 torque filters use elapsed hardware time (real torque_input.c + main wiring)'
+       Harness = Join-Path $PSScriptRoot 'fw141_torque_elapsed_time_host.c'
+       Modules = @(Join-Path $root 'src\torque_input.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @('-Wno-type-limits') },
     @{ Name = 'QS-3 final Iq slew parity (real final ramp + lifecycle wiring)'
        Harness = Join-Path $PSScriptRoot 'qs3_final_iq_slew_host.c'
        Modules = @((Join-Path $root 'src\assist_dynamics.c'),

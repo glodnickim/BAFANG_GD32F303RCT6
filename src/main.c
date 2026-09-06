@@ -3011,7 +3011,7 @@ void reg_ADC_processing(void)
 	torque_input_coast_update(MS.torque_on_crank, pas_idle_ticks>TQ_RECAL_IDLE_TICKS && tq_fault_ticks==0 && MS.i_q_setpoint==0,
 		coast_wheel_moved!=0); //FW-058/FW-061: latched over the episode, not sampled at its end
 	torque_input_set_run_window_deg(tuning_config_assist_torque_run_window_deg()); //FW-085: RUN estimator window in crank degrees (Canable)
-	torque_input_update(torque_raw_mv, MS.torque_on_crank, torque_fault==0);
+	torque_input_update_elapsed(torque_raw_mv, MS.torque_on_crank, torque_fault==0, control_delta);
 	//Publish one coherent, read-only rider snapshot: the single input the assist pipeline reads.
 	{
 		const torque_snapshot_t *torque_snapshot = torque_input_get_snapshot();

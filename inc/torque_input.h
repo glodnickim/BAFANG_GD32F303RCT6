@@ -206,8 +206,17 @@ int16_t torque_input_correct(uint16_t raw_native);
 void torque_input_coast_update(int16_t torque_corrected_native, bool coast_eligible,
 	bool bike_moving);
 bool torque_input_cal_fault(void);
+/* Legacy one-control-tick wrapper, kept for deterministic module tests and callers that
+ * genuinely execute at exactly one 4 kHz tick per call. */
 void torque_input_update(uint16_t raw_native, int16_t torque_corrected_native,
 	bool sensor_valid);
+
+/* FW-141: production timebase-aware update. elapsed_ticks is the real 4 kHz hardware time
+ * since the previous processed control pass (main.c control_delta). This keeps the 35 ms FAST
+ * filter and the 120/250 ms ordinary-RUN filter tied to elapsed time when foreground processing
+ * misses ticks, rather than silently stretching their response by the missed-call ratio. */
+void torque_input_update_elapsed(uint16_t raw_native, int16_t torque_corrected_native,
+	bool sensor_valid, uint32_t elapsed_ticks);
 
 const torque_snapshot_t *torque_input_get_snapshot(void);
 

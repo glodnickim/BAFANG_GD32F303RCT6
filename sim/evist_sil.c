@@ -18,6 +18,7 @@
 #include "motor_core.h"
 #include "pas_cadence.h"
 #include "pas_direction.h"
+#include "pas_liveness.h"
 #include "pas_sampler.h"
 #include "rider_input.h"
 #include "ride_control.h"
@@ -56,6 +57,7 @@ typedef struct {
     uint8_t bounce_ticks;
     bool inject_bounce;
     uint32_t forward_edges;
+    bool active;
     double torque_mean_ckg;
     double torque_ripple_ckg;
 } rider_plant_t;
@@ -150,10 +152,15 @@ static void rider_init(rider_plant_t *r, double rpm, double cadence_ripple_fract
     r->ab = FWD_AB[0];
     r->next_pas_edge_rev = 1.0 / (double)PAS_TRANSITIONS_PER_REV;
     r->inject_bounce = bounce;
+    r->active = true;
 }
 
 static uint8_t rider_pas_tick(rider_plant_t *r)
 {
+    if (!r->active) {
+        r->bounce_ticks = 0U;
+        return r->ab;
+    }
     if (r->bounce_ticks == 1U) {
         r->bounce_ticks = 2U;
         /* return briefly to the previous raw state: one-tick reverse bounce */
@@ -184,6 +191,7 @@ static uint8_t rider_pas_tick(rider_plant_t *r)
 static double rider_torque_ckg(const rider_plant_t *r, uint32_t tick)
 {
     (void)tick;
+    if (!r->active) return 0.0;
     /* two leg pushes per crank revolution; mean plus bounded sinusoidal ripple */
     double v = r->torque_mean_ckg + r->torque_ripple_ckg * sin(4.0 * PI * r->crank_rev);
     return v < 0.0 ? 0.0 : v;
@@ -202,6 +210,7 @@ static void sim_init(sim_t *s, double rpm, double cadence_ripple_fraction,
     motor_core_init(&s->MS);
     ride_control_init();
     pas_direction_init();
+    pas_liveness_init();
     pas_cadence_reset();
     cadence_filter_reset();
     pas_sampler_init(0U);
@@ -262,7 +271,15 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     process_pas(s, ab);
 
     uint32_t idle = s->tick - pas_sampler_last_transition_tick();
-    bool real_stop = idle > s->stop_timeout;
+    pas_liveness_update(idle, s->stop_timeout);
+    bool real_stop = pas_liveness_stopped();
+    if (real_stop) {
+        s->MS.cadence = 0U;
+        s->start_phase = 0U;
+        cadence_filter_reset();
+        pas_cadence_reset();
+        pas_direction_on_stop();
+    }
     bool crank_direction_ok = (s->MS.cadence > 0U || s->start_phase) && !real_stop;
     bool pedaling = crank_direction_ok &&
         pas_direction_fwd_run() >= tuning_config_start_steps();
@@ -441,6 +458,74 @@ static int run_fuzz(unsigned count)
     return failures ? 1 : 0;
 }
 
+
+static int run_stop_restart_scenario(void)
+{
+    sim_t s;
+    sim_init(&s, 60.0, 0.20, 1800.0, 400.0, false, 8.0, true);
+
+    /* Establish a normal ACTIVE ride first. */
+    for (uint32_t i = 0U; i < 2U * CTRL_HZ; i++) sim_ctrl_tick(&s, NULL);
+    if (s.MS.i_q_setpoint <= 0 || s.first_permission_tick == 0U) {
+        fprintf(stderr, "STOP_RESTART FAIL: did not establish ACTIVE ride\n");
+        return 1;
+    }
+
+    const uint32_t stop_tick = s.tick;
+    const int32_t iq_at_release = s.MS.i_q_setpoint;
+    s.rider.active = false;
+    uint32_t zero_tick = 0U;
+    int32_t prev_iq = s.MS.i_q_setpoint;
+    int32_t max_fall_step = 0;
+    for (uint32_t i = 0U; i < 2U * CTRL_HZ; i++) {
+        sim_ctrl_tick(&s, NULL);
+        int32_t d = prev_iq - s.MS.i_q_setpoint;
+        if (d > max_fall_step) max_fall_step = d;
+        prev_iq = s.MS.i_q_setpoint;
+        if (!zero_tick && s.MS.i_q_setpoint == 0) zero_tick = s.tick;
+    }
+    if (!zero_tick || s.MS.i_q_setpoint != 0) {
+        fprintf(stderr, "STOP_RESTART FAIL: normal stop never reached Iq=0\n");
+        return 1;
+    }
+
+    /* Restart from a true stopped/PAS-reset state. No stale Iq may survive. */
+    const uint32_t restart_tick = s.tick;
+    s.rider.active = true;
+    uint32_t restart_permission = 0U;
+    uint32_t restart_first_iq = 0U;
+    int32_t first_positive_iq = 0;
+    int32_t max_rise_step = 0;
+    prev_iq = s.MS.i_q_setpoint;
+    for (uint32_t i = 0U; i < 2U * CTRL_HZ; i++) {
+        sim_ctrl_tick(&s, NULL);
+        int32_t d = s.MS.i_q_setpoint - prev_iq;
+        if (d > max_rise_step) max_rise_step = d;
+        prev_iq = s.MS.i_q_setpoint;
+        if (!restart_permission && ride_control_get_session_state() == RIDE_SESSION_ACTIVE)
+            restart_permission = s.tick;
+        if (!restart_first_iq && s.MS.i_q_setpoint > 0) {
+            restart_first_iq = s.tick;
+            first_positive_iq = s.MS.i_q_setpoint;
+        }
+    }
+
+    bool ok = restart_permission != 0U && restart_first_iq != 0U &&
+              restart_first_iq >= restart_permission &&
+              first_positive_iq > 0 && first_positive_iq < PH_CURRENT_MAX &&
+              s.false_reverse_events == 0U && s.direction_inhibit_ticks == 0U;
+    double stop_to_zero_ms = 1000.0 * (double)(zero_tick - stop_tick) / CTRL_HZ;
+    double restart_permission_ms = restart_permission ?
+        1000.0 * (double)(restart_permission - restart_tick) / CTRL_HZ : -1.0;
+    double permission_to_iq_ms = (restart_permission && restart_first_iq) ?
+        1000.0 * (double)(restart_first_iq - restart_permission) / CTRL_HZ : -1.0;
+    printf("SCENARIO stop_restart       releaseIq=%d stop->Iq0=%.2fms maxFallStep=%d "
+           "restartPermission=%.2fms permission->Iq=%.2fms firstRestartIq=%d maxRiseStep=%d %s\n",
+           iq_at_release, stop_to_zero_ms, max_fall_step, restart_permission_ms,
+           permission_to_iq_ms, first_positive_iq, max_rise_step, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
 static void run_scenario(const char *name, double rpm, double cadence_ripple_fraction,
                          double mean_ckg, double ripple_ckg, bool bounce,
                          double breakaway_iq, bool filtered_cadence, double seconds)
@@ -493,5 +578,6 @@ int main(int argc, char **argv)
     run_scenario("pedal40", 40.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
     run_scenario("pedal60", 60.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
     run_scenario("pedal80", 80.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
+    if (run_stop_restart_scenario() != 0) return 1;
     return 0;
 }

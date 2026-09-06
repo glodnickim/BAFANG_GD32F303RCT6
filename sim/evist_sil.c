@@ -489,5 +489,9 @@ int main(int argc, char **argv)
      * filtered-control wiring. */
     run_scenario("cadence_raw", 60.0, 0.35, 1800.0, 0.0, false, 6.0, false, 8.0);
     run_scenario("cadence_filtered", 60.0, 0.35, 1800.0, 0.0, false, 6.0, true, 8.0);
+    run_scenario("pedal20", 20.0, 0.30, 1800.0, 700.0, false, 6.0, true, 10.0);
+    run_scenario("pedal40", 40.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
+    run_scenario("pedal60", 60.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
+    run_scenario("pedal80", 80.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
     return 0;
 }

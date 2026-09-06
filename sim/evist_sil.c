@@ -79,6 +79,8 @@ typedef struct {
     double iq_sq_sum_run;
     uint32_t iq_samples_run;
     bool use_filtered_control_cadence;
+    int32_t iq_min_all;
+    int32_t iq_max_all;
 } sim_t;
 
 /* Raw forward ring for PAS_DIR_SIGN=-1: 00 -> 10 -> 11 -> 01 -> 00. */
@@ -209,6 +211,8 @@ static void sim_init(sim_t *s, double rpm, double cadence_ripple_fraction,
     s->stop_timeout = PAS_STOP_TICKS;
     s->iq_min_run = 0x7fffffff;
     s->iq_max_run = -0x7fffffff;
+    s->iq_min_all = 0x7fffffff;
+    s->iq_max_all = -0x7fffffff;
     s->use_filtered_control_cadence = use_filtered_control_cadence;
     /* seed physical PAS state */
     pas_sampler_isr_tick(s->rider.ab, 0U);
@@ -345,6 +349,8 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
         s->plant.hall_age_ticks++;
     }
     if (s->MS.i_q_setpoint > 0 && s->first_iq_tick == 0U) s->first_iq_tick = s->tick;
+    if (s->MS.i_q_setpoint < s->iq_min_all) s->iq_min_all = s->MS.i_q_setpoint;
+    if (s->MS.i_q_setpoint > s->iq_max_all) s->iq_max_all = s->MS.i_q_setpoint;
     if (r.direction_inhibit_active) s->direction_inhibit_ticks++;
 
     if (s->tick > 2U * CTRL_HZ) {
@@ -366,6 +372,73 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
             ts->load_centikg, ts->assist_delta_filtered_native,
             ts->assist_delta_run_native, mo->iq_request);
     }
+}
+
+static uint32_t fuzz_state = 0xE7157A39U;
+
+static uint32_t fuzz_u32(void)
+{
+    /* Deterministic xorshift32. A failing seed can be replayed exactly. */
+    uint32_t x = fuzz_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    fuzz_state = x;
+    return x;
+}
+
+static double fuzz_range(double lo, double hi)
+{
+    double u = (double)(fuzz_u32() & 0x00FFFFFFU) / 16777215.0;
+    return lo + (hi - lo) * u;
+}
+
+static int run_fuzz(unsigned count)
+{
+    unsigned failures = 0U;
+    uint32_t initial_seed = fuzz_state;
+    for (unsigned i = 0U; i < count; i++) {
+        uint32_t case_seed = fuzz_state;
+        double rpm = fuzz_range(20.0, 120.0);
+        double cadence_ripple = fuzz_range(0.0, 0.40);
+        double mean_ckg = fuzz_range(900.0, 3500.0);
+        double torque_ripple = mean_ckg * fuzz_range(0.0, 0.55);
+        double breakaway_iq = fuzz_range(0.0, 20.0);
+        bool bounce = (fuzz_u32() & 1U) != 0U;
+
+        sim_t s;
+        sim_init(&s, rpm, cadence_ripple, mean_ckg, torque_ripple, bounce,
+            breakaway_iq, true);
+        uint32_t n = 2U * CTRL_HZ;
+        for (uint32_t t = 0U; t < n; t++) sim_ctrl_tick(&s, NULL);
+
+        bool ok = true;
+        /* A sustained forward rider with well-above-threshold load must not be stuck behind a
+         * hidden Hall gate. At 20 rpm four configured start transitions take ~125 ms, then the
+         * virtual drivetrain still gets 250 ms to break away. This is intentionally generous:
+         * the deterministic fixed scenarios above are much tighter. */
+        if (!s.first_permission_tick || !s.first_iq_tick || !s.first_hall_tick) ok = false;
+        if (s.first_permission_tick && s.first_hall_tick &&
+            (s.first_hall_tick - s.first_permission_tick) > CTRL_HZ / 4U) ok = false;
+        if (s.false_reverse_events != 0U || s.direction_inhibit_ticks != 0U) ok = false;
+        if (s.iq_min_all < 0 || s.iq_max_all > PH_CURRENT_MAX) ok = false;
+
+        if (!ok) {
+            failures++;
+            fprintf(stderr,
+                "FUZZ FAIL case=%u seed=0x%08X rpm=%.2f cadRipple=%.3f meanCkg=%.1f "
+                "torqueRipple=%.1f breakawayIq=%.2f bounce=%u perm=%u iq=%u hall=%u "
+                "falseR=%u inhibit=%u iqRange=[%d,%d]\n",
+                i, case_seed, rpm, cadence_ripple, mean_ckg, torque_ripple,
+                breakaway_iq, bounce ? 1U : 0U, s.first_permission_tick, s.first_iq_tick,
+                s.first_hall_tick, s.false_reverse_events, s.direction_inhibit_ticks,
+                s.iq_min_all, s.iq_max_all);
+            if (failures >= 10U) break;
+        }
+    }
+    printf("FUZZ deterministic seed=0x%08X cases=%u failures=%u\n",
+        initial_seed, count, failures);
+    return failures ? 1 : 0;
 }
 
 static void run_scenario(const char *name, double rpm, double cadence_ripple_fraction,
@@ -399,8 +472,13 @@ static void run_scenario(const char *name, double rpm, double cadence_ripple_fra
         s.iq_samples_run ? (s.iq_max_run - s.iq_min_run) : 0);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc >= 2 && strcmp(argv[1], "--fuzz") == 0) {
+        unsigned count = (argc >= 3) ? (unsigned)strtoul(argv[2], NULL, 10) : 1000U;
+        if (argc >= 4) fuzz_state = (uint32_t)strtoul(argv[3], NULL, 0);
+        return run_fuzz(count);
+    }
     system("mkdir -p .build/sil");
     run_scenario("clean_start", 40.0, 0.0, 1800.0, 0.0, false, 6.0, false, 4.0);
     run_scenario("loaded_start", 40.0, 0.0, 1800.0, 0.0, false, 15.0, false, 4.0);

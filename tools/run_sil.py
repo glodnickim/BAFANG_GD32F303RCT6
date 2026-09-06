@@ -18,5 +18,12 @@ if p.returncode:
  print(p.stdout); sys.exit(p.returncode)
 r=subprocess.run([str(out/'evist_sil')],cwd=R,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 print(r.stdout,end='')
-(R/'.build/sil/REPORT.txt').write_text(r.stdout)
-sys.exit(r.returncode)
+if r.returncode:
+ (R/'.build/sil/REPORT.txt').write_text(r.stdout)
+ sys.exit(r.returncode)
+f=subprocess.run([str(out/'evist_sil'),'--fuzz','1000','0xE7157A39'],cwd=R,text=True,
+                 stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+print(f.stdout,end='')
+report=r.stdout+'\n'+f.stdout
+(R/'.build/sil/REPORT.txt').write_text(report)
+sys.exit(f.returncode)

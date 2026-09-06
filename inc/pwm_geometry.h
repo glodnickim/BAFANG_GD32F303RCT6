@@ -8,22 +8,17 @@
  *
  * WHY THIS LAYER EXISTS
  * ---------------------
- * Nothing between svpwm() and the compare write ever bounded the value. The FW-127 pre-audit
- * proved that a legal controller output can ask for a compare outside the timer's range:
+ * Nothing between svpwm() and the compare write used to provide a final defensive range check.
+ * FW-127 originally justified this layer with an analytical claim that the normal SVPWM path
+ * exceeded ARR already around u_abs=1170. The later electrical SIL invalidated that claim: a
+ * 360-degree sweep of the REAL svpwm() at _T=3750 stays inside the timer range all the way to
+ * the configured circle limit _U_MAX=1920. At u_abs=1920 the observed requested compare range
+ * is 103..3647, with zero clamp hits across 360 electrical degrees.
  *
- *     deviation from centre = 1.602 * u_abs      (binding sector 2&5, switchtime[0];
- *                                                 swept over a full electrical revolution
- *                                                 across all three sector formulas)
- *     |deviation| > _T/2 = 1875   <=>   u_abs > 1170
- *
- * and the circle limiter in runPIcontrol() allows u_abs up to _U_MAX = 1920, i.e. 61 % of its
- * own ceiling. At u_abs = 1920 the request reaches 4952 against ARR = 3750.
- *
- * Two consequences, both bad and both silent:
- *   - the compare is truncated into uint16 and handed to the timer as if it were meaningful;
- *   - the old trigger code then derived CH3 from that same out-of-range number, producing a
- *     compare that can never match - no CC3 event, no conversion, no ISR, and with the rotor
- *     turning nothing resets the soft-cutoff counter, so there is no recovery path.
+ * The module is therefore a DEFENSIVE OUTPUT INVARIANT, not a normal modulation limiter and not
+ * evidence that legal FOC output is routinely out of range. It still matters because malformed
+ * state, a future SVPWM edit or an arithmetic defect must never become an impossible timer
+ * compare or an impossible ADC-trigger geometry.
  *
  * WHAT THIS MODULE DOES AND DOES NOT DO
  * -------------------------------------
@@ -35,10 +30,9 @@
  *     whatever SVPWM asks for, what is written to the timer is inside [0, ARR],
  *     and every later sampling decision describes the APPLIED values.
  *
- * Clamping is therefore evidence, not a fix: a clamp hit means the voltage controller asked for
- * something the bridge cannot express. The counters below exist so the single FW-127 hardware
- * session can say how often that really happens - which is the practical-reachability question
- * the pre-audit deliberately left open rather than spending a bike test on.
+ * Clamping is therefore evidence, not a normal control action: a clamp hit means some producer
+ * asked for geometry the timer cannot express. With the current real-SVPWM sweep, any hit inside
+ * the normal _U_MAX envelope is itself a regression signal and should be investigated.
  */
 
 #define PWM_GEOMETRY_PHASES 3

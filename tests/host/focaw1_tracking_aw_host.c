@@ -44,6 +44,9 @@
 #ifndef MAIN_H_PATH
 #error "MAIN_H_PATH must be supplied by run-host-tests.ps1"
 #endif
+#ifndef FOC_CURRENT_LOOP_C_PATH
+#error "FOC_CURRENT_LOOP_C_PATH must be supplied by run-host-tests.ps1"
+#endif
 
 /* ------------------------------------------------------------------------------------------- */
 /* Replica of the production regulator + limiter.                                                */
@@ -616,20 +619,23 @@ static int count_in_span(const char *first, const char *last, const char *needle
 
 static void production_wiring_checks(void)
 {
-	long main_len = 0, foc_len = 0, mainh_len = 0;
+	long main_len = 0, foc_len = 0, mainh_len = 0, loop_len = 0;
 	char *main_raw = read_whole_file(STRINGIZE(MAIN_C_PATH), &main_len);
 	char *foc_raw = read_whole_file(STRINGIZE(FOC_C_PATH), &foc_len);
 	char *mainh_raw = read_whole_file(STRINGIZE(MAIN_H_PATH), &mainh_len);
-	char *main_c = NULL, *foc_c = NULL, *main_h = NULL;
+	char *loop_raw = read_whole_file(STRINGIZE(FOC_CURRENT_LOOP_C_PATH), &loop_len);
+	char *main_c = NULL, *foc_c = NULL, *main_h = NULL, *loop_c = NULL;
 
-	CHECK(main_raw && foc_raw && mainh_raw, "setup: main.c, FOC.c and main.h are readable");
-	if (!main_raw || !foc_raw || !mainh_raw) goto done;
+	CHECK(main_raw && foc_raw && mainh_raw && loop_raw,
+		"setup: main.c, FOC.c, main.h and foc_current_loop.c are readable");
+	if (!main_raw || !foc_raw || !mainh_raw || !loop_raw) goto done;
 
 	main_c = strip_comments(main_raw, main_len);
 	foc_c = strip_comments(foc_raw, foc_len);
 	main_h = strip_comments(mainh_raw, mainh_len);
-	CHECK(main_c && foc_c && main_h, "setup: all three sources sanitize successfully");
-	if (!main_c || !foc_c || !main_h) goto done;
+	loop_c = strip_comments(loop_raw, loop_len);
+	CHECK(main_c && foc_c && main_h && loop_c, "setup: all current-loop sources sanitize successfully");
+	if (!main_c || !foc_c || !main_h || !loop_c) goto done;
 
 	/* --- Model-matches-production ------------------------------------------------------ */
 	CHECK(strstr(foc_c, "float aw_part = (float)((PI_c->aw_sat_error * PI_c->aw_inv_kp_q15) >> 15);") != NULL &&
@@ -662,26 +668,26 @@ static void production_wiring_checks(void)
 		strstr(main_c, "if (q15 > (float)FOC_AW_INV_KP_Q15_MAX) q15 = (float)FOC_AW_INV_KP_Q15_MAX;") != NULL &&
 		strstr(main_c, "if (PI_c->gain_p > 0.0f) {") != NULL,
 		"W8: pi_aw_init() derives Kaw = 1/gain_p in Q15 with the clamp and the divide-by-zero guard");
-	CHECK(strstr(main_c, "PI_iq.aw_sat_error =  sat_q;") != NULL &&
-		strstr(main_c, "PI_id.aw_sat_error = -sat_d;") != NULL,
-		"W9: the D-axis sign flip (Vd = -PI_id.out) is applied exactly once, in main.c");
-	CHECK(strstr(main_c, "MS.u_q_req = q31_u_q_temp;") != NULL &&
-		strstr(main_c, "MS.u_d_req = q31_u_d_temp;") != NULL &&
-		strstr(main_c, "MS.u_abs_req = MS.u_abs;") != NULL,
-		"W10: runPIcontrol() records the REQUESTED vector before the limiter can alter it");
-	CHECK(strstr(main_c, "MS.u_q = (q31_u_q_temp*_U_MAX)/MS.u_abs;") != NULL &&
-		strstr(main_c, "MS.u_abs = _U_MAX;") != NULL,
-		"W11: the vector limiter itself is unchanged");
+	CHECK(strstr(loop_c, "pi_iq->aw_sat_error = sat_q;") != NULL &&
+		strstr(loop_c, "pi_id->aw_sat_error = -sat_d;") != NULL,
+		"W9: the D-axis sign flip (Vd = -PI_id.out) is applied exactly once in the shared current-loop owner");
+	CHECK(strstr(loop_c, "ms->u_q_req = u_q_requested;") != NULL &&
+		strstr(loop_c, "ms->u_d_req = u_d_requested;") != NULL &&
+		strstr(loop_c, "ms->u_abs_req = ms->u_abs;") != NULL,
+		"W10: the shared current-loop owner records the REQUESTED vector before limiting");
+	CHECK(strstr(loop_c, "ms->u_q = (u_q_requested * _U_MAX) / ms->u_abs;") != NULL &&
+		strstr(loop_c, "ms->u_abs = _U_MAX;") != NULL,
+		"W11: the vector limiter itself is preserved in the shared production module");
 
 	/* --- The residual must be published AFTER the limiter, and after the requested store. */
 	{
-		const char *run_pi = strstr(main_c, "void runPIcontrol(void){");
-		const char *limiter = run_pi ? strstr(run_pi, "if (MS.u_abs > _U_MAX){") : NULL;
-		const char *publish = run_pi ? strstr(run_pi, "foc_aw_publish_residual();") : NULL;
-		const char *req_store = run_pi ? strstr(run_pi, "MS.u_q_req = q31_u_q_temp;") : NULL;
-		CHECK(run_pi && limiter && publish && req_store,
-			"setup: runPIcontrol()'s limiter and residual publication are locatable");
-		if (run_pi && limiter && publish && req_store) {
+		const char *owner = strstr(loop_c, "void foc_current_loop_step(");
+		const char *limiter = owner ? strstr(owner, "if (ms->u_abs > _U_MAX)") : NULL;
+		const char *publish = owner ? strstr(owner, "pi_iq->aw_sat_error = sat_q;") : NULL;
+		const char *req_store = owner ? strstr(owner, "ms->u_q_req = u_q_requested;") : NULL;
+		CHECK(owner && limiter && publish && req_store,
+			"setup: shared current-loop limiter and residual publication are locatable");
+		if (owner && limiter && publish && req_store) {
 			CHECK(req_store < limiter,
 				"W12: the requested vector is stored BEFORE the limiter runs");
 			CHECK(limiter < publish,
@@ -803,9 +809,11 @@ done:
 	free(main_c);
 	free(foc_c);
 	free(main_h);
+	free(loop_c);
 	free(main_raw);
 	free(foc_raw);
 	free(mainh_raw);
+	free(loop_raw);
 }
 
 int main(void)

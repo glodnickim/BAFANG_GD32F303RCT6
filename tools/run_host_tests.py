@@ -27,6 +27,7 @@ varmap={
  'motorCoreCPathForward': ROOT/'src/motor_core.c',
  'rollingNoAssistDiagCPathForward': ROOT/'src/rolling_no_assist_diag.c',
  'focCPathForward': ROOT/'src/FOC.c',
+ 'focCurrentLoopCPathForward': ROOT/'src/foc_current_loop.c',
  'sampleWindowCPathForward': ROOT/'src/sample_window.c',
  'armMathHPathForward': ROOT/'Firmware/CMSIS/arm_math.h',
  'configHPathForward': ROOT/'inc/config.h',

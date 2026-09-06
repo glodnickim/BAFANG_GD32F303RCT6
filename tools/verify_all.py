@@ -2,9 +2,9 @@
 """Single local quality gate for EVistDrive.
 
 Runs the real-module host suites, deterministic whole-pipeline regression, closed-loop
-supervisory SIL, stress fuzzing, ASan/UBSan and source-manifest hygiene. If the exact
-Arm GNU toolchain + PowerShell are available, --target also performs the canonical debug
-Developer target build using the existing production build script.
+supervisory SIL, real electrical FOC/PMSM/Hall SIL, stress fuzzing, ASan/UBSan, BL820 packaging
+and source-manifest hygiene. If the exact Arm GNU toolchain is available, --target also performs
+the debug Developer target build using the cross-platform Python builder.
 """
 from __future__ import annotations
 import argparse, os, shutil, subprocess, sys, time
@@ -40,9 +40,8 @@ def diff_gate():
 
 def target_build(require):
     gcc=shutil.which('arm-none-eabi-gcc') or shutil.which('arm-none-eabi-gcc.exe')
-    ps=shutil.which('pwsh') or shutil.which('powershell') or shutil.which('powershell.exe')
-    if not gcc or not ps:
-        msg=f'TARGET BUILD SKIP: arm-none-eabi-gcc={bool(gcc)} PowerShell={bool(ps)}'
+    if not gcc:
+        msg='TARGET BUILD SKIP: arm-none-eabi-gcc not found'
         if require: print(msg,file=sys.stderr); raise SystemExit(3)
         print(msg); return
     ver=subprocess.check_output([gcc,'-dumpfullversion','-dumpversion'],text=True).strip().splitlines()[0]
@@ -51,11 +50,8 @@ def target_build(require):
         if require: print(msg,file=sys.stderr); raise SystemExit(3)
         print(msg); return
     toolbin=str(Path(gcc).resolve().parent)
-    cmd=[ps]
-    if Path(ps).name.lower().startswith('powershell'): cmd += ['-ExecutionPolicy','Bypass']
-    cmd += ['-File',str(R/'scripts/build-firmware.ps1'),'-Target','M820_BL820','-Profile','debug',
-            '-Variant','normal','-BuildMode','Developer','-Toolchain',toolbin,
-            '-OutputDir',str(R/'.build/verify-target')]
+    cmd=[sys.executable,'tools/build_firmware.py','--variant','normal','--mode','developer',
+         '--toolchain',toolbin,'--output-dir',str(R/'.build/verify-target')]
     step('exact ARM target build',cmd)
 
 def main():
@@ -66,11 +62,17 @@ def main():
     a=ap.parse_args()
     print('EVistDrive full verification gate')
     manifest_gate(); diff_gate()
-    step('68 real-module host suites',[sys.executable,'tools/run_host_tests.py'])
+    step('cross-platform target-tree + BL820 packager self-check',
+         [sys.executable,'tools/build_firmware.py','--check-only'])
+    step('independent BL820 container regression',[sys.executable,'tests/tools_prepare_m820_bl820.py'])
+    step('real-module host suites',[sys.executable,'tools/run_host_tests.py'])
     step('whole-pipeline deterministic regression',[sys.executable,'tools/run_regression.py'])
     sil=[sys.executable,'tools/run_sil.py','--fuzz','1000' if a.quick else '10000']
     if not a.quick: sil += ['--sanitize','--sanitize-fuzz','1000']
     step('closed-loop SIL + deterministic fuzz'+('' if a.quick else ' + ASan/UBSan'),sil)
+    electrical=[sys.executable,'tools/run_electrical_sil.py','--full-fuzz','250' if a.quick else '1000']
+    if not a.quick: electrical += ['--sanitize','--sanitize-fuzz','100']
+    step('real FOC/PMSM/Hall electrical SIL'+('' if a.quick else ' + ASan/UBSan'),electrical)
     if a.target or a.require_target: target_build(a.require_target)
     print('\n==================================================')
     print('EVistDrive PC VERIFICATION: PASS')

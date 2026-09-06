@@ -34,6 +34,7 @@ OF SUCH DAMAGE.
 
 #include "main.h"
 #include "FOC.h"
+#include "foc_current_loop.h"
 #include "assist_limits.h"
 #include "motor_core.h"
 #include "motor_service.h"
@@ -396,23 +397,6 @@ static void pi_aw_init(PI_control_t* PI_c)
  * it can only fire if some future change breaks that invariant - and if it does, it keeps the
  * fixed-point multiply in PI_control() inside int32 instead of letting it overflow silently.
  */
-static void foc_aw_publish_residual(void)
-{
-	int32_t sat_q = MS.u_q_req - MS.u_q;   /* physical Vq: requested - applied */
-	int32_t sat_d = MS.u_d_req - MS.u_d;   /* physical Vd: requested - applied */
-
-	if (sat_q >  FOC_AW_SAT_ERROR_MAX) sat_q =  FOC_AW_SAT_ERROR_MAX;
-	if (sat_q < -FOC_AW_SAT_ERROR_MAX) sat_q = -FOC_AW_SAT_ERROR_MAX;
-	if (sat_d >  FOC_AW_SAT_ERROR_MAX) sat_d =  FOC_AW_SAT_ERROR_MAX;
-	if (sat_d < -FOC_AW_SAT_ERROR_MAX) sat_d = -FOC_AW_SAT_ERROR_MAX;
-
-	MS.u_q_sat_err = sat_q;
-	MS.u_d_sat_err = sat_d;
-
-	PI_iq.aw_sat_error =  sat_q;
-	PI_id.aw_sat_error = -sat_d;
-}
-
 void foc_aw_tracking_reset(void)
 {
 	PI_iq.aw_sat_error = 0;
@@ -4044,58 +4028,20 @@ void runPIcontrol(void){
 		MS.u_d_sat_err = 0;
 	}
 #endif
-	q31_u_q_temp =  PI_control(&PI_iq);
-	//control id
-	  PI_id.recent_value = MS.i_d;
-	  PI_id.setpoint = MS.i_d_setpoint;
-	  q31_u_d_temp = -PI_control(&PI_id); //control direct current to zero
+	{
+		foc_current_loop_result_t loop_result;
 #if QUIET_ZERO_ENABLE
-	if(qz.apply_integral){
-		/*
-		 * Re-assert the commanded integral AFTER the regulators ran. PI_control() adds one
-		 * gain_i*error increment of its own every call; overwriting it here means the fade
-		 * trajectory (and the exact zero of the hold) is what the integrator actually holds and
-		 * what a trace observes, and that single increment can never accumulate back into a
-		 * back-EMF-compensating voltage. PI.out keeps the increment - the P path is meant to
-		 * stay live - and is not touched.
-		 */
-		PI_iq.integral_part = qz.iq_integral;
-		PI_id.integral_part = qz.id_integral;
-	}
+		foc_current_loop_step(&MS, &PI_iq, &PI_id,
+			qz.apply_integral ? 1U : 0U,
+			qz.iq_integral, qz.id_integral, &loop_result);
+#else
+		foc_current_loop_step(&MS, &PI_iq, &PI_id, 0U, 0.0f, 0.0f, &loop_result);
 #endif
-
-	  /* FOC-AW1: the REQUESTED vector, recorded before the limiter can touch it. This is the
-	   * split the whole card rests on - "what the regulators asked for" and "what the bridge
-	   * was allowed to produce" used to be the same two variables, so the difference between
-	   * them could not be observed, let alone fed back. */
-	  MS.u_q_req = q31_u_q_temp;
-	  MS.u_d_req = q31_u_d_temp;
-
-	  //circle limitation
-
-	  MS.u_abs = (int32_t)sqrtf((float)(q31_u_d_temp*q31_u_d_temp+q31_u_q_temp*q31_u_q_temp));
-//	  arm_sqrt_q31((q31_u_d_temp*q31_u_d_temp+q31_u_q_temp*q31_u_q_temp)<<1,&MS.u_abs);
-//	  MS.u_abs = (MS.u_abs>>16)+1;
-	  MS.u_abs_req = MS.u_abs;   //FOC-AW1: magnitude before the clamp below rewrites MS.u_abs
-
-	  if (MS.u_abs > _U_MAX){
-			MS.u_q = (q31_u_q_temp*_U_MAX)/MS.u_abs; //division!
-			MS.u_d = (q31_u_d_temp*_U_MAX)/MS.u_abs; //division!
-			MS.u_abs = _U_MAX;
-			foc_aw_saturated = 1;
-			foc_aw_sat_ticks++;  //free-running per-run counter; wrapping is meaningless here
-		}
-	  else{
-			MS.u_q=q31_u_q_temp;
-			MS.u_d=q31_u_d_temp;
-			foc_aw_saturated = 0;
-		}
-
-	  /* FOC-AW1: cycle N publishes the residual that cycle N+1's PI_control() consumes. It has
-	   * to be here, AFTER the branch above: the applied vector does not exist until the limiter
-	   * has decided. In the else branch applied == requested, so this stores an exact zero and
-	   * the next cycle's regulator is bit-identical to the pre-FOC-AW1 one. */
-	  foc_aw_publish_residual();
+		q31_u_q_temp = loop_result.u_q_requested;
+		q31_u_d_temp = loop_result.u_d_requested;
+		foc_aw_saturated = loop_result.saturated;
+		if (loop_result.saturated) foc_aw_sat_ticks++;
+	}
 
 	  PI_flag=0;
 

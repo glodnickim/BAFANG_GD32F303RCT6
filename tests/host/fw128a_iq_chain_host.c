@@ -27,6 +27,9 @@
 #ifndef RIDE_CONTROL_C_PATH
 #error "RIDE_CONTROL_C_PATH must be defined (see tests/host/run-host-tests.ps1)"
 #endif
+#ifndef FOC_CURRENT_LOOP_C_PATH
+#error "FOC_CURRENT_LOOP_C_PATH must be defined (see tests/host/run-host-tests.ps1)"
+#endif
 #define STRINGIZE_(x) #x
 #define STRINGIZE(x) STRINGIZE_(x)
 
@@ -170,13 +173,15 @@ int main(void)
 
 	/* ================= structural ownership ============================================== */
 
-	long ml = 0, rl = 0;
+	long ml = 0, rl = 0, fl = 0;
 	char *mraw = read_whole_file(STRINGIZE(MAIN_C_PATH), &ml);
 	char *rraw = read_whole_file(STRINGIZE(RIDE_CONTROL_C_PATH), &rl);
-	if (!mraw || !rraw) { printf("  FAIL  cannot read the sources\n"); return 1; }
+	char *fraw = read_whole_file(STRINGIZE(FOC_CURRENT_LOOP_C_PATH), &fl);
+	if (!mraw || !rraw || !fraw) { printf("  FAIL  cannot read the sources\n"); return 1; }
 	char *m = strip_comments(mraw, ml);
 	char *r = strip_comments(rraw, rl);
-	if (!m || !r) { printf("  FAIL  out of memory\n"); return 1; }
+	char *f = strip_comments(fraw, fl);
+	if (!m || !r || !f) { printf("  FAIL  out of memory\n"); return 1; }
 
 	/* --- A1: exactly one producer per stage -------------------------------------------------- */
 	CHECK(count_occurrences(r, "iq_chain_note_requested(") == 1,
@@ -253,9 +258,9 @@ int main(void)
 	      "A11g. legacy BC override no longer writes setpoint with battery-current domain");
 
 	/* --- A12: Id untouched -------------------------------------------------------------------- */
-	CHECK(strstr(m, "PI_id.recent_value = MS.i_d;") != NULL, "A12a. Id feedback unchanged");
-	CHECK(strstr(m, "PI_id.setpoint = MS.i_d_setpoint;") != NULL, "A12b. Id reference unchanged");
-	CHECK(strstr(m, "q31_u_d_temp = -PI_control(&PI_id);") != NULL,
+	CHECK(strstr(f, "pi_id->recent_value = ms->i_d;") != NULL, "A12a. Id feedback unchanged");
+	CHECK(strstr(f, "pi_id->setpoint = ms->i_d_setpoint;") != NULL, "A12b. Id reference unchanged");
+	CHECK(strstr(f, "u_d_requested = -PI_control(pi_id);") != NULL,
 	      "A12c. the Ud sign expression is untouched, as the card requires");
 
 	/* --- A13 + S4: nothing downstream or upstream of this card moved ---------------------------- */

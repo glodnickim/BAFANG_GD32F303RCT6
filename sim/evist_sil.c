@@ -26,6 +26,15 @@
 #include "torque_input.h"
 #include "tuning_config.h"
 
+#ifdef EVD_SIL_REAL_FOC
+#include "FOC.h"
+#include "foc_current_loop.h"
+#include "pwm_geometry.h"
+#include "quiet_zero.h"
+#include "rotor_angle.h"
+#include "rotor_motion.h"
+#endif
+
 #define CTRL_HZ 4000U
 #define INNER_PER_CTRL 4U
 #define PI 3.14159265358979323846
@@ -45,7 +54,211 @@ typedef struct {
     uint32_t last_hall_tick;
     uint32_t prev_hall_tick;
     bool hall_edge_this_ctrl;
+#ifdef EVD_SIL_REAL_FOC
+    double id_a;
+    double iq_a;
+    double r_ohm;
+    double ld_h;
+    double lq_h;
+    double flux_wb;
+    rotor_angle_state_t angle_state;
+    rotor_motion_t rotor_motion;
+    uint32_t hall_sequence;
+    uint32_t tics_filtered_8;
+    uint16_t last_capture_500k;
+    double hall_elapsed_500k;
+    int64_t hall_sector_index;
+    uint8_t sixstep_untrusted;
+    double max_angle_error_deg;
+#endif
 } plant_t;
+
+#ifdef EVD_SIL_REAL_FOC
+#define SIL_CURRENT_A_PER_COUNT 0.095
+#define SIL_VBUS 40.0
+#define SIL_SQRT3 1.7320508075688772
+PI_control_t PI_iq, PI_id;
+uint8_t ui_8_PWM_ON_Flag = 1U;
+uint8_t bridge_lifecycle = BRIDGE_LIFECYCLE_RUN;
+int32_t switchtime[3];
+uint16_t pwm_applied[3];
+static MotorState_t *g_foc_ms;
+static plant_t *g_foc_plant;
+static MotorParams_t g_foc_mp;
+static quiet_zero_t g_quiet_zero;
+static int32_t g_qz_entry_erps;
+static int32_t g_qz_abort_erps;
+static int32_t g_qz_peak_abs_iq;
+
+void timer_channel_output_pulse_value_config(uint32_t timer, uint16_t ch, uint32_t value)
+{ (void)timer; (void)ch; (void)value; }
+void timer_primary_output_config(uint32_t timer, uint32_t enable)
+{ (void)timer; (void)enable; }
+
+static void sil_pi_init(PI_control_t *p, int16_t limit_i)
+{
+    memset(p, 0, sizeof(*p));
+    p->gain_p = 1.5f;
+    p->gain_i = 0.01f;
+    p->limit_i = limit_i;
+    p->limit_output = _U_MAX;
+    p->max_step = 15;
+    p->shift = 11;
+    p->aw_inv_kp_q15 = 21845;
+}
+
+void runPIcontrol(void)
+{
+    foc_current_loop_result_t r;
+    quiet_zero_action_t qz;
+
+    fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &g_foc_ms->i_q_setpoint);
+    PI_iq.recent_value = (int16_t)g_foc_ms->i_q;
+    PI_iq.setpoint = g_foc_ms->i_q_setpoint;
+
+    /* Keep the electrical SIL on the production zero-current lifecycle too. This mirrors the
+     * QZERO block in main.c: the same state machine decides whether the current regulators'
+     * integrals are faded/held, while the real PI and vector limiter still execute below. */
+    {
+        quiet_zero_input_t in = {
+            .iq_ref = g_foc_ms->i_q_setpoint,
+            .zero_policy_quiet =
+                fast_iq_slew_current_zero_policy() == FIS_ZERO_POLICY_QUIET,
+            .iq_measured = g_foc_ms->i_q,
+            .id_measured = g_foc_ms->i_d,
+            .abort_current = QZERO_ABORT_CURRENT,
+            .rotor_erps = g_foc_plant ? (int32_t)g_foc_plant->rotor_motion.edge_erps : 0,
+            .speed_fresh = g_foc_plant ?
+                rotor_motion_speed_fresh(&g_foc_plant->rotor_motion,
+                                         g_foc_plant->hall_age_ticks) : false,
+            .min_brake_erps = RIDE_COAST_RELEASE_ERPS,
+            .iq_integral = PI_iq.integral_part,
+            .id_integral = PI_id.integral_part
+        };
+        quiet_zero_tick(&g_quiet_zero, &in, &qz);
+        if (qz.entered) g_qz_entry_erps = in.rotor_erps;
+        if (g_quiet_zero.state != (uint32_t)QZERO_INACTIVE) {
+            int32_t a = in.iq_measured < 0 ? -in.iq_measured : in.iq_measured;
+            if (a > g_qz_peak_abs_iq) g_qz_peak_abs_iq = a;
+        }
+        if (qz.aborted) g_qz_abort_erps = in.rotor_erps;
+    }
+
+    if (qz.apply_integral) {
+        PI_iq.integral_part = qz.iq_integral;
+        PI_id.integral_part = qz.id_integral;
+    }
+    if (qz.freeze_aw || qz.clear_aw_edge) {
+        PI_iq.aw_sat_error = 0;
+        PI_id.aw_sat_error = 0;
+        g_foc_ms->u_q_sat_err = 0;
+        g_foc_ms->u_d_sat_err = 0;
+    }
+
+    foc_current_loop_step(g_foc_ms, &PI_iq, &PI_id,
+                          qz.apply_integral ? 1U : 0U,
+                          qz.iq_integral, qz.id_integral, &r);
+}
+
+static double sil_wrap_pi(double a)
+{
+    while (a >= PI) a -= 2.0 * PI;
+    while (a < -PI) a += 2.0 * PI;
+    return a;
+}
+
+static q31_t sil_angle_q31(double rev)
+{
+    double a = sil_wrap_pi(rev * 2.0 * PI);
+    double x = a / PI * 2147483648.0;
+    if (x >= 2147483647.0) x = 2147483647.0;
+    if (x < -2147483648.0) x = -2147483648.0;
+    return (q31_t)llround(x);
+}
+
+static double sil_q31_to_rad(q31_t a)
+{
+    return ((double)a / 2147483648.0) * PI;
+}
+
+static q31_t sil_estimated_hall_angle(plant_t *p)
+{
+    uint32_t elapsed = (uint32_t)llround(p->hall_elapsed_500k);
+    if (elapsed > 65535U) elapsed = 65535U;
+
+    if (elapsed > (uint32_t)(SIXSTEPTHRESHOLD << 1)) {
+        p->last_capture_500k = (uint16_t)(SIXSTEPTHRESHOLD << 1);
+        p->tics_filtered_8 = (uint32_t)p->last_capture_500k << 3;
+    }
+    if (p->last_capture_500k < SIXSTEPTHRESHOLD && elapsed < 200U)
+        p->sixstep_untrusted = 0U;
+    if (p->last_capture_500k > ((SIXSTEPTHRESHOLD * 6U) >> 2))
+        p->sixstep_untrusted = 1U;
+
+    double boundary_rev = (double)p->hall_sector_index / 6.0;
+    rotor_angle_input_t in = {
+        .hall_angle = sil_angle_q31(boundary_rev),
+        .angle_correction = 0,
+        .direction = 1,
+        .tim2_recent = elapsed,
+        .tics_filtered_8 = p->tics_filtered_8,
+        .want_untrusted = p->sixstep_untrusted != 0U,
+        .stalled = rotor_motion_angle_stale(&p->rotor_motion, p->hall_age_ticks),
+        .fallback_sign = 1,
+        .hall_sequence = p->hall_sequence,
+        .hall_sequence_valid = true
+    };
+    q31_t theta = rotor_angle_update(&p->angle_state, &in);
+    double err = sil_wrap_pi(sil_q31_to_rad(theta) -
+                             sil_wrap_pi(p->theta_e_rev * 2.0 * PI));
+    double deg = fabs(err) * 180.0 / PI;
+    if (deg > p->max_angle_error_deg) p->max_angle_error_deg = deg;
+    return theta;
+}
+
+static void sil_dq_to_ab(double d, double q, double th, double *a, double *b)
+{
+    double c = cos(th), s = sin(th);
+    *a = d * c - q * s;
+    *b = d * s + q * c;
+}
+
+static void sil_ab_to_dq(double a, double b, double th, double *d, double *q)
+{
+    double c = cos(th), s = sin(th);
+    *d = a * c + b * s;
+    *q = -a * s + b * c;
+}
+
+static void sil_current_to_phase_counts(const plant_t *p, int16_t *ia, int16_t *ib)
+{
+    double a, b;
+    double th = p->theta_e_rev * 2.0 * PI;
+    sil_dq_to_ab(p->id_a, p->iq_a, th, &a, &b);
+    double ib_a = (-a + SIL_SQRT3 * b) * 0.5;
+    long ca = llround(a / SIL_CURRENT_A_PER_COUNT);
+    long cb = llround(ib_a / SIL_CURRENT_A_PER_COUNT);
+    if (ca > 32767) ca = 32767;
+    if (ca < -32768) ca = -32768;
+    if (cb > 32767) cb = 32767;
+    if (cb < -32768) cb = -32768;
+    *ia = (int16_t)ca;
+    *ib = (int16_t)cb;
+}
+
+static void sil_pwm_to_ab(const uint16_t pwm[3], double *alpha, double *beta)
+{
+    double da = (double)pwm[0] / (double)_T;
+    double db = (double)pwm[1] / (double)_T;
+    double dc = (double)pwm[2] / (double)_T;
+    double mean = (da + db + dc) / 3.0;
+    /* TIMER/PWM polarity established by the standalone real-FOC electrical SIL. */
+    double va = -SIL_VBUS * (da - mean);
+    double vb = -SIL_VBUS * (db - mean);
+    *alpha = va;
+    *beta = (va + 2.0 * vb) / SIL_SQRT3;
+}
+#endif
 
 typedef struct {
     double rpm;
@@ -111,11 +324,86 @@ static void plant_init(plant_t *p, double breakaway_iq)
     p->accel_erps_s_per_iq = 20.0; /* plant parameter, not firmware truth */
     p->drag_per_s = 5.0;
     p->hall_age_ticks = 0xFFFFU;
+#ifdef EVD_SIL_REAL_FOC
+    p->r_ohm = 0.060;
+    p->ld_h = 80e-6;
+    p->lq_h = 80e-6;
+    p->flux_wb = 0.015;
+    rotor_angle_reset(&p->angle_state);
+    memset(&p->rotor_motion, 0, sizeof(p->rotor_motion));
+    p->tics_filtered_8 = 128000U;
+    p->last_capture_500k = 0U;
+    p->hall_elapsed_500k = 0.0;
+    p->hall_sector_index = (int64_t)floor(p->theta_e_rev * 6.0);
+    p->sixstep_untrusted = 0U;
+    sil_pi_init(&PI_iq, _U_MAX);
+    sil_pi_init(&PI_id, 1800);
+    quiet_zero_reset(&g_quiet_zero);
+    g_qz_entry_erps = 0;
+    g_qz_abort_erps = 0;
+    g_qz_peak_abs_iq = 0;
+    pwm_geometry_init();
+#endif
 }
 
-static void plant_inner_tick(plant_t *p, int32_t iq_cmd, uint32_t ctrl_tick)
+#ifdef EVD_SIL_REAL_FOC
+static void plant_set_start_angle(plant_t *p, double electrical_rev)
+{
+    p->theta_e_rev = electrical_rev;
+    p->hall_sector_index = (int64_t)floor(p->theta_e_rev * 6.0);
+    p->hall_elapsed_500k = 0.0;
+    p->hall_sequence = 0U;
+    p->tics_filtered_8 = 128000U;
+    p->last_capture_500k = 0U;
+    p->sixstep_untrusted = 0U;
+    p->max_angle_error_deg = 0.0;
+    memset(&p->rotor_motion, 0, sizeof(p->rotor_motion));
+    rotor_angle_reset(&p->angle_state);
+}
+#endif
+
+static void plant_inner_tick(plant_t *p, MotorState_t *ms, int32_t iq_cmd, uint32_t ctrl_tick)
 {
     const double dt = 1.0 / 16000.0;
+#ifdef EVD_SIL_REAL_FOC
+    int16_t ia, ib;
+    sil_current_to_phase_counts(p, &ia, &ib);
+    g_foc_ms = ms;
+    g_foc_plant = p;
+    g_foc_mp.com_mode = Hallsensor;
+    g_foc_mp.reverse = 1;
+    q31_t theta_control = sil_estimated_hall_angle(p);
+    FOC_calculation(ia, ib, theta_control,
+                    (int16_t)ms->i_q_setpoint, ms, &g_foc_mp);
+    (void)pwm_geometry_apply(switchtime, pwm_applied, (uint16_t)_T);
+
+    double alpha, beta, vd, vq;
+    sil_pwm_to_ab(pwm_applied, &alpha, &beta);
+    sil_ab_to_dq(alpha, beta, p->theta_e_rev * 2.0 * PI, &vd, &vq);
+
+    /* Controller stays at 16 kHz. Only the virtual motor is sub-stepped. */
+    const int substeps = 8;
+    const double h = dt / (double)substeps;
+    for (int n = 0; n < substeps; n++) {
+        double we = 2.0 * PI * p->erps;
+        double did = (vd - p->r_ohm * p->id_a + we * p->lq_h * p->iq_a) / p->ld_h;
+        double diq = (vq - p->r_ohm * p->iq_a - we * (p->ld_h * p->id_a + p->flux_wb)) / p->lq_h;
+        p->id_a += did * h;
+        p->iq_a += diq * h;
+    }
+    p->iq_actual = p->iq_a / SIL_CURRENT_A_PER_COUNT;
+    /* A positive static/load torque opposes forward motion. Once moving, negative electrical Iq
+     * is allowed to brake the virtual rotor; clamping negative drive to zero would make QZERO
+     * electrically visible but mechanically ineffective and would hide exactly the STOP path
+     * this backend is meant to validate. */
+    double load_iq = (p->erps > 0.01 || p->iq_actual > p->breakaway_iq) ?
+        p->breakaway_iq : 0.0;
+    double drive = p->iq_actual - load_iq;
+    double accel = drive * p->accel_erps_s_per_iq - p->drag_per_s * p->erps;
+    p->erps += accel * dt;
+    if (p->erps < 0.0) p->erps = 0.0;
+#else
+    (void)ms;
     /* Current loop stand-in: ~2 ms current tracking. The production PI is independently host-
      * tested; here we need its actuator effect so supervisory states see real/no Hall motion. */
     const double alpha = dt / (0.002 + dt);
@@ -126,9 +414,13 @@ static void plant_inner_tick(plant_t *p, int32_t iq_cmd, uint32_t ctrl_tick)
     double accel = drive * p->accel_erps_s_per_iq - p->drag_per_s * p->erps;
     p->erps += accel * dt;
     if (p->erps < 0.0) p->erps = 0.0;
+#endif
 
     double old = p->theta_e_rev;
     p->theta_e_rev += p->erps * dt;
+#ifdef EVD_SIL_REAL_FOC
+    p->hall_elapsed_500k += 500000.0 * dt;
+#endif
     /* Hall edge each 1/6 electrical revolution. */
     uint64_t old_sector = (uint64_t)floor(old * 6.0);
     uint64_t new_sector = (uint64_t)floor(p->theta_e_rev * 6.0);
@@ -137,6 +429,18 @@ static void plant_inner_tick(plant_t *p, int32_t iq_cmd, uint32_t ctrl_tick)
         p->hall_edges += (uint32_t)(new_sector - old_sector);
         p->prev_hall_tick = p->last_hall_tick;
         p->last_hall_tick = ctrl_tick;
+#ifdef EVD_SIL_REAL_FOC
+        uint32_t capture = (uint32_t)llround(p->hall_elapsed_500k);
+        if (capture > 65535U) capture = 65535U;
+        if (capture == 0U) capture = 1U;
+        rotor_motion_note_edge(&p->rotor_motion, p->hall_age_ticks, (uint16_t)capture);
+        p->hall_sequence++;
+        p->last_capture_500k = (uint16_t)capture;
+        p->tics_filtered_8 -= p->tics_filtered_8 >> 3;
+        p->tics_filtered_8 += capture;
+        p->hall_elapsed_500k = 0.0;
+        p->hall_sector_index = (int64_t)new_sector;
+#endif
     }
 }
 
@@ -208,6 +512,10 @@ static void sim_init(sim_t *s, double rpm, double cadence_ripple_fraction,
     assist_modes_init();
     assist_modes_set_active_bank(0U);
     motor_core_init(&s->MS);
+#ifdef EVD_SIL_REAL_FOC
+    s->MS.hall_angle_detect_flag = 1U;
+    foc_current_feedback_reset(&s->MS);
+#endif
     ride_control_init();
     pas_direction_init();
     pas_liveness_init();
@@ -310,8 +618,12 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
      * exercise cadence-dependent Power/eMTB demand in closed loop. This is a SIL plant law, not
      * a claimed M820 calibration. */
     {
+#ifdef EVD_SIL_REAL_FOC
+        double u = (double)s->MS.u_abs;
+#else
         double u = 600.0 + 2.0 * s->plant.erps;
         if (u > 1800.0) u = 1800.0;
+#endif
         r.motor_voltage_utilization = (uint16_t)llround(u);
     }
     r.pas_forward = pedaling;
@@ -339,10 +651,25 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     in.phase_current_max = PH_CURRENT_MAX;
     in.battery_current_mA = 0;
     in.battery_current_max = 15000;
-    in.u_abs = 600;
+    in.u_abs =
+#ifdef EVD_SIL_REAL_FOC
+        s->MS.u_abs;
+#else
+        600;
+#endif
     in.cal_i = 95;
-    in.current_iq = (int32_t)llround(s->plant.iq_actual);
-    in.current_id = 0;
+    in.current_iq =
+#ifdef EVD_SIL_REAL_FOC
+        s->MS.i_q;
+#else
+        (int32_t)llround(s->plant.iq_actual);
+#endif
+    in.current_id =
+#ifdef EVD_SIL_REAL_FOC
+        s->MS.i_d;
+#else
+        0;
+#endif
     in.voltage_raw = TEST_VOLTAGE_RAW;
     in.voltage_min_raw = VOLTAGE_MIN;
     in.controller_temperature_c = TEST_TEMP_C;
@@ -356,8 +683,10 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
         s->first_permission_tick = s->tick;
 
     for (unsigned k = 0; k < INNER_PER_CTRL; k++) {
+#ifndef EVD_SIL_REAL_FOC
         fast_iq_slew_tick(ride_control_final_iq_slew_mailbox(), &s->MS.i_q_setpoint);
-        plant_inner_tick(&s->plant, s->MS.i_q_setpoint, s->tick);
+#endif
+        plant_inner_tick(&s->plant, &s->MS, s->MS.i_q_setpoint, s->tick);
     }
     if (s->plant.hall_edge_this_ctrl) {
         s->plant.hall_age_ticks = 0U;
@@ -426,6 +755,9 @@ static int run_fuzz(unsigned count)
         sim_t s;
         sim_init(&s, rpm, cadence_ripple, mean_ckg, torque_ripple, bounce,
             breakaway_iq, true);
+#ifdef EVD_SIL_REAL_FOC
+        plant_set_start_angle(&s.plant, fuzz_range(0.0, 1.0));
+#endif
         uint32_t n = 2U * CTRL_HZ;
         for (uint32_t t = 0U; t < n; t++) sim_ctrl_tick(&s, NULL);
 
@@ -439,17 +771,28 @@ static int run_fuzz(unsigned count)
             (s.first_hall_tick - s.first_permission_tick) > CTRL_HZ / 4U) ok = false;
         if (s.false_reverse_events != 0U || s.direction_inhibit_ticks != 0U) ok = false;
         if (s.iq_min_all < 0 || s.iq_max_all > PH_CURRENT_MAX) ok = false;
+#ifdef EVD_SIL_REAL_FOC
+        if (s.plant.max_angle_error_deg > 31.0) ok = false;
+#endif
 
         if (!ok) {
             failures++;
             fprintf(stderr,
                 "FUZZ FAIL case=%u seed=0x%08X rpm=%.2f cadRipple=%.3f meanCkg=%.1f "
                 "torqueRipple=%.1f breakawayIq=%.2f bounce=%u perm=%u iq=%u hall=%u "
-                "falseR=%u inhibit=%u iqRange=[%d,%d]\n",
+                "falseR=%u inhibit=%u iqRange=[%d,%d]"
+#ifdef EVD_SIL_REAL_FOC
+                " angleErrMax=%.2fdeg"
+#endif
+                "\n",
                 i, case_seed, rpm, cadence_ripple, mean_ckg, torque_ripple,
                 breakaway_iq, bounce ? 1U : 0U, s.first_permission_tick, s.first_iq_tick,
                 s.first_hall_tick, s.false_reverse_events, s.direction_inhibit_ticks,
-                s.iq_min_all, s.iq_max_all);
+                s.iq_min_all, s.iq_max_all
+#ifdef EVD_SIL_REAL_FOC
+                , s.plant.max_angle_error_deg
+#endif
+                );
             if (failures >= 10U) break;
         }
     }
@@ -514,15 +857,32 @@ static int run_stop_restart_scenario(void)
               restart_first_iq >= restart_permission &&
               first_positive_iq > 0 && first_positive_iq < PH_CURRENT_MAX &&
               s.false_reverse_events == 0U && s.direction_inhibit_ticks == 0U;
+#ifdef EVD_SIL_REAL_FOC
+    /* A real electrical STOP test is only meaningful if the production QZERO lifecycle actually
+     * armed. Otherwise this would silently regress to the ordinary zero-current PI while still
+     * printing a green stop/restart result. */
+    ok = ok && g_quiet_zero.entries == 1U &&
+         g_quiet_zero.aborts <= 1U &&
+         g_quiet_zero.state == (uint32_t)QZERO_INACTIVE;
+#endif
     double stop_to_zero_ms = 1000.0 * (double)(zero_tick - stop_tick) / CTRL_HZ;
     double restart_permission_ms = restart_permission ?
         1000.0 * (double)(restart_permission - restart_tick) / CTRL_HZ : -1.0;
     double permission_to_iq_ms = (restart_permission && restart_first_iq) ?
         1000.0 * (double)(restart_first_iq - restart_permission) / CTRL_HZ : -1.0;
     printf("SCENARIO stop_restart       releaseIq=%d stop->Iq0=%.2fms maxFallStep=%d "
-           "restartPermission=%.2fms permission->Iq=%.2fms firstRestartIq=%d maxRiseStep=%d %s\n",
+           "restartPermission=%.2fms permission->Iq=%.2fms firstRestartIq=%d maxRiseStep=%d"
+#ifdef EVD_SIL_REAL_FOC
+           " qzeroEntries=%u qzeroAborts=%u qzeroHandbacks=%u qzEntryErps=%d qzAbortErps=%d qzPeakIq=%d"
+#endif
+           " %s\n",
            iq_at_release, stop_to_zero_ms, max_fall_step, restart_permission_ms,
-           permission_to_iq_ms, first_positive_iq, max_rise_step, ok ? "PASS" : "FAIL");
+           permission_to_iq_ms, first_positive_iq, max_rise_step,
+#ifdef EVD_SIL_REAL_FOC
+           g_quiet_zero.entries, g_quiet_zero.aborts, g_quiet_zero.low_speed_exits,
+           g_qz_entry_erps, g_qz_abort_erps, g_qz_peak_abs_iq,
+#endif
+           ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }
 
@@ -551,11 +911,47 @@ static void run_scenario(const char *name, double rpm, double cadence_ripple_fra
     double hall_ms = s.first_hall_tick ? 1000.0 * s.first_hall_tick / CTRL_HZ : -1.0;
     double perm_to_hall = (s.first_permission_tick && s.first_hall_tick) ?
         1000.0 * (s.first_hall_tick - s.first_permission_tick) / CTRL_HZ : -1.0;
-    printf("SCENARIO %-18s permission=%7.2fms firstIq=%7.2fms firstHall=%7.2fms perm->Hall=%7.2fms falseR=%u inhibitTicks=%u steadyIqMean=%.1f std=%.1f pp=%d\n",
+    printf("SCENARIO %-18s permission=%7.2fms firstIq=%7.2fms firstHall=%7.2fms perm->Hall=%7.2fms falseR=%u inhibitTicks=%u steadyIqMean=%.1f std=%.1f pp=%d"
+#ifdef EVD_SIL_REAL_FOC
+           " angleErrMax=%.2fdeg"
+#endif
+           "\n",
         name, permission_ms, iq_ms, hall_ms, perm_to_hall,
         s.false_reverse_events, s.direction_inhibit_ticks, mean, std,
-        s.iq_samples_run ? (s.iq_max_run - s.iq_min_run) : 0);
+        s.iq_samples_run ? (s.iq_max_run - s.iq_min_run) : 0
+#ifdef EVD_SIL_REAL_FOC
+        , s.plant.max_angle_error_deg
+#endif
+        );
 }
+
+#ifdef EVD_SIL_REAL_FOC
+static int run_hall_start_angle_sweep(void)
+{
+    int failures = 0;
+    double worst_ms = 0.0;
+    double worst_err = 0.0;
+    for (int deg = 0; deg < 360; deg += 15) {
+        for (int load = 0; load < 2; load++) {
+            sim_t s;
+            sim_init(&s, 40.0, 0.20, 1800.0, 400.0, false,
+                     load ? 15.0 : 6.0, true);
+            plant_set_start_angle(&s.plant, (double)deg / 360.0);
+            for (uint32_t i = 0; i < CTRL_HZ; i++) sim_ctrl_tick(&s, NULL);
+            double ms = (s.first_permission_tick && s.first_hall_tick) ?
+                1000.0 * (double)(s.first_hall_tick - s.first_permission_tick) / CTRL_HZ : 1e9;
+            if (ms > worst_ms && ms < 1e8) worst_ms = ms;
+            if (s.plant.max_angle_error_deg > worst_err) worst_err = s.plant.max_angle_error_deg;
+            if (!s.first_permission_tick || !s.first_hall_tick || ms > 100.0 ||
+                s.plant.max_angle_error_deg > 31.0 || s.false_reverse_events != 0U)
+                failures++;
+        }
+    }
+    printf("HALL START SWEEP 24 angles x 2 loads: failures=%d worstPerm->Hall=%.2fms worstAngleErr=%.2fdeg %s\n",
+           failures, worst_ms, worst_err, failures ? "FAIL" : "PASS");
+    return failures ? 1 : 0;
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -578,6 +974,9 @@ int main(int argc, char **argv)
     run_scenario("pedal40", 40.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
     run_scenario("pedal60", 60.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
     run_scenario("pedal80", 80.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
+#ifdef EVD_SIL_REAL_FOC
+    if (run_hall_start_angle_sweep() != 0) return 1;
+#endif
     if (run_stop_restart_scenario() != 0) return 1;
     return 0;
 }

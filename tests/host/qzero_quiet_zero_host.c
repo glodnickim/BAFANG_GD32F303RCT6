@@ -49,6 +49,9 @@
 #ifndef RIDE_CONTROL_C_PATH
 #error "RIDE_CONTROL_C_PATH must be supplied by run-host-tests.ps1"
 #endif
+#ifndef FOC_CURRENT_LOOP_C_PATH
+#error "FOC_CURRENT_LOOP_C_PATH must be supplied by run-host-tests.ps1"
+#endif
 
 /* Same production numbers the other PI suites hardcode, and for the same reason (config.h/FOC.h
  * pull in hardware context this harness does not have): P_FACTOR_I_Q=1.5, I_FACTOR_I_Q=0.01,
@@ -875,18 +878,21 @@ static int count_all(const char *text, const char *needle)
 
 static void production_wiring_checks(void)
 {
-	long main_len = 0, foc_len = 0, ride_len = 0;
+	long main_len = 0, foc_len = 0, ride_len = 0, loop_len = 0;
 	char *main_raw = read_whole_file(STRINGIZE(MAIN_C_PATH), &main_len);
 	char *foc_raw = read_whole_file(STRINGIZE(FOC_C_PATH), &foc_len);
 	char *ride_raw = read_whole_file(STRINGIZE(RIDE_CONTROL_C_PATH), &ride_len);
-	CHECK(main_raw && foc_raw && ride_raw, "setup: main.c, FOC.c and ride_control.c are readable");
-	if (!main_raw || !foc_raw || !ride_raw) goto done;
+	char *loop_raw = read_whole_file(STRINGIZE(FOC_CURRENT_LOOP_C_PATH), &loop_len);
+	CHECK(main_raw && foc_raw && ride_raw && loop_raw,
+		"setup: main.c, FOC.c, ride_control.c and foc_current_loop.c are readable");
+	if (!main_raw || !foc_raw || !ride_raw || !loop_raw) goto done;
 
 	char *main_c = strip_comments(main_raw, main_len);
 	char *foc_c = strip_comments(foc_raw, foc_len);
 	char *ride_c = strip_comments(ride_raw, ride_len);
-	CHECK(main_c && foc_c && ride_c, "setup: all three sources sanitize successfully");
-	if (!main_c || !foc_c || !ride_c) { free(main_c); free(foc_c); free(ride_c); goto done; }
+	char *loop_c = strip_comments(loop_raw, loop_len);
+	CHECK(main_c && foc_c && ride_c && loop_c, "setup: all QZERO/current-loop sources sanitize successfully");
+	if (!main_c || !foc_c || !ride_c || !loop_c) { free(main_c); free(foc_c); free(ride_c); free(loop_c); goto done; }
 
 	/* Model-matches-production: the replica must still be FOC.c's real PI_control() body. */
 	CHECK(strstr(foc_c, "PI_c->integral_part += (Delta - aw_part)*PI_c->gain_i;") != NULL &&
@@ -905,12 +911,15 @@ static void production_wiring_checks(void)
 			CHECK(count_in_span(run_pi, run_pi_end, "quiet_zero_tick(&quiet_zero_state") == 1,
 				"T13: exactly one quiet_zero_tick() call, and it is inside runPIcontrol()");
 			const char *tick_call = strstr(run_pi, "quiet_zero_tick(&quiet_zero_state");
-			const char *first_pi = strstr(run_pi, "PI_control(&PI_iq)");
-			CHECK(tick_call && first_pi && tick_call < first_pi,
+			const char *loop_call = strstr(run_pi, "foc_current_loop_step(&MS, &PI_iq, &PI_id");
+			CHECK(tick_call && loop_call && tick_call < loop_call,
 				"T13: the decision is made BEFORE either regulator runs, on this tick's Iq_ref");
-			CHECK(count_in_span(run_pi, run_pi_end, "PI_iq.integral_part = qz.iq_integral;") == 2 &&
-				count_in_span(run_pi, run_pi_end, "PI_id.integral_part = qz.id_integral;") == 2,
-				"T13: the commanded integral is applied both before and after the regulators");
+			CHECK(count_in_span(run_pi, run_pi_end, "PI_iq.integral_part = qz.iq_integral;") == 1 &&
+				count_in_span(run_pi, run_pi_end, "PI_id.integral_part = qz.id_integral;") == 1 &&
+				strstr(loop_c, "if (reassert_integral)") != NULL &&
+				strstr(loop_c, "pi_iq->integral_part = iq_integral;") != NULL &&
+				strstr(loop_c, "pi_id->integral_part = id_integral;") != NULL,
+				"T13: the commanded integral is applied before the shared loop and re-asserted inside it after both PI calls");
 			CHECK(count_in_span(run_pi, run_pi_end, "PI_iq.aw_sat_error = 0;") == 1 &&
 				count_in_span(run_pi, run_pi_end, "PI_id.aw_sat_error = 0;") == 1,
 				"T13: FOC-AW1's residual is cleared in the ISR that owns it, not via foc_aw_tracking_reset()");
@@ -1005,10 +1014,12 @@ static void production_wiring_checks(void)
 	free(main_c);
 	free(foc_c);
 	free(ride_c);
+	free(loop_c);
 done:
 	free(main_raw);
 	free(foc_raw);
 	free(ride_raw);
+	free(loop_raw);
 }
 
 int main(void)

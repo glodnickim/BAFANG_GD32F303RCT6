@@ -1,87 +1,154 @@
-# EVistDrive v3 - status po etapie FW139-FW141
+# EVistDrive v3 — zweryfikowany checkpoint FW139–FW142
 
-Baseline: `EvistDrive06092026v3.zip`
-Branch: `master`
+**Baseline:** `EvistDrive06092026v3.zip`
+**Cel:** przerwać cykl „unit PASS → flash → nowa regresja” i mieć jeden testowalny tor od ridera do FOC/Hall.
+**Stan:** PC/SIL VERIFIED; exact ARM target build READY BUT NOT EXECUTED IN THIS RUNTIME.
 
-## Zrealizowane zmiany
+## 1. Zmiany produkcyjne
 
-1. **Test infrastructure sync** (`a6e9dd9`)
-   - przenosny runner host-testow;
-   - schema diagnostic v4 zsynchronizowana z testami.
+### FW139 — PAS physical-glitch rejection
+- odbicie 1–3 ticki nie trafia do automatu `pas_direction` jako prawdziwy reverse;
+- rzeczywisty reverse po fizycznie możliwym odstępie nadal natychmiast ustawia direction inhibit;
+- naprawa jest przed safety state machine, więc nie osłabia zabezpieczenia reverse.
 
-2. **FW139 PAS physical glitch rejection** (`7033c71`)
-   - odbicia 1-3 ticki nie sa przekazywane do direction safety;
-   - prawdziwy reverse zachowuje natychmiastowe direction inhibit.
+### FW139 — normal START ma jednego ownera trajektorii prądu
+- usunięty Hall-gated Gear Preload (`~1 A -> czekaj na Hall / timeout 300 ms`);
+- finalny 16 kHz `fast_iq_slew` pozostaje normalnym właścicielem narastania Iq;
+- w zamkniętym SIL ciężki start, który wcześniej czekał ~333 ms permission→Hall, schodzi do dziesiątek ms.
 
-3. **FW139 startup trajectory cleanup** (`0be2557`)
-   - usuniety Hall-gated gear preload z normalnego startu;
-   - finalny 16 kHz Iq trajectory pozostaje jedynym ownerem narastania pradu.
+### FW140 — jedna kadencja sterująca
+- raw cadence pozostaje do HMI/diagnostyki;
+- assist i adaptive Iq używają `cadence_filter`;
+- pierwszy wiarygodny pomiar seeduje filtr, więc nie powstaje dodatkowy start delay;
+- A/B przy tej samej fizycznej korbie: finalne Iq peak-to-peak 71 -> 19 counts (~73% mniej pompowania).
 
-4. **Closed-loop supervisory SIL + fuzz** (`0be2557`, `a3ad8b4`, `989f83f`)
-   - prawdziwy PAS -> torque -> rider_input -> ride_control -> final Iq;
-   - model ridera, PAS A/B, Hall feedback i breakaway load;
-   - scenariusze clean/loaded start, PAS bounce, cadence ripple, pedal 20/40/60/80, stop/restart;
-   - deterministyczny fuzz.
+### FW141 — filtry torque mają prawdziwy timebase
+- FAST ~35 ms i RUN ~120/250 ms są catch-upowane według `elapsed_ticks` 4 kHz;
+- 35 ms fizycznego wejścia daje ten sam wynik przy gęstych i sparse foreground calls: 247 == 247;
+- wynik filtra nie zależy już od chwilowego obciążenia CPU/foreground.
 
-5. **FW140 conditioned cadence** (`e6150d9`)
-   - wspomaganie i adaptive Iq dynamics korzystaja z jednego filtra kadencji sterujacej;
-   - pierwszy realny pomiar seeduje filtr bez dodatkowego start delay;
-   - raw cadence zostaje do diagnostyki/HMI.
+### FW142 — jeden współdzielony current-loop owner
+- matematyka PI Id/Iq + wspólny limiter wektora została wydzielona z `main.c` do
+  `src/foc_current_loop.c`;
+- firmware target i elektryczny SIL linkują TEN SAM moduł;
+- parity test: **2000 losowych stanów, exact legacy-vs-helper match PASS**;
+- nie zmieniono celowo gainów PI, limitów ani semantyki anti-windup.
 
-6. **FW141 elapsed-time torque filtering** (`18d81e0`)
-   - 35 ms FAST oraz 120/250 ms RUN sa liczone w realnym czasie 4 kHz, nie liczbie wywolan foreground;
-   - missed-tick burst nie rozciaga filtrow torque;
-   - caly FAST->RUN cascade jest catch-upowany w poprawnej kolejnosci.
+## 2. Elektryczny FOC SIL
 
-## Aktualny gate PC
+Pełny backend wykonuje produkcyjny:
 
-### Host real-module suites
-- **68 / 68 PASS**
+```text
+PAS/torque/cadence
+ -> ride_control
+ -> final Iq @16 kHz
+ -> FOC.c / Clarke / Park / measured Id/Iq
+ -> PI Id/Iq + tracking AW + vector limit
+ -> inverse Park
+ -> svpwm()
+ -> PWM geometry guard
+ -> virtual PMSM
+ -> Ia/Ib + fizyczny kąt rotora
+ -> fizyczne Hall edges
+ -> rotor_motion + rotor_angle
+ -> z powrotem do FOC/ride_control
+```
+
+QZERO jest również wykonywany w pełnym backendzie. W aktualnym modelu testowym STOP:
+- QZERO entry: ~156 erps;
+- safety abort: ~127 erps;
+- test nie wymusza sztucznego handbacku — abort jest akceptowany jako jawna bezpieczna gałąź,
+  ponieważ R/L/flux/J w wirtualnym PMSM nie są deklarowane jako pomiar prawdziwego M820.
+
+To jest ważne: simulator ma wykrywać zależność QZERO od fizyki, a nie „stroić prawdę” pod oczekiwany wynik.
+
+## 3. Wyniki pełnego gate PC
+
+### Real-module host
+- **69 / 69 PASS**
 
 ### Whole-pipeline deterministic regression
-- 6 scenariuszy x 3 warstwy = **18 traces PASS**
-- missed-tick burst: **PASS**
-- determinism RUN_100 rerun: **PASS byte-identical**
+- **18 / 18 traces PASS**;
+- missed-tick regression PASS;
+- repeated RUN_100 byte-identical PASS.
 
-### Closed-loop supervisory SIL
-- clean start: permission -> first Hall ~33.5 ms
-- loaded start: permission -> first Hall ~37.5 ms
-- PAS bounce: 0 false reverse / 0 inhibit ticks
-- cadence raw peak-to-peak Iq: 71 counts
-- cadence filtered peak-to-peak Iq: 19 counts
-- stop/restart: PASS; first restart Iq=1; max rise step=1
-- fuzz: **10000 / 10000 PASS**
-- ASan/UBSan fuzz: **1000 / 1000 PASS**
+### Fast closed-loop supervisory SIL
+- clean start permission→Hall ~33.5 ms;
+- loaded start ~37.5 ms;
+- PAS bounce: 0 false reverse;
+- cadence A/B: 71 -> 19 Iq p-p;
+- STOP→RESTART: first restart Iq=1 count;
+- deterministic fuzz: **10 000 / 10 000 PASS**;
+- ASan/UBSan fuzz: **1 000 / 1 000 PASS**.
 
-## Wazne ograniczenie aktualnego SIL
+### Real FOC/PMSM/Hall/QZERO SIL
+- real SVPWM 360° geometry through `_U_MAX=1920`: **0 clamp hits**;
+- corrected historical FW127 assumption: normal real SVPWM does NOT exceed ARR at `u_abs~1170`;
+- 6-sector locked-rotor current tests PASS;
+- moving current tracking 50..220 erps PASS; voltage saturation appears only near the high end of the chosen plant;
+- Hall start sweep: **24 electrical angles x 2 loads = 48 / 48 starts PASS**;
+- worst permission→first Hall = ~45 ms;
+- worst initial Hall-angle uncertainty = 30°, as expected for 3 Hall sector-centre fallback;
+- deterministic full electrical fuzz: **1 000 / 1 000 PASS**;
+- ASan/UBSan full electrical fuzz: **100 / 100 PASS**.
 
-Obecny SIL jest zamknieta petla supervisory, ale nie jest jeszcze pelnym modelem elektrycznym PMSM/invertera. Current loop jest stand-inem (~2 ms tracking), a nie realnym `FOC.c` pracujacym przeciwko modelowi faz Ia/Ib/Ic i PWM/ADC.
+### BL820 target packaging/build infrastructure
+- complete target tree check: **PASS** (85 manifest entries + startup/linker/CMSIS/HAL);
+- Python BL820 packager regression: **PASS**;
+- CRC/container test uses an independent bitwise reference across many payload lengths: **PASS**;
+- cross-platform target builder: `tools/build_firmware.py`;
+- one-command target-required gate: `python tools/verify_all.py --require-target`.
 
-## Co dalej
+## 4. Czego NIE udajemy
 
-1. **Electrical FOC SIL**
-   - realny `FOC.c`/PI/SVPWM przeciwko modelowi PMSM;
-   - Ia/Ib/Ic, ADC offset/quantization, bus voltage, rotor electrical angle, 3 Hall;
-   - wszystkie 6 startowych sektorow Hall;
-   - current limit, voltage limit, saturation, anti-windup, zero-current.
+W tym runtime nie ma `arm-none-eabi-gcc 13.2.1`, a bezpośrednie pobranie oficjalnego toolchainu jest blokowane.
+Dlatego:
 
-2. **FOC lifecycle matrix**
-   - COLD -> PREPARE -> ACTIVE -> ARMED_ZERO -> ACTIVE;
-   - normal stop bez MOE chatter;
-   - fault shutdown niezaleznie;
-   - reverse i rolling restart.
+```text
+PC/SIL verification: PASS
+BL820 packaging logic: PASS
+target build path: READY/CHECKED
+exact target ELF/BIN in this runtime: NOT BUILT
+hardware ride verification of FW142: NOT DONE
+```
 
-3. **Residual architecture cleanup dopiero po electrical SIL**
-   - one permission owner;
-   - one rider-effort estimator;
-   - A/B legacy `min-Iq hold`, QZERO, coast-release;
-   - bez zmiany wszystkiego naraz.
+Nie nazywać tej paczki „hardware verified firmware” dopóki exact target build i kontrolowany test na M820 nie przejdą.
 
-4. **Target build gate**
-   - exact Arm GNU 13.2.1 + production linker/startup;
-   - obecne srodowisko nie ma `arm-none-eabi-gcc` ani PowerShell, wiec target `.bin` nie zostal tu jeszcze zbudowany;
-   - `tools/verify_all.py --require-target` jest przygotowany jako twardy gate, gdy toolchain jest dostepny.
+## 5. Jak uruchomić
 
-## Regula dalszej pracy
+Quick:
 
-`host -> whole-pipeline -> closed-loop SIL -> electrical FOC SIL -> exact target build -> dopiero hardware`
+```bash
+python tools/verify_all.py --quick
+```
+
+Full:
+
+```bash
+python tools/verify_all.py
+```
+
+Pełny gate + wymagany target M820:
+
+```bash
+python tools/verify_all.py --require-target
+```
+
+Sam build targetu z Arm GNU 13.2.1:
+
+```bash
+python tools/build_firmware.py --toolchain "<bin katalog Arm GNU 13.2.1>"
+```
+
+## 6. Następny hardware gate
+
+Po uzyskaniu exact `.bin` nie wracamy do losowego strojenia. Pierwszy test roweru ma jedynie zweryfikować rzeczy, których SIL nie może udowodnić z niezmierzonym plantem:
+
+1. start z miejsca pod lekkim i cięższym naciskiem — brak opóźnienia/Hall deadlock;
+2. 20/40/60/80 rpm — brak ciągłego pump/szarpania;
+3. prawdziwy reverse — natychmiastowy cut;
+4. zwykły STOP — klik / czas zatrzymania / QZERO hardware trace;
+5. restart z ARMED_ZERO — brak kliku i brak stale Iq;
+6. log konfiguracji runtime, żeby odróżnić kod od starego persisted banku.
+
+Dopiero dane z tego jednego gate mogą zmieniać parametry fizycznego modelu lub QZERO. Nie stroić FOC na podstawie samego virtual PMSM.

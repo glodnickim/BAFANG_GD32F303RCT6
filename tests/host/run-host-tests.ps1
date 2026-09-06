@@ -45,6 +45,7 @@ $assistDynamicsCPathForward = (Join-Path $root 'src\assist_dynamics.c') -replace
 $motorCoreCPathForward = (Join-Path $root 'src\motor_core.c') -replace '\\', '/'
 $rollingNoAssistDiagCPathForward = (Join-Path $root 'src\rolling_no_assist_diag.c') -replace '\\', '/'
 $focCPathForward = (Join-Path $root 'src\FOC.c') -replace '\\', '/'
+$focCurrentLoopCPathForward = (Join-Path $root 'src\foc_current_loop.c') -replace '\\', '/'
 $sampleWindowCPathForward = (Join-Path $root 'src\sample_window.c') -replace '\\', '/'
 $armMathHPathForward = (Join-Path $root 'Firmware\CMSIS\arm_math.h') -replace '\\', '/'
 $configHPathForward = (Join-Path $root 'inc\config.h') -replace '\\', '/'
@@ -478,7 +479,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'armed_zero_lifecycle_host.c'
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward", "-DFOC_CURRENT_LOOP_C_PATH=$focCurrentLoopCPathForward") },
     @{ Name = 'FOC-AW1 D/Q voltage tracking anti-windup (real PI_control()+limiter replica + production wiring guards)'
        Harness = Join-Path $PSScriptRoot 'focaw1_tracking_aw_host.c'
        # No modules linked - main.c/FOC.c are the ARM entry point/ISR core (same reasoning as
@@ -487,7 +488,12 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        # circle limiter; the wiring checks are source-text guards over main.c/FOC.c/main.h.
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DMAIN_H_PATH=$mainHPathForward", "-DFOC_C_PATH=$focCPathForward", "-DFOC_CURRENT_LOOP_C_PATH=$focCurrentLoopCPathForward") },
+    @{ Name = 'FOC current-loop extraction parity (real shared module vs legacy block, randomized)'
+       Harness = Join-Path $PSScriptRoot 'foc_current_loop_parity_host.c'
+       Modules = @(Join-Path $root 'src\foc_current_loop.c')
+       IncludeDirs = @((Join-Path $PSScriptRoot 'foc_current_loop_shim'),
+                       (Join-Path $PSScriptRoot 'common')) },
     @{ Name = 'STOP-CLICK-C1 PI D/Q integrator continuity (real PI_control() replica + production wiring guards)'
        Harness = Join-Path $PSScriptRoot 'stopclick_c1_pi_integral_host.c'
        # No modules linked - main.c/FOC.c are the ARM entry point/ISR core (same reasoning as
@@ -529,7 +535,8 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @((Join-Path $root 'src\quiet_zero.c'),
                    (Join-Path $root 'src\fast_iq_slew.c'))
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DFOC_C_PATH=$focCPathForward",
+        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DFOC_C_PATH=$focCPathForward",
+                   "-DFOC_CURRENT_LOOP_C_PATH=$focCurrentLoopCPathForward",
                    "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
     @{ Name = 'QS-3D 16 kHz final Iq slew parity (real 16 kHz owner + real 4 kHz owner, lockstep)'
        Harness = Join-Path $PSScriptRoot 'qs3d_16khz_slew_host.c'
@@ -547,7 +554,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'qs3c_battery_cap_host.c'
        Modules = @(Join-Path $root 'src\battery_iq_cap.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward", "-DFOC_CURRENT_LOOP_C_PATH=$focCurrentLoopCPathForward") },
     @{ Name = 'FW-127A applied PWM geometry clamp (real pwm_geometry.c)'
        Harness = Join-Path $PSScriptRoot 'fw127a_pwm_geometry_host.c'
        Modules = @(Join-Path $root 'src\pwm_geometry.c')
@@ -574,7 +581,7 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'fw128a_iq_chain_host.c'
        Modules = @(Join-Path $root 'src\iq_chain.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
-       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DRIDE_CONTROL_C_PATH=$rideControlCPathForward", "-DFOC_CURRENT_LOOP_C_PATH=$focCurrentLoopCPathForward") },
     @{ Name = 'PRE-FW128 PAS timebase (real pas_sampler.c + pas_cadence.c + pas_quadrature.c)'
        Harness = Join-Path $PSScriptRoot 'pre128_pas_timebase_host.c'
        Modules = @((Join-Path $root 'src\pas_sampler.c'), (Join-Path $root 'src\pas_cadence.c'), (Join-Path $root 'src\pas_quadrature.c'))

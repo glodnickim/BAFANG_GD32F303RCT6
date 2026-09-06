@@ -1,12 +1,11 @@
 /*
  * FW-127A: the applied-PWM-geometry clamp, against the REAL module (src/pwm_geometry.c).
  *
- * WHAT THIS PROTECTS. The pre-audit proved arithmetically that a legal controller output can
- * ask for a compare outside the timer's range - deviation from centre is 1.602 * u_abs, so
- * anything above u_abs = 1170 exceeds _T/2 = 1875, and the circle limiter allows 1920. Before
- * this card the request went to the timer truncated into uint16, and the trigger code then
- * derived CH3 from that same illegal number, producing a compare that can never match: no
- * conversion, no ISR, and with the rotor turning nothing resets the soft-cutoff counter.
+ * WHAT THIS PROTECTS. Later real-SVPWM electrical-SIL evidence corrected the original FW-127
+ * reachability analysis: the current svpwm() remains inside [0, ARR] throughout a 360-degree
+ * sweep at _U_MAX=1920. This module is therefore a defensive last-line invariant, not a normal
+ * saturation mechanism. The tests below deliberately inject illegal requests to prove they can
+ * never reach the timer; normal-SVPWM reachability is tested by sim/foc_electrical_sil.c.
  *
  * So the tests below are not about tidiness. A4/A5 are the invariant this card exists for.
  */
@@ -19,14 +18,6 @@
 #include <string.h>
 
 #define ARR ((uint16_t)_T)          /* TIMER0 period: timer_initpara.period = _T */
-
-/* The real SVPWM arithmetic for the binding sector (2&5), so the fixtures are the firmware's
- * own numbers rather than invented ones. _SQRT3 = 28 = 1.732 * 16. */
-static int32_t svpwm_sector25_phase_a(int32_t u_alpha)
-{
-	const int32_t U_alpha = (28 * (int32_t)_T * u_alpha) >> 4;
-	return ((int32_t)_T + U_alpha) >> 12;
-}
 
 int main(void)
 {
@@ -84,20 +75,14 @@ int main(void)
 		CHECK(bad == 0, "A4. across a full sweep, every applied compare is inside [0, ARR]");
 	}
 
-	/* --- A4b: driven by the REAL SVPWM arithmetic at the circle limit ----------------------- */
+	/* --- A4b: defensive containment of deliberately impossible upstream geometry ------------- */
 	pwm_geometry_init();
 	{
-		int over = 0, bad = 0;
-		for (int32_t u = 0; u <= 1920; u += 10) {          /* 1920 = _U_MAX */
-			const int32_t dev = svpwm_sector25_phase_a(u);
-			const int32_t req[3] = { dev + (int32_t)(_T >> 1), (int32_t)(_T >> 1), (int32_t)(_T >> 1) };
-			if (req[0] > (int32_t)ARR) over++;
-			(void)pwm_geometry_apply(req, applied, ARR);
-			if (applied[0] > ARR) bad = 1;
-		}
-		CHECK(over > 0,
-		      "A4b. the real SVPWM formula DOES exceed ARR inside the circle limit - the defect is real");
-		CHECK(bad == 0, "A4c. ...and the clamp contains every one of those cases");
+		const int32_t req[3] = { -4000, (int32_t)ARR + 4000, 1875 };
+		mask = pwm_geometry_apply(req, applied, ARR);
+		CHECK(mask == 0x03, "A4b. deliberately impossible A/B geometry is detected");
+		CHECK(applied[0] == 0 && applied[1] == ARR && applied[2] == 1875,
+		      "A4c. impossible geometry is contained without changing the legal phase");
 	}
 
 	/* --- A5: no illegal CH3 may ever be programmed ------------------------------------------ */

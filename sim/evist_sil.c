@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "assist_modes.h"
+#include "cadence_filter.h"
 #include "config.h"
 #include "motor_core.h"
 #include "pas_cadence.h"
@@ -47,7 +48,9 @@ typedef struct {
 
 typedef struct {
     double rpm;
-    double phase_steps;
+    double crank_rev;
+    double cadence_ripple_fraction;
+    double next_pas_edge_rev;
     uint8_t state_index;
     uint8_t ab;
     uint8_t bounce_ticks;
@@ -62,7 +65,6 @@ typedef struct {
     plant_t plant;
     rider_plant_t rider;
     uint32_t tick;
-    uint16_t cadence_filtered_x8;
     uint16_t last_forward_gap;
     uint16_t stop_timeout;
     uint8_t start_phase;
@@ -76,6 +78,7 @@ typedef struct {
     double iq_sum_run;
     double iq_sq_sum_run;
     uint32_t iq_samples_run;
+    bool use_filtered_control_cadence;
 } sim_t;
 
 /* Raw forward ring for PAS_DIR_SIGN=-1: 00 -> 10 -> 11 -> 01 -> 00. */
@@ -133,14 +136,17 @@ static void plant_inner_tick(plant_t *p, int32_t iq_cmd, uint32_t ctrl_tick)
     }
 }
 
-static void rider_init(rider_plant_t *r, double rpm, double mean_ckg, double ripple_ckg, bool bounce)
+static void rider_init(rider_plant_t *r, double rpm, double cadence_ripple_fraction,
+                       double mean_ckg, double ripple_ckg, bool bounce)
 {
     memset(r, 0, sizeof(*r));
     r->rpm = rpm;
+    r->cadence_ripple_fraction = cadence_ripple_fraction;
     r->torque_mean_ckg = mean_ckg;
     r->torque_ripple_ckg = ripple_ckg;
     r->state_index = 0U;
     r->ab = FWD_AB[0];
+    r->next_pas_edge_rev = 1.0 / (double)PAS_TRANSITIONS_PER_REV;
     r->inject_bounce = bounce;
 }
 
@@ -155,9 +161,15 @@ static uint8_t rider_pas_tick(rider_plant_t *r)
         r->bounce_ticks = 0U;
         return r->ab;
     }
-    r->phase_steps += r->rpm * (double)PAS_TRANSITIONS_PER_REV / (60.0 * CTRL_HZ);
-    if (r->phase_steps >= 1.0) {
-        r->phase_steps -= 1.0;
+    /* Human cadence is not uniform inside a crank revolution. Two leg pushes speed the crank
+     * up and the two dead spots slow it down. This is deliberately a physical-angle ripple so
+     * the PAS period estimator sees the same local-speed modulation it sees on a bicycle. */
+    double inst_rpm = r->rpm *
+        (1.0 + r->cadence_ripple_fraction * sin(4.0 * PI * r->crank_rev));
+    if (inst_rpm < 1.0) inst_rpm = 1.0;
+    r->crank_rev += inst_rpm / (60.0 * CTRL_HZ);
+    if (r->crank_rev >= r->next_pas_edge_rev) {
+        r->next_pas_edge_rev += 1.0 / (double)PAS_TRANSITIONS_PER_REV;
         r->state_index = (uint8_t)((r->state_index + 1U) & 3U);
         r->ab = FWD_AB[r->state_index];
         r->forward_edges++;
@@ -169,15 +181,15 @@ static uint8_t rider_pas_tick(rider_plant_t *r)
 
 static double rider_torque_ckg(const rider_plant_t *r, uint32_t tick)
 {
-    double rev_s = r->rpm / 60.0;
-    double t = (double)tick / CTRL_HZ;
+    (void)tick;
     /* two leg pushes per crank revolution; mean plus bounded sinusoidal ripple */
-    double v = r->torque_mean_ckg + r->torque_ripple_ckg * sin(4.0 * PI * rev_s * t);
+    double v = r->torque_mean_ckg + r->torque_ripple_ckg * sin(4.0 * PI * r->crank_rev);
     return v < 0.0 ? 0.0 : v;
 }
 
-static void sim_init(sim_t *s, double rpm, double mean_ckg, double ripple_ckg,
-                     bool bounce, double breakaway_iq)
+static void sim_init(sim_t *s, double rpm, double cadence_ripple_fraction,
+                     double mean_ckg, double ripple_ckg, bool bounce,
+                     double breakaway_iq, bool use_filtered_control_cadence)
 {
     memset(s, 0, sizeof(*s));
     torque_input_init();
@@ -189,13 +201,15 @@ static void sim_init(sim_t *s, double rpm, double mean_ckg, double ripple_ckg,
     ride_control_init();
     pas_direction_init();
     pas_cadence_reset();
+    cadence_filter_reset();
     pas_sampler_init(0U);
-    rider_init(&s->rider, rpm, mean_ckg, ripple_ckg, bounce);
+    rider_init(&s->rider, rpm, cadence_ripple_fraction, mean_ckg, ripple_ckg, bounce);
     plant_init(&s->plant, breakaway_iq);
     s->last_forward_gap = PAS_STOP_TICKS;
     s->stop_timeout = PAS_STOP_TICKS;
     s->iq_min_run = 0x7fffffff;
     s->iq_max_run = -0x7fffffff;
+    s->use_filtered_control_cadence = use_filtered_control_cadence;
     /* seed physical PAS state */
     pas_sampler_isr_tick(s->rider.ab, 0U);
 }
@@ -219,8 +233,7 @@ static void process_pas(sim_t *s, uint8_t ab)
             if (cad.pulse && cad.measured) {
                 s->MS.cadence = cad.rpm;
                 s->start_phase = 0U;
-                s->cadence_filtered_x8 -= s->cadence_filtered_x8 >> 3;
-                s->cadence_filtered_x8 += s->MS.cadence;
+                cadence_filter_update(s->MS.cadence);
             }
         } else if (st < 0) {
             s->false_reverse_events++;
@@ -249,6 +262,8 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     bool crank_direction_ok = (s->MS.cadence > 0U || s->start_phase) && !real_stop;
     bool pedaling = crank_direction_ok &&
         pas_direction_fwd_run() >= tuning_config_start_steps();
+    uint8_t control_cadence = s->MS.cadence;
+    if (s->use_filtered_control_cadence) control_cadence = cadence_filter_get();
 
     double load_ckg = rider_torque_ckg(&s->rider, s->tick);
     uint16_t raw = sensor_native_from_ckg(load_ckg);
@@ -264,10 +279,20 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     r.torque_assist_filtered = ts->assist_delta_filtered_native;
     r.torque_run_filtered = ts->assist_delta_run_native;
     r.torque_load_centikg = ts->load_centikg;
-    r.cadence_rpm = s->MS.cadence;
+    r.cadence_rpm = control_cadence;
     r.wheel_speed_x100 = 0U;
     r.motor_erps = (uint16_t)(s->plant.erps > 65535.0 ? 65535.0 : llround(s->plant.erps));
     r.motor_erps_age_ticks = s->plant.hall_age_ticks;
+    /* Approximate increasing electrical voltage utilization with motor speed. At standstill the
+     * production demand path deliberately leans on its launch anchor; once the virtual motor is
+     * spinning this moves the calculation into the measured-duty branch, which is required to
+     * exercise cadence-dependent Power/eMTB demand in closed loop. This is a SIL plant law, not
+     * a claimed M820 calibration. */
+    {
+        double u = 600.0 + 2.0 * s->plant.erps;
+        if (u > 1800.0) u = 1800.0;
+        r.motor_voltage_utilization = (uint16_t)llround(u);
+    }
     r.pas_forward = pedaling;
     r.pedaling_active = pedaling;
     r.crank_forward_steps = pas_direction_fwd_run();
@@ -285,7 +310,7 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     ride_control_input_t in;
     memset(&in, 0, sizeof(in));
     in.speed_x100 = 0U;
-    in.cadence_rpm = s->MS.cadence;
+    in.cadence_rpm = control_cadence;
     in.assist_level_index = 3U; /* default Power level 3 */
     in.battery_voltage_mv = TEST_BATTERY_MV;
     in.iq_scale = PH_CURRENT_MAX;
@@ -300,7 +325,7 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     in.voltage_raw = TEST_VOLTAGE_RAW;
     in.voltage_min_raw = VOLTAGE_MIN;
     in.controller_temperature_c = TEST_TEMP_C;
-    in.cadence_filtered_x8 = s->cadence_filtered_x8;
+    in.cadence_filtered_x8 = cadence_filter_get_x8();
     in.speed_limit_x100 = SPEEDLIMIT;
     in.legal_enabled = true;
     in.elapsed_ticks = 1U;
@@ -335,7 +360,7 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
         const assist_mode_output_t *mo = assist_modes_get_last_output();
         fprintf(csv, "%u,%u,%u,%u,%u,%d,%.3f,%.3f,%u,%u,%u,%u,%u,%u,%d\n",
             s->tick, ab, pas_direction_fwd_run(), s->MS.cadence,
-            s->cadence_filtered_x8 >> 3, s->MS.i_q_setpoint,
+            cadence_filter_get(), s->MS.i_q_setpoint,
             s->plant.iq_actual, s->plant.erps, s->plant.hall_age_ticks,
             ride_control_get_session_state(), ride_control_get_debug_flags(),
             ts->load_centikg, ts->assist_delta_filtered_native,
@@ -343,11 +368,13 @@ static void sim_ctrl_tick(sim_t *s, FILE *csv)
     }
 }
 
-static void run_scenario(const char *name, double rpm, double mean_ckg, double ripple_ckg,
-                         bool bounce, double breakaway_iq, double seconds)
+static void run_scenario(const char *name, double rpm, double cadence_ripple_fraction,
+                         double mean_ckg, double ripple_ckg, bool bounce,
+                         double breakaway_iq, bool filtered_cadence, double seconds)
 {
     sim_t s;
-    sim_init(&s, rpm, mean_ckg, ripple_ckg, bounce, breakaway_iq);
+    sim_init(&s, rpm, cadence_ripple_fraction, mean_ckg, ripple_ckg, bounce,
+        breakaway_iq, filtered_cadence);
     char path[256];
     snprintf(path, sizeof(path), ".build/sil/%s.csv", name);
     FILE *f = fopen(path, "w");
@@ -375,9 +402,14 @@ static void run_scenario(const char *name, double rpm, double mean_ckg, double r
 int main(void)
 {
     system("mkdir -p .build/sil");
-    run_scenario("clean_start", 40.0, 1800.0, 0.0, false, 6.0, 4.0);
-    run_scenario("loaded_start", 40.0, 1800.0, 0.0, false, 15.0, 4.0);
-    run_scenario("pas_bounce", 60.0, 1800.0, 300.0, true, 6.0, 4.0);
-    run_scenario("steady_ripple", 60.0, 1800.0, 500.0, false, 6.0, 6.0);
+    run_scenario("clean_start", 40.0, 0.0, 1800.0, 0.0, false, 6.0, false, 4.0);
+    run_scenario("loaded_start", 40.0, 0.0, 1800.0, 0.0, false, 15.0, false, 4.0);
+    run_scenario("pas_bounce", 60.0, 0.0, 1800.0, 300.0, true, 6.0, false, 4.0);
+    run_scenario("steady_ripple", 60.0, 0.0, 1800.0, 500.0, false, 6.0, false, 6.0);
+    /* Same physical non-uniform crank, identical torque. Only the cadence signal consumed by
+     * assist/dynamics changes. This isolates the current raw-cadence wiring from the proposed
+     * filtered-control wiring. */
+    run_scenario("cadence_raw", 60.0, 0.35, 1800.0, 0.0, false, 6.0, false, 8.0);
+    run_scenario("cadence_filtered", 60.0, 0.35, 1800.0, 0.0, false, 6.0, true, 8.0);
     return 0;
 }

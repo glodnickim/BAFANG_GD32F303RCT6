@@ -6,6 +6,7 @@ src/assist_limits.c
 src/assist_modes.c
 src/assist_start.c
 src/cadence_comp.c
+src/cadence_filter.c
 src/can_multiframe.c
 src/can_reply_effects.c
 src/can_tx_queue.c

@@ -501,6 +501,11 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'fw139_start_trajectory_host.c'
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DRIDE_CONTROL_C_PATH=$rideControlCPathForward") },
+    @{ Name = 'FW-140 conditioned control cadence (real filter + main wiring guard)'
+       Harness = Join-Path $PSScriptRoot 'fw140_control_cadence_host.c'
+       Modules = @(Join-Path $root 'src\cadence_filter.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DMAIN_C_PATH=$mainCPathForward") },
     @{ Name = 'QS-3 final Iq slew parity (real final ramp + lifecycle wiring)'
        Harness = Join-Path $PSScriptRoot 'qs3_final_iq_slew_host.c'
        Modules = @((Join-Path $root 'src\assist_dynamics.c'),

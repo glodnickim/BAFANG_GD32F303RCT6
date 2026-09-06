@@ -4,7 +4,7 @@ import subprocess,sys
 R=Path(__file__).resolve().parents[1]
 out=R/'.build/sil'; out.mkdir(parents=True,exist_ok=True)
 mods=[
- 'src/torque_input.c','src/rider_input.c','src/assist_modes.c','src/cadence_comp.c',
+ 'src/torque_input.c','src/rider_input.c','src/assist_modes.c','src/cadence_comp.c','src/cadence_filter.c',
  'src/power_curve.c','src/assist_start.c','src/assist_extended_boost.c','src/tuning_config.c',
  'src/ride_control.c','src/fast_iq_slew.c','src/battery_iq_cap.c','src/ride_session.c',
  'src/iq_chain.c','src/pedal_assist_gate.c','src/assist_dynamics.c','src/assist_limits.c',

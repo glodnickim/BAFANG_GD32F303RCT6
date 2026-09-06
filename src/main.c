@@ -65,6 +65,7 @@ OF SUCH DAMAGE.
 #include "rotor_angle.h"         /* FW-131: one canonical rotor angle, bumpless handover */
 #include "pas_sampler.h"         /* PRE-FW128: PAS sampled in the 4 kHz ISR, not main  */
 #include "pas_cadence.h"         /* PRE-FW128: cadence period, epoch and validity      */
+#include "cadence_filter.h"      /* FW-140: stable control cadence, raw kept for diag */
 #include "battery_current.h"     /* FW-128B1: battery-current filter on the sample clock */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
@@ -433,7 +434,6 @@ uint8_t ui8_hall_state=0;
 uint8_t ui8_hall_state_old=0;
 uint8_t ui8_hall_case=0;
 uint32_t uint32_tics_filtered=128000;
-uint16_t uint16_cadence_filtered=0;
 //--- Quadrature PAS decoder state ---
 //PRE-FW128: pas_qstate moved into src/pas_sampler.c - the ISR owns the line state now, and
 //there is exactly one copy of it. Read it with pas_sampler_state()/pas_sampler_seeded().
@@ -1064,6 +1064,7 @@ int main(void)
 	                        //main.c is where its init belongs too, same as the modules above.
 	pas_liveness_init();   //FW-112.1: any-PAS-edge liveness timer - see inc/pas_liveness.h
 	pas_cadence_reset();   //PRE-FW128: cadence period/epoch/validity - see inc/pas_cadence.h
+	cadence_filter_reset(); //FW-140: explicit lifecycle owner for the conditioned control cadence
 	crit_can_queue_init(); //FW-110: unconditional (every build) - critical HMI frames go through
 	                        //this queue whether or not CAN_DIAGNOSTICS_ENABLE is set.
 	can_multiframe_init(); //FW-110 v4: clean automaton/counters, no active transfer, no pending id
@@ -2808,8 +2809,10 @@ void reg_ADC_processing(void)
 						if(cad.measured){
 							MS.cadence = cad.rpm;
 							start_phase = 0;                  //FW-087: a real measurement ends the start phase
-							uint16_cadence_filtered -= uint16_cadence_filtered>>3;
-							uint16_cadence_filtered += MS.cadence;
+							/* FW-140: raw cadence is a 15-degree local-speed measurement. Keep it in
+							 * MS.cadence for HMI/diagnostics, but seed/update one conditioned cadence
+							 * for motor demand so normal leg-speed ripple cannot pump Iq. */
+							cadence_filter_update(MS.cadence);
 							MS.p_human = (uint16_t)((float)(MS.cadence*MS.torque_filtered)*0.00342);
 						}
 					}
@@ -2940,7 +2943,7 @@ void reg_ADC_processing(void)
 		                                       //time, so the verdict no longer depends on how
 		                                       //often this loop runs. See pas_liveness.h.
 		pas_real_stop = pas_liveness_stopped() ? 1 : 0;   //FW-109: computed once, before the stop reset below touches pas_idle_ticks's own consequences
-		if(pas_liveness_stopped()){ MS.cadence=0; start_phase=0; uint16_cadence_filtered=0; pas_cadence_reset(); pas_direction_on_stop(); } //stop
+		if(pas_liveness_stopped()){ MS.cadence=0; start_phase=0; cadence_filter_reset(); pas_cadence_reset(); pas_direction_on_stop(); } //stop
 		//FW-087: the start phase counts as forward pedalling. The fake 1 rpm used to carry this
 		//implicitly through MS.cadence>0; without saying so explicitly, dropping the fake would
 		//close the assist gate a SECOND way, because forward_pedaling feeds pedaling_active
@@ -3024,7 +3027,8 @@ void reg_ADC_processing(void)
 			.torque_run_filtered = torque_snapshot->assist_delta_run_native, //FW-033
 			.torque_load_centikg = torque_input_load_centikg(),
 			.torque_assist_now_native = torque_snapshot->assist_delta_native, //FW-107
-			.cadence_rpm = MS.cadence,
+			/* FW-140: assist consumes the conditioned cadence. MS.cadence remains raw. */
+			.cadence_rpm = cadence_filter_get(),
 			.wheel_speed_x100 = MS.Speedx100,
 			.motor_erps = ui16_erps,
 			.motor_erps_age_ticks = ui16_erps_counter,   //FW-136.1: movement is an edge, not a speed
@@ -3260,7 +3264,8 @@ void reg_ADC_processing(void)
             torque_fault || torque_input_calibration_active();
         ride_control_input_t ride_input = {
             .speed_x100 = MS.Speedx100,
-            .cadence_rpm = MS.cadence,
+            /* FW-140: the same single control cadence drives demand and adaptive Iq slew. */
+            .cadence_rpm = cadence_filter_get(),
 			.assist_level_index = level_to_array_element[MS.assist_level],
 			.battery_voltage_mv = MS.Voltage,
             .iq_scale = phase_current_max_scaled,
@@ -3275,7 +3280,7 @@ void reg_ADC_processing(void)
 			.voltage_raw = voltage_raw_filtered,
 			.voltage_min_raw = MP.voltage_min,
 			.controller_temperature_c = MS.int_Temperature,
-			.cadence_filtered_x8 = uint16_cadence_filtered,
+			.cadence_filtered_x8 = cadence_filter_get_x8(),
 			.speed_limit_x100 = speedlimitx100_scaled,
 			.legal_enabled = MP.legalflag != 0,
 			.offroad = MS.offroadflag != RESET,
@@ -3858,7 +3863,7 @@ void reg_ADC_processing(void)
 			if(pas_idle_ticks>pas_stop_timeout) pas_direction_clear_backpedal_latch();
 			MS.cadence=0;
 			MS.p_human=0;
-			uint16_cadence_filtered=0;
+			cadence_filter_reset();
     	}
 		torque_cumulated=0;
 		//STOP-CLICK-C1: the redundant second zero-target reset (same defect as the FW-028 site
@@ -5131,7 +5136,7 @@ static void diag_build_aggregate(void){
 		uint32_t br = pc->broken_reverse;  if(br>255U) br=255U;
 		uint32_t bi = pc->broken_invalid;  if(bi>255U) bi=255U;
 		uint32_t bo = pc->broken_overflow; if(bo>255U) bo=255U;
-		uint16_t filt = (uint16_t)(uint16_cadence_filtered>>3);
+		uint16_t filt = cadence_filter_get();
 		transmit_message.tx_efid = 0x0001022A;
 		transmit_message.tx_data[0] = (pc->last_period_ticks>>8)&0xFF;
 		transmit_message.tx_data[1] = (pc->last_period_ticks)&0xFF;

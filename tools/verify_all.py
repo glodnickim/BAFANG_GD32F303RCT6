@@ -38,7 +38,7 @@ def diff_gate():
     if p.returncode: print(p.stdout); raise SystemExit(p.returncode)
     print('PASS git diff --check')
 
-def target_build(require):
+def target_build(require, variant):
     gcc=shutil.which('arm-none-eabi-gcc') or shutil.which('arm-none-eabi-gcc.exe')
     if not gcc and os.name == 'nt':
         candidate=Path(r'C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\13.2 Rel1\bin\arm-none-eabi-gcc.exe')
@@ -53,7 +53,7 @@ def target_build(require):
         if require: print(msg,file=sys.stderr); raise SystemExit(3)
         print(msg); return
     toolbin=str(Path(gcc).resolve().parent)
-    cmd=[sys.executable,'tools/build_firmware.py','--variant','normal','--mode','developer',
+    cmd=[sys.executable,'tools/build_firmware.py','--variant',variant,'--mode','developer',
          '--toolchain',toolbin,'--output-dir',str(R/'.build/verify-target')]
     step('exact ARM target build',cmd)
 
@@ -62,6 +62,8 @@ def main():
     ap.add_argument('--quick',action='store_true',help='1000 fuzz, skip sanitizers')
     ap.add_argument('--target',action='store_true',help='attempt exact ARM target build when tools exist')
     ap.add_argument('--require-target',action='store_true',help='fail if exact target toolchain cannot run')
+    ap.add_argument('--target-variant',choices=['normal','diagnostic'],default='normal',
+                    help='target build variant; diagnostic enables FW145 live telemetry')
     a=ap.parse_args()
     print('EVistDrive full verification gate')
     manifest_gate(); diff_gate()
@@ -80,7 +82,8 @@ def main():
     if not a.quick: level4 += ['--sanitize']
     step('Level-4 virtual rider + bicycle + battery/SOC + real FOC'+('' if a.quick else ' + ASan/UBSan'),level4)
     step('recorded-ride import/replay deterministic regression',[sys.executable,'tools/run_replay_regression.py'])
-    if a.target or a.require_target: target_build(a.require_target)
+    step('CANable FW145 raw-log decode -> canonical -> native replay',[sys.executable,'tests/test_canable_ride_decode.py'])
+    if a.target or a.require_target: target_build(a.require_target, a.target_variant)
     print('\n==================================================')
     print('EVistDrive PC VERIFICATION: PASS')
     print('Target build is a separate gate; use --target / --require-target with Arm GNU 13.2.1.')

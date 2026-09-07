@@ -4,7 +4,7 @@ This repository snapshot is intended to be self-contained for continued EVistDri
 
 ## 1. Authoritative baseline
 
-Current checkpoint: FW144 Level-4 development state on top of the verified FW143 Walk/electrical-SIL baseline.
+Current checkpoint: **FW145 Live Telemetry / Level-4 replay baseline**, built on the verified FW144 whole-bike/battery/SOC digital twin and FW143 Walk/electrical-SIL baseline.
 
 Read in this order before changing production code:
 
@@ -13,9 +13,11 @@ Read in this order before changing production code:
 3. `docs/ARCHITECTURE_CURRENT.md`
 4. `README_TESTING.md`
 5. `VERIFICATION_STATUS_2026-09-07_PL.md`
-6. `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`
-7. `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`
-8. only then inspect historical/reference material in `docs/reference/`.
+6. `protocol/RIDE_TELEMETRY_CAN.md`
+7. `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`
+8. `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`
+9. `verification_evidence/FW145_FINAL_GATE_SUMMARY.md`
+10. only then inspect historical/reference material in `docs/reference/`.
 
 Do not reconstruct the architecture from old ticket names or old chats. The current ownership map in `AGENTS.md` and `docs/ARCHITECTURE_CURRENT.md` wins when old documents describe superseded implementations.
 
@@ -97,3 +99,26 @@ Before every production change:
 7. only then produce a target firmware candidate.
 
 Do not send the user back to repeated road flashing merely because isolated unit tests pass.
+
+## 7. FW145 real-bike logging
+
+The current authoritative continuation adds diagnostic live telemetry for Level 4.
+
+Read `protocol/RIDE_TELEMETRY_CAN.md` before changing the logger or the `0x10400..0x10407` block.
+The stream is observation only. Do not move CAN transmission into the FOC ISR and do not give the
+telemetry path priority over critical HMI/multiframe traffic.
+
+For a firmware intended to produce live Level-4 logs use:
+
+```text
+VERIFY_AND_BUILD_DIAGNOSTIC_WINDOWS.bat
+```
+
+Then record CANable in `All Traffic`, save the raw `.log`, and run:
+
+```bash
+python tools/decode_canable_ride_log.py ride.log --output-prefix ride
+python tools/run_replay.py ride.canonical.csv
+```
+
+A normal firmware build deliberately remains silent on the FW145 diagnostic block.

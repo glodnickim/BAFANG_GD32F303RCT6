@@ -50,3 +50,28 @@ when the real logger can provide it. Missed rows must create a timestamp gap, no
 6. `tools/verify_all.py` replays every registered case on future changes.
 
 Never accept the output of a known-bug firmware merely to turn a regression green.
+
+---
+
+## FW145 built-in CAN source
+
+Diagnostic firmware now publishes the continuous observation block `0x10400..0x10407`; see
+`protocol/RIDE_TELEMETRY_CAN.md` for the exact byte schema, priority rules and timing.
+
+The current CANable raw logger does not need to understand these IDs in order to collect them: an
+`All Traffic` capture with the existing monotonic timestamp is sufficient input for:
+
+```bash
+python tools/decode_canable_ride_log.py ride.log --output-prefix ride
+python tools/run_replay.py ride.canonical.csv
+```
+
+To register the raw capture and retain the original bytes plus rich decoded observations:
+
+```bash
+python tools/register_canable_ride_case.py ride.log BUG_NAME --accept-current
+```
+
+FW145's `0x10406` PAS A/B field is a low-rate state snapshot. It is intentionally classified as
+`ROTOR_PAS_STATE`, **not** `PAS_RAW`. Use the existing high-resolution PAS recorder when individual
+quadrature transitions/event gaps are the evidence required.

@@ -1,6 +1,6 @@
 # EVistDrive — agent entry point
 
-This repository is the current FW144 Level-4 testable baseline. Start here before changing production code.
+This repository is the current **FW145 Level-4 + live CAN telemetry/replay testable baseline**. Start here before changing production code.
 
 ## 1. Required reading order
 
@@ -8,9 +8,10 @@ This repository is the current FW144 Level-4 testable baseline. Start here befor
 2. `README_TESTING.md`
 3. `VERIFICATION_STATUS_2026-09-07_PL.md`
 4. `docs/ARCHITECTURE_CURRENT.md`
-5. `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`
-6. `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`
-7. `verification_evidence/FW144_FINAL_GATE_SUMMARY.md`
+5. `protocol/RIDE_TELEMETRY_CAN.md`
+6. `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`
+7. `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`
+8. `verification_evidence/FW145_FINAL_GATE_SUMMARY.md`
 
 Do not start from old FW/QS ticket notes and do not recreate removed workarounds without new evidence.
 
@@ -27,6 +28,7 @@ Current documented history:
 - `7ef4779` one-command exact target gate on Windows
 - FW143 Walk 10..60 rpm + full Walk FOC matrix
 - FW144 production SOC-core parity + Level-4 rider/bike/battery + recorded-ride replay
+- FW145 observation-only live CAN telemetry `0x10400..0x10407` + direct CANable raw-log decode/replay
 
 Use `git log --oneline` to confirm the current checkout before work.
 
@@ -161,3 +163,22 @@ For every non-trivial production change:
 8. commit one coherent change.
 
 Do not mix rider-feel tuning, FOC changes, configuration migration, and protocol changes in one patch.
+
+## 10. FW145 live telemetry ownership rule
+
+`src/ride_telemetry.c` owns only serialization/pacing of **observations**. It owns no rider demand,
+permission, Iq, FOC, QZERO, Hall or SOC state.
+
+- IDs `0x10400..0x10407` are reserved to FW145 live ride telemetry.
+- Do not reuse `0x10300..0x10307` (STOP_TRACE).
+- Do not transmit telemetry from the 16 kHz FOC ISR.
+- Do not let 4 kHz foreground read the `quiet_zero_state` object; it may only read the ISR-published
+  `qzero_diag_state_isr` mirror.
+- Keep snapshot construction rate-limited (~48 Hz) and CAN sending non-blocking/best-effort.
+- Critical queue/multiframe/dumps always have priority.
+- `0x10406` PAS A/B is a sparse state snapshot, not a raw quadrature event recorder.
+- Any wire schema change requires a schema/version update, decoder test update and
+  `protocol/RIDE_TELEMETRY_CAN.md` update in the same commit.
+
+Hardware capture workflow is raw CANable `.log` -> `tools/decode_canable_ride_log.py` -> canonical
+replay -> reviewed permanent case via `tools/register_canable_ride_case.py`.

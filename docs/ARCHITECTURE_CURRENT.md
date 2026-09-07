@@ -181,3 +181,27 @@ battery truth/SOC/sag -> Vbus/current -> production limits + soc_core -> control
 `sim/l4/` contains plant assumptions only. `src/soc_core.c` is production SOC math and is shared by target and
 simulator. Real captures are normalized and replayed by `sim/replay/`; accepted hardware regressions become
 persistent cases under `sim/replay/cases/`.
+
+## FW145 diagnostic observation path
+
+The Level-4 live logger is deliberately outside the control ownership graph:
+
+```text
+existing owners @ 4 kHz / 16 kHz
+        |
+        +--> ISR-only qzero diagnostic mirror
+        |
+        +--> coherent read-only snapshot ~48 Hz
+                  |
+                  v
+           ride_telemetry.c
+          best-effort CAN pacing
+                  |
+            0x10400..10407
+                  |
+             CANable raw log
+                  |
+        offline decoder / replay
+```
+
+No arrow from telemetry returns into rider demand, permission, Iq, FOC, theta, QZERO or SOC.

@@ -113,6 +113,9 @@ are the hard gate. See `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`.
 - FW144: share the existing production SOC math through `soc_core.c`, add the Level-4 rider/bike/road/battery/SOC
   digital twin, and add canonical import/replay/registration of real-ride logs. The virtual battery/vehicle parameters
   are plant assumptions; the production control/SOC code is shared, not reimplemented.
+- FW145: add an observation-only diagnostic CAN stream `0x10400..0x10407` (~47.6 coherent snapshots/s),
+  keep CAN TX outside the 16 kHz FOC ISR and below critical HMI/multiframe traffic, and add direct conversion of
+  the existing CANable `All Traffic` text log into Level-4 canonical replay input.
 
 See `VERIFICATION_STATUS_2026-09-07_PL.md` for current evidence and remaining hardware gate.
 
@@ -143,3 +146,34 @@ Every registered case is subsequently executed by `tools/verify_all.py`.
 
 The heavy electrical fuzz supports deterministic non-overlapping sharding through `tools/run_electrical_sil.py`;
 this reduces wall time without reducing the requested case count or reusing random cases.
+
+## FW145 live CAN telemetry -> Level-4 replay
+
+FW145 adds a diagnostic-only, observation-only CAN stream `0x10400..0x10407`. It publishes about
+47.6 coherent snapshots/s without transmitting from the 16 kHz FOC ISR and yields to critical HMI /
+multiframe traffic. Exact wire schema: `protocol/RIDE_TELEMETRY_CAN.md`.
+
+Build the logging firmware on Windows with:
+
+```text
+VERIFY_AND_BUILD_DIAGNOSTIC_WINDOWS.bat
+```
+
+The ordinary `VERIFY_AND_BUILD_WINDOWS.bat` still builds the normal, silent variant.
+
+With the diagnostic firmware flashed, the existing CANable `All Traffic` raw logger can record the
+new IDs without understanding them. Convert a `.log` directly:
+
+```bash
+python tools/decode_canable_ride_log.py ride.log --output-prefix ride
+python tools/run_replay.py ride.canonical.csv
+```
+
+Register a reviewed real-bike case in one step:
+
+```bash
+python tools/register_canable_ride_case.py ride.log BUG_NAME --accept-current
+```
+
+The global `verify_all.py` gate includes a synthetic raw-CANable -> FW145 decoder -> canonical CSV
+-> native C replay test so the wire decoder cannot silently drift away from the firmware schema.

@@ -260,3 +260,50 @@ Przeczytaj:
 - `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`.
 
 Nie przedstawiać parametrów PMSM/bike/rider/sag z Level 4 jako zmierzonych stałych M820. To plant testowy.
+
+---
+
+# FW145 UPDATE — LIVE CAN TELEMETRY FOR LEVEL 4
+
+FW145 dodaje brakujący most pomiędzy prawdziwym M820 a przygotowanym w FW144 replayem Level 4.
+Zmiana jest diagnostyczna: nie tworzy nowego ownera sterowania i domyślnie występuje tylko w
+`diagnostic` buildzie.
+
+## Firmware
+
+- nowy `src/ride_telemetry.c` / `inc/ride_telemetry.h`;
+- chroniony blok EFID `0x10400..0x10407`, rozłączny od STOP_TRACE `0x10300..0x10307`;
+- około 47.6 spójnych snapshotów/s;
+- snapshot budowany ~48 Hz, nie 4 kHz;
+- żadnego CAN TX z FOC ISR 16 kHz;
+- QZERO obserwowane wyłącznie przez ISR-owned read-only mirror — foreground nie czyta state machine;
+- critical HMI queue/multiframe/dumpy mają pierwszeństwo;
+- brak busy-wait i brak retry-flood po zaakceptowanym, ale nieudanym mailboxie.
+
+Transmitowane obserwacje obejmują torque FAST/RUN/load, raw/control cadence, permission/debug/session,
+Iq request/allowed/ref/actual, Id, ERPS, battery V/I/SOC, wheel speed, u_abs/limiter flags, QZERO,
+theta/Hall/trust, lifecycle/PWM oraz stan PAS/direction.
+
+## CANable / replay
+
+`tools/decode_canable_ride_log.py` czyta bezpośrednio istniejący tekstowy format loggera CANable,
+składa 7 ramek po wspólnym ticku i generuje rich decoded CSV + canonical replay CSV + metadata loss
+report. Snapshot z brakującym fragmentem pozostaje jawnie niekompletny; czas nie jest kompresowany.
+Do replay wymagane są CORE + STATE, pozostałe braki zostają `nan`/metadata.
+
+`tools/register_canable_ride_case.py` potrafi zapisać surowy `.log`, decoded observations, canonical
+input i po świadomej akceptacji bieżący output jako permanent regression.
+
+Stary rzeczywisty log `log-2026-09-06-08-52-10-n0.log`: 4436 poprawnie sparsowane ramki, 0 ramek
+fałszywie rozpoznanych jako FW145 telemetry — oczekiwane, ponieważ pochodzi sprzed FW145.
+
+Nowy synthetic wire-to-replay gate: firmware schema -> raw CANable text -> decoder -> canonical CSV ->
+production C replay: PASS. Host real-module suite po integracji: **71/71 PASS**.
+
+Do fizycznego logowania należy zbudować `diagnostic` target:
+
+```text
+VERIFY_AND_BUILD_DIAGNOSTIC_WINDOWS.bat
+```
+
+Exact `.bin` nadal wymaga Arm GNU GCC 13.2.1 na maszynie target-build.

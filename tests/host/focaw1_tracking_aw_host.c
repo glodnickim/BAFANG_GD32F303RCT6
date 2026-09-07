@@ -597,6 +597,24 @@ static char *strip_comments(const char *text, long len)
 	return out;
 }
 
+/* CRLF-tolerant span-open locator: finds `signature` immediately followed by an
+ * optional '\r', then '\n', then '{' - so a "void f(void)\n{" anchor locates the
+ * function body on both LF and CRLF checkouts (Windows git autocrlf yields \r\n).
+ * Returns a pointer to the signature start (identical to the old strstr match), or
+ * NULL. Buffers stay byte-identical, so raw/stripped offset arithmetic stays 1:1. */
+static const char *find_span_open(const char *haystack, const char *signature)
+{
+	const char *p = strstr(haystack, signature);
+	while (p) {
+		const char *q = p + strlen(signature);
+		if (*q == '\r') q++;
+		if (*q == '\n') q++;
+		if (*q == '{') return p;
+		p = strstr(p + 1, signature);
+	}
+	return NULL;
+}
+
 static bool span_contains(const char *first, const char *last, const char *needle)
 {
 	const char *found = strstr(first, needle);
@@ -758,7 +776,7 @@ static void production_wiring_checks(void)
 	 * clearing tracking state up to 4000x/s would race the 16 kHz owner in exactly the way
 	 * that card removed, and this card must not reintroduce it in a new field. */
 	{
-		const char *reg_adc_start = strstr(main_c, "void reg_ADC_processing(void)\n{");
+		const char *reg_adc_start = find_span_open(main_c, "void reg_ADC_processing(void)");
 		const char *reg_adc_end = strstr(main_c, "int16_t internal_tics_to_speedx100 (uint32_t tics){");
 		const char *zero_transition = strstr(main_c,
 			"bridge_lifecycle == BRIDGE_LIFECYCLE_RUN && MS.i_q_setpoint == 0");

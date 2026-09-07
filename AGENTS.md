@@ -111,6 +111,15 @@ type ..\..\..\.ebics-version-state\M820_BL820.json
 
 **Zasada:** każde kanoniczne wydanie (FLASHowane na rower) musi rezerwować numer przez `--mode auto`. Buildy developerskie (bramka, testy) używają `--mode developer`.
 
+Po zbudowaniu trybem `auto` finalny BIN jest automatycznie kopiowany do `releases/<version>/`:
+
+```powershell
+releases\0.601\0.601_M820_BL820.bin
+releases\0.602\0.602_M820_BL820.bin
+```
+
+Tylko plik `.bin` — żadnych dodatkowych artifactów (manifest, ELF, MAP pozostają w `.build\`).
+
 ### FW-xxx vs BUILD version
 
 ```text

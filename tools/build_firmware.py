@@ -404,6 +404,16 @@ def main() -> int:
     print(f"Final BIN: {final}")
     print(f"SHA256:    {sha256(final)}")
     print("==================================================")
+
+    # Copy final BIN to releases/<version>/ (canonical releases only)
+    if version_source == "auto_global":
+        releases_dir = ROOT / "releases" / version
+        releases_dir.mkdir(parents=True, exist_ok=True)
+        dest = releases_dir / final.name
+        shutil.copy2(final, dest)
+        print(f"RELEASE:   {dest}")
+        print(f"Size:      {dest.stat().st_size} B")
+
     return 0
 
 

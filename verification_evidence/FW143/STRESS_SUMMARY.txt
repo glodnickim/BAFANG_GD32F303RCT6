@@ -1,0 +1,5 @@
+FW143 extra stress:
+supervisory fuzz 10000/10000 PASS
+supervisory ASan/UBSan fuzz 1000/1000 PASS
+electrical fuzz 1000/1000 PASS
+electrical ASan/UBSan fuzz 100/100 PASS

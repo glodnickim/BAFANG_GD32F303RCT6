@@ -1,0 +1,44 @@
+STANDALONE REAL FOC / PMSM
+EVistDrive electrical FOC SIL (real FOC.c + PI + SVPWM + PWM geometry)
+PWM polarity calibration: u_q=15 vq(-)=+0.1601V vq(+)=-0.1601V -> polarity=-1
+SVPWM requested-geometry 360deg sweep:
+  u=1170 -> requested [795,2956], clamp angles=0/360
+  u=1305 -> requested [670,3080], clamp angles=0/360
+  u=1600 -> requested [398,3352], clamp angles=0/360
+  u=1887 -> requested [133,3617], clamp angles=0/360
+  u=1920 -> requested [103,3647], clamp angles=0/360
+SVPWM geometry within configured _U_MAX: PASS
+locked target=100 angle=+0: physical dq=(+0.0,+101.2) ctrl_q=101.2 u=53 clamps=0 sat=0
+locked target=200 angle=+0: physical dq=(+0.0,+201.3) ctrl_q=201.3 u=101 clamps=0 sat=0
+locked target=100 angle=+20: physical dq=(-34.2,+94.1) ctrl_q=100.1 u=51 clamps=0 sat=0
+locked target=100 angle=-20: physical dq=(+35.3,+94.6) ctrl_q=101.0 u=53 clamps=0 sat=0
+locked target=100 angle=+30: physical dq=(-48.6,+88.1) ctrl_q=100.6 u=51 clamps=0 sat=0
+locked target=100 angle=-30: physical dq=(+50.4,+88.6) ctrl_q=101.9 u=52 clamps=0 sat=0
+6-sector standstill sweep: PASS
+moving erps= 50.0 target=100: iq=+99.3 id=+1.0 u=468 clamp=0.0% sat=0.0%
+moving erps=100.0 target=100: iq=+98.0 id=+0.6 u=888 clamp=0.0% sat=0.0%
+moving erps=150.0 target=100: iq=+95.5 id=+0.1 u=1305 clamp=0.0% sat=0.0%
+moving erps=180.0 target=100: iq=+94.1 id=+0.7 u=1555 clamp=0.0% sat=0.0%
+moving erps=200.0 target=100: iq=+93.2 id=+1.3 u=1722 clamp=0.0% sat=0.0%
+moving erps=220.0 target=100: iq=+92.4 id=+2.5 u=1887 clamp=0.0% sat=15.4%
+electrical FOC SIL: PASS
+
+END-TO-END ASSIST -> REAL FOC -> PMSM -> HALL
+SCENARIO clean_start        permission=  62.50ms firstIq=  62.50ms firstHall= 102.25ms perm->Hall=  39.75ms falseR=0 inhibitTicks=0 steadyIqMean=58.4 std=0.5 pp=1 angleErrMax=30.00deg
+SCENARIO loaded_start       permission=  62.50ms firstIq=  62.50ms firstHall= 107.25ms perm->Hall=  44.75ms falseR=0 inhibitTicks=0 steadyIqMean=63.1 std=0.7 pp=2 angleErrMax=30.00deg
+SCENARIO pas_bounce         permission=  41.75ms firstIq=  41.75ms firstHall=  81.00ms perm->Hall=  39.25ms falseR=0 inhibitTicks=0 steadyIqMean=77.1 std=3.4 pp=12 angleErrMax=30.00deg
+SCENARIO steady_ripple      permission=  41.75ms firstIq=  41.75ms firstHall=  81.00ms perm->Hall=  39.25ms falseR=0 inhibitTicks=0 steadyIqMean=79.1 std=5.5 pp=18 angleErrMax=30.00deg
+SCENARIO cadence_raw        permission=  38.50ms firstIq=  38.50ms firstHall=  77.25ms perm->Hall=  38.75ms falseR=0 inhibitTicks=0 steadyIqMean=72.5 std=17.2 pp=52 angleErrMax=30.00deg
+SCENARIO cadence_filtered   permission=  38.50ms firstIq=  38.50ms firstHall=  77.25ms perm->Hall=  38.75ms falseR=0 inhibitTicks=0 steadyIqMean=75.1 std=4.8 pp=16 angleErrMax=30.00deg
+SCENARIO pedal20            permission= 116.50ms firstIq= 116.50ms firstHall= 156.25ms perm->Hall=  39.75ms falseR=0 inhibitTicks=0 steadyIqMean=43.8 std=7.9 pp=25 angleErrMax=30.00deg
+SCENARIO pedal40            permission=  58.25ms firstIq=  58.25ms firstHall=  98.00ms perm->Hall=  39.75ms falseR=0 inhibitTicks=0 steadyIqMean=57.5 std=9.6 pp=32 angleErrMax=30.00deg
+SCENARIO pedal60            permission=  39.00ms firstIq=  39.00ms firstHall=  77.75ms perm->Hall=  38.75ms falseR=0 inhibitTicks=0 steadyIqMean=76.6 std=11.8 pp=36 angleErrMax=30.00deg
+SCENARIO pedal80            permission=  29.25ms firstIq=  29.25ms firstHall=  66.00ms perm->Hall=  36.75ms falseR=0 inhibitTicks=0 steadyIqMean=102.1 std=13.0 pp=38 angleErrMax=30.00deg
+HALL START SWEEP 24 angles x 2 loads: failures=0 worstPerm->Hall=45.00ms worstAngleErr=30.00deg PASS
+WALK FOC MATRIX 7 targets x 3 loads x 6 Hall starts = 126: failures=0 safeStalls=2 trackingWarnings=23 worstFirstHall=206.00ms worstMeanErr=93.9% worstSteadyPP=28.80rpm PASS
+SCENARIO stop_restart       releaseIq=69 stop->Iq0=292.25ms maxFallStep=1 restartPermission=41.25ms permission->Iq=0.00ms firstRestartIq=1 maxRiseStep=1 qzeroEntries=1 qzeroAborts=1 qzeroHandbacks=0 qzEntryErps=156 qzAbortErps=127 qzPeakIq=280 PASS
+
+FUZZ deterministic seed=0xE7157A39 cases=100 failures=0
+
+FULL FOC SANITIZERS ASan+UBSan
+FUZZ deterministic seed=0xE7157A39 cases=50 failures=0

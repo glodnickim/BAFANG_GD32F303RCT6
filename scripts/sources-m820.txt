@@ -41,6 +41,7 @@ src/pas_sampler.c
 src/pas_cadence.c
 src/battery_current.c
 src/battery_iq_cap.c
+src/soc_core.c
 src/fast_iq_slew.c
 src/pas_raw.c
 src/pas_trace.c

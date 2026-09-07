@@ -623,6 +623,10 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        # sample indices/timestamps and no missing fragments. It is intentionally an extension of
        # the recorder suite, not a second encoder/decoder model.
        TransportDecoder = $true },
+    @{ Name = 'FW-144 SOC core exact-production parity + randomized 1 Hz transitions'
+       Harness = Join-Path $PSScriptRoot 'fw144_soc_core_parity_host.c'
+       Modules = @(Join-Path $root 'src\soc_core.c')
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
     @{ Name = 'FW-112 PATCH B0 pedal-assist gate scenario proof (S1-S10 + M1-M9)'
        Harness = Join-Path $PSScriptRoot 'fw112_b0_gate_host.c'
        # Same real-module chain as the FW-109 v2 ride control suite: the pedal_assist_gate

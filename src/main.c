@@ -68,6 +68,7 @@ OF SUCH DAMAGE.
 #include "pas_cadence.h"         /* PRE-FW128: cadence period, epoch and validity      */
 #include "cadence_filter.h"      /* FW-140: stable control cadence, raw kept for diag */
 #include "battery_current.h"     /* FW-128B1: battery-current filter on the sample clock */
+#include "soc_core.h"            /* FW-144: production SOC math shared with Level-4 SIL */
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
@@ -6042,27 +6043,8 @@ void get_standstill_position(void){
 			q31_rotorposition_absolute = q31_rotorposition_hall;
 }
 
-int8_t calculate_SOC(uint16_t voltage, uint8_t cells_in_series){ //interpolate from lookup table
-    //measured LG M58T discharge curve @3A (home measurements, "Srednia LG" per-cell average), ascending
-    float voltages[]   = {2.799, 2.968, 3.086, 3.247, 3.450, 3.569, 3.681, 3.774, 3.853, 3.946, 3.989, 4.070};
-    float soc_values[] = {0,     5,     10,    20,    30,    40,    50,    60,    70,    80,    90,    100};
-    int length = sizeof(voltages) / sizeof(voltages[0]);
-    float cell_voltage = (float)voltage/((float)cells_in_series*1000);
-    if (cell_voltage <= voltages[0]) {
-        return (int8_t)soc_values[0];
-    }
-    if (cell_voltage >= voltages[length - 1]) {
-        return (int8_t)soc_values[length - 1];
-    }
-
-    for (int i = 0; i < length - 1; i++) {
-        if (cell_voltage < voltages[i+1]) {
-            float slope = (soc_values[i+1] - soc_values[i]) / (voltages[i+1] - voltages[i]);
-            float soc = soc_values[i] + slope * (cell_voltage - voltages[i]);
-            return (int8_t)soc;
-        }
-    }
-    return (int8_t)soc_values[length - 1];
+int8_t calculate_SOC(uint16_t voltage, uint8_t cells_in_series){
+	return soc_core_calculate_ocv(voltage, cells_in_series);
 }
 
 //=====================  SOC / Range implementation  =====================
@@ -6079,23 +6061,7 @@ uint32_t soc_crc32(const uint8_t* data, uint32_t len){
 }
 
 float compute_limp_factor(float soc){
-	uint8_t lim=MP.limp_soc_limit;
-	if(lim==LIMP_DISABLED || lim==0) return 1.0f;          //disabled
-	float fl=(float)LIMP_FLOOR_PCT/100.0f;
-	if(soc<0) soc=0;
-	if(soc>=lim) return 1.0f;
-	uint8_t s2=MP.limp_soc_limit_stage2;
-	float f;
-	if(s2!=LIMP_DISABLED && s2>0 && s2<lim){
-		float p2=(float)LIMP_STAGE2_PCT/100.0f;
-		if(soc>s2) f=p2+(1.0f-p2)*(soc-(float)s2)/(float)(lim-s2);  //s2..lim : p2 -> 1.0
-		else       f=fl+(p2-fl)*soc/(float)s2;                      //0..s2  : floor -> p2
-	} else {
-		f=fl+(1.0f-fl)*soc/(float)lim;                             //0..lim : floor -> 1.0
-	}
-	if(f<fl) f=fl;
-	if(f>1.0f) f=1.0f;
-	return f;
+	return soc_core_limp_factor(soc, MP.limp_soc_limit, MP.limp_soc_limit_stage2);
 }
 
 float default_wh_km_for_level(uint8_t lvl){
@@ -6218,74 +6184,50 @@ void soc_init(void){
 }
 
 void soc_update(void){
-	//--- FW-018: boot-time full-charge detection (once, over the first SOC_FULL_BOOT_SETTLE_S seconds) ---
-	//Compares the WHOLE-PACK voltage directly against the user threshold - no cell count, no /3.6.
-	if(!soc_boot_full_done){
-		if(MP.soc_full_magic==SOC_FULL_MAGIC){
-			if(MS.Voltage<soc_boot_vmin) soc_boot_vmin=MS.Voltage;
-			if(MS.Voltage>soc_boot_vmax) soc_boot_vmax=MS.Voltage;
-			if(++soc_boot_settle_s>=SOC_FULL_BOOT_SETTLE_S){
-				soc_boot_full_done=1;
-				if((uint16_t)(soc_boot_vmax-soc_boot_vmin)<=SOC_FULL_BOOT_STABLE_MV &&
-				   (uint32_t)MS.Voltage>=(uint32_t)MP.soc_full_pack_10mv*10U){
-					MS.remaining_mah=(float)MP.battery_capacity_estimated_mah; //battery is full
-					MS.soc_real=100.0f; MS.soc_display=100.0f; MS.SOC=100;
-					soc_full_anchor=1;
-					soc_anchor_start_mah=MS.remaining_mah;
-				}
-			}
-		} else {
-			soc_boot_full_done=1; //feature not configured -> skip, keep the coulomb counter
-		}
-	}
-
-	//--- integrate this second's charge ---
+	/* FW-144: production SOC math now has one portable owner. The state is copied in/out of the
+	 * existing globals so flash/range/capacity-learning layout and all external observability stay
+	 * unchanged. This is a testability refactor, not a new estimator law. */
 	float dmah=soc_mAs_acc/3600.0f;   //mA*s -> mAh (signed)
 	soc_mAs_acc=0;
-	MS.remaining_mah-=dmah;            //discharge reduces; regen (dmah<0) adds back
-	if(MS.remaining_mah>(float)MP.battery_capacity_estimated_mah) MS.remaining_mah=(float)MP.battery_capacity_estimated_mah;
-	if(MS.remaining_mah<0) MS.remaining_mah=0;
-	MS.used_wh+=(dmah/1000.0f)*((float)MS.Voltage/1000.0f); //Wh this second (signed)
-	MS.soc_real=MS.remaining_mah/(float)MP.battery_capacity_estimated_mah*100.0f;
+	soc_core_state_t core={
+		.remaining_mah=MS.remaining_mah,
+		.soc_real=MS.soc_real,
+		.soc_display=MS.soc_display,
+		.soc_voltage=MS.soc_voltage,
+		.rest_seconds=rest_seconds,
+		.full_anchor=soc_full_anchor,
+		.boot_full_done=soc_boot_full_done,
+		.boot_settle_s=soc_boot_settle_s,
+		.boot_vmin_mv=soc_boot_vmin,
+		.boot_vmax_mv=soc_boot_vmax,
+		.anchor_start_mah=soc_anchor_start_mah
+	};
+	soc_core_input_t core_in={
+		.voltage_mv=(uint32_t)MS.Voltage,
+		.battery_current_ma=MS.Battery_Current,
+		.delta_mah=dmah,
+		.capacity_estimated_mah=MP.battery_capacity_estimated_mah,
+		.r_batt_mohm=MP.r_batt_mohm,
+		.system_voltage=MP.system_voltage,
+		.soc_full_magic=MP.soc_full_magic,
+		.soc_full_pack_10mv=MP.soc_full_pack_10mv
+	};
+	soc_core_step_1hz(&core,&core_in);
 
-	//--- IR-compensated OCV lookup ---
-	uint8_t cells=(uint8_t)((float)MP.system_voltage/3.6f);
-	float i_a=(float)MS.Battery_Current/1000.0f;
-	uint16_t u_comp=(uint16_t)((float)MS.Voltage + i_a*(float)MP.r_batt_mohm);
-	MS.soc_voltage=calculate_SOC(u_comp,cells);
-
-	//--- slow OCV correction only at rest (anti-drift), never a hard jump ---
-	if(MS.Battery_Current<I_REST_MA && MS.Battery_Current>-I_REST_MA){
-		if(rest_seconds<65000) rest_seconds++;
-		if(rest_seconds>=REST_TIME_S){
-			MS.soc_real+=OCV_CORR_GAIN*((float)MS.soc_voltage-MS.soc_real);
-			MS.remaining_mah=MS.soc_real/100.0f*(float)MP.battery_capacity_estimated_mah;
-		}
-	} else {
-		rest_seconds=0;
-	}
-
-	//--- SOC_display low-pass with max step per minute (anti-jump) ---
-	float diff=MS.soc_real-MS.soc_display;
-	float step=SOC_DISP_GAIN*diff;
-	float max_step=SOC_DISP_MAX_STEP/60.0f; //per second
-	if(MS.soc_real<10.0f) step=diff;        //near cutoff: converge fast, don't lag high
-	if(step>max_step)step=max_step;
-	if(step<-max_step)step=-max_step;
-	MS.soc_display+=step;
-	if(MS.soc_display<0)MS.soc_display=0;
-	if(MS.soc_display>100)MS.soc_display=100;
+	MS.remaining_mah=core.remaining_mah;
+	MS.soc_real=core.soc_real;
+	MS.soc_display=core.soc_display;
+	MS.soc_voltage=core.soc_voltage;
 	MS.SOC=(uint8_t)(MS.soc_display+0.5f);
+	rest_seconds=core.rest_seconds;
+	soc_full_anchor=core.full_anchor;
+	soc_boot_full_done=core.boot_full_done;
+	soc_boot_settle_s=core.boot_settle_s;
+	soc_boot_vmin=core.boot_vmin_mv;
+	soc_boot_vmax=core.boot_vmax_mv;
+	soc_anchor_start_mah=core.anchor_start_mah;
 
-	//--- FW-018: hold display at 100% right after a detected full charge (anti flicker to 99%) ---
-	//Released once ~SOC_FULL_RELEASE_FRAC of capacity has actually been consumed; soc_real keeps tracking underneath.
-	if(soc_full_anchor){
-		if((soc_anchor_start_mah-MS.remaining_mah) < SOC_FULL_RELEASE_FRAC*(float)MP.battery_capacity_estimated_mah){
-			MS.soc_display=100.0f; MS.SOC=100;
-		} else {
-			soc_full_anchor=0; //enough used -> resume normal display tracking
-		}
-	}
+	MS.used_wh+=(dmah/1000.0f)*((float)MS.Voltage/1000.0f); //Wh this second (signed)
 
 	//--- Range from remaining energy / PER-LEVEL average consumption ---
 	float remaining_wh=(MS.remaining_mah/1000.0f)*(float)MP.system_voltage;

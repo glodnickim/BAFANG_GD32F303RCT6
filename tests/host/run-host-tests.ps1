@@ -470,6 +470,15 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Modules = @()
        IncludeDirs = @(Join-Path $PSScriptRoot 'common')
        Defines = @("-DMAIN_C_PATH=$mainCPathForward", "-DCAN_DISPLAY_C_PATH=$canDisplayCPathForward") },
+    @{ Name = 'EVD-WALK 0x3202 bit0 gate guard (CAN_Display.c source-text check)'
+       Harness = Join-Path $PSScriptRoot 'walk3202_bit0_guard_host.c'
+       # Source-text, same reasoning as the FW-110 sibling: CAN_Display.c cannot be linked here
+       # (ARM entry wired to GD32 CMSIS); the regression guards the gated bit0 semantics live in
+       # the active source, so a revert to unconditional 0x00 (or a set on Walk-selected-only,
+       # or on motion without Walk) is caught structurally. See the harness's own file header.
+       Modules = @()
+       IncludeDirs = @(Join-Path $PSScriptRoot 'common')
+       Defines = @("-DCAN_DISPLAY_C_PATH=$canDisplayCPathForward") },
     @{ Name = 'STEP 2A neutral-dwell wiring guard (main.c source-text check)'
        Harness = Join-Path $PSScriptRoot 'step2a_neutral_dwell_wiring_host.c'
        Modules = @()

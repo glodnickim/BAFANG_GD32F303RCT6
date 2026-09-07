@@ -136,6 +136,8 @@ extern volatile uint16_t bus_lost_ticks;    //FW-135 power watchdog (main.c) - r
 extern volatile uint8_t  bus_seen;          //FW-135 power watchdog arm flag (main.c) - set on the first frame of any kind
 extern volatile uint16_t update_hold_ticks; //FW-135 update session hold (main.c) - suspends the silence power-off
 extern volatile uint16_t ride_seconds;    //FW-134: seconds of motion (defined in main.c)
+extern MotorState_t MS;                   //global ride state (defined in main.c): 0x3202 bit0 reads pushassist_flag+Speedx100
+extern volatile uint16_t ui16_erps;       //motor electrical rev/s (defined in main.c): unambiguous wheel-motion at walk pace
 extern volatile uint16_t click_release_count;   //FW-136.0 (main.c) - quiet descents to zero Iq reference
 extern volatile uint16_t coast_peak_iq;         //FW-136.0 (main.c) - peak |Iq| over the whole coast
 extern volatile uint16_t coast_peak_erps;       //FW-136.0 (main.c) - rotor speed at that peak
@@ -857,8 +859,19 @@ void sendCAN_3100(MotorState_t* MS){
 #endif
 
 void sendCAN_3202(void){
-	//Original firmware sends 0x3202 (1 byte 0x00) every ~100ms. HMI may lose sync or exit WA without it.
+	//0x3202 byte0 bit0 drives the stock HMI (DPC245 CF80301.2) Walk-icon blink: it is copied
+	//to state[0].bit4 and gates the periodic FF/FE callback. It must be 0x01 ONLY while a Walk
+	//session is actually RUNNING and the bike is ACTUALLY MOVING - not merely when Walk mode
+	//was selected. "Moving" is the same wheel-OR-motor test FW-134 uses for 0x3210 (main.c):
+	//at walking pace a single wheel pulse can be ~2.6 s apart, right at the speed-stop timeout,
+	//so wheel speed alone would flicker to zero exactly during Walk - the motor is unambiguous
+	//there. pushassist_flag gates the whole expression to Walk only, so an ordinary pedal start
+	//never sets the bit (per user decision 2026-09-07).
 	uint8_t d[8] = {0};
+	if((MS.pushassist_flag != RESET)
+	   && (MS.Speedx100 > 0 || ui16_erps >= RIDE_COAST_RELEASE_ERPS)){
+		d[0] = 0x01;
+	}
 	can_tx_queue_enqueue(0x02F83202U, 1U, d); //FW-110: was a blocking can_message_transmit/can_transmit_states wait
 }
 

@@ -72,6 +72,7 @@ OF SUCH DAMAGE.
 #include "diag_budget.h"      /* FW-126.5: the RAM budget this probe is asserted against */
 #if CAN_DIAGNOSTICS_ENABLE
 #include "diag_efid_map.h"       /* FW-121.0: compile-time proof that no two diag id blocks overlap */
+#include "ride_telemetry.h"      /* FW-145: continuous Level-4 ride stream for CANable */
 #include "rolling_no_assist_dump.h" /* FW-123: explicit/repeatable FROZEN capture replay */
 #include "qs_transition_dump.h"
 #endif
@@ -357,6 +358,9 @@ volatile uint32_t foc_aw_sat_ticks = 0;
  * through a new field. See inc/quiet_zero.h.
  */
 static quiet_zero_t quiet_zero_state;
+/* FW-145: ISR-owned diagnostic mirror. Foreground telemetry may observe this byte,
+ * but never reaches into the QZERO state machine object itself. */
+static volatile uint8_t qzero_diag_state_isr;
 #if STOP_TRACE_ENABLE
 static uint32_t stop_trace_foc_tick;
 static uint16_t stop_trace_qzero_events;
@@ -1304,6 +1308,13 @@ int main(void)
     	 * regardless of allow_new_tx - see diag_session_dump_step()'s own contract.
     	 */
     	diag_dump_step();
+	/* FW-145: critical HMI/multiframe traffic and the post-ride dump always get first refusal.
+	 * The continuous stream is useful only while a ride session is active, so it naturally
+	 * vacates the bus when the session closes and the detailed dump begins. */
+	ride_telemetry_step(control_time_ticks,
+		(can_tx_queue_depth() == 0U) && !can_multiframe_busy() &&
+		!rolling_no_assist_dump_busy() && !qs_transition_dump_busy(),
+		diag_session_is_active());
 #endif
 
 
@@ -3287,6 +3298,85 @@ void reg_ADC_processing(void)
          * owner, battery_iq_cap.c latch). Drive the legacy FW-033 diagnostic flag from that
          * ONE latch so the CAN bit and the actual cap never disagree. */
         BC_limit_flag = ride_control_battery_limit_active() ? 1 : 0;
+#if CAN_DIAGNOSTICS_ENABLE
+        /*
+         * FW-145: read-only live-ride snapshot for CANable / Level-4 replay. Every field is
+         * copied from its existing owner; nothing below feeds back into a control decision.
+         * Snapshot construction itself is throttled to the wire snapshot rate (~48 Hz), so the
+         * 4 kHz foreground pays only one cheap due-check on intervening ticks. Serialization
+         * happens later in the main loop.
+         */
+        if (ride_telemetry_capture_due(control_now)) {
+            const torque_snapshot_t *rt_tq = torque_input_get_snapshot();
+            const iq_chain_t *rt_iq = iq_chain_get();
+            float rt_soc_f = MS.soc_display * 10.0f;
+            int32_t rt_bat_10ma = MS.Battery_Current / 10;
+            uint32_t rt_v_10mv = (MS.Voltage > 0) ? (uint32_t)MS.Voltage / 10U : 0U;
+            uint32_t rt_u_abs = (MS.u_abs > 0) ? (uint32_t)MS.u_abs : 0U;
+            uint16_t rt_flags = 0U;
+
+            if(ride_control_battery_limit_active()) rt_flags |= RIDE_TELEM_F_BATTERY_LIMIT;
+            if(MS.brake_active_flag) rt_flags |= RIDE_TELEM_F_BRAKE;
+            if(MS.pushassist_flag) rt_flags |= RIDE_TELEM_F_WALK;
+            if(torque_fault) rt_flags |= RIDE_TELEM_F_TORQUE_FAULT;
+            if(overtemp_stage >= 2) rt_flags |= RIDE_TELEM_F_OVERTEMP_CUT;
+            if(foc_aw_saturated) rt_flags |= RIDE_TELEM_F_FOC_SATURATED;
+            if(torque_input_calibration_active()) rt_flags |= RIDE_TELEM_F_TORQUE_CAL;
+            if(MS.offroadflag) rt_flags |= RIDE_TELEM_F_OFFROAD;
+            if(ui_8_PWM_ON_Flag) rt_flags |= RIDE_TELEM_F_PWM_ON;
+            if(start_phase) rt_flags |= RIDE_TELEM_F_START_PHASE;
+            if(MS.walk_can_request) rt_flags |= RIDE_TELEM_F_WALK_CAN_REQ;
+            if(pas_direction_direction_inhibit_active()) rt_flags |= RIDE_TELEM_F_DIRECTION_INHIBIT;
+            if(pas_direction_backpedal_confirmed()) rt_flags |= RIDE_TELEM_F_BACKPEDAL;
+            rt_flags |= (uint16_t)(((uint16_t)bridge_lifecycle & 7U) << RIDE_TELEM_F_BRIDGE_SHIFT);
+
+            if(rt_soc_f < 0.0f) rt_soc_f = 0.0f;
+            if(rt_soc_f > 1000.0f) rt_soc_f = 1000.0f;
+            if(rt_bat_10ma < -32768) rt_bat_10ma = -32768;
+            if(rt_bat_10ma > 32767) rt_bat_10ma = 32767;
+            if(rt_v_10mv > 65535U) rt_v_10mv = 65535U;
+            if(rt_u_abs > 65535U) rt_u_abs = 65535U;
+
+            ride_telemetry_snapshot_t rt = {
+                .control_tick = control_now,
+                .load_centikg = rt_tq ? rt_tq->load_centikg : 0U,
+                .torque_fast_native = rt_tq ? rt_tq->assist_delta_filtered_native : 0U,
+                .torque_run_native = rt_tq ? rt_tq->assist_delta_run_native : 0U,
+                .cadence_raw_rpm = MS.cadence,
+                .cadence_control_rpm = cadence_filter_get(),
+                .iq_requested = diag_clamp16((rt_iq && rt_iq->valid) ? rt_iq->requested : 0),
+                .iq_allowed = diag_clamp16((rt_iq && rt_iq->valid) ? rt_iq->allowed : 0),
+                .iq_ref = diag_clamp16(MS.i_q_setpoint),
+                .iq_actual = diag_clamp16(MS.i_q),
+                .id_actual = diag_clamp16(MS.i_d),
+                .motor_erps = ui16_erps,
+                .battery_voltage_10mv = (uint16_t)rt_v_10mv,
+                .battery_current_10ma = (int16_t)rt_bat_10ma,
+                .soc_display_x10 = (uint16_t)(rt_soc_f + 0.5f),
+                .wheel_speed_x100 = (MS.Speedx100 > 65535U) ? 65535U : (uint16_t)MS.Speedx100,
+                .u_abs = (uint16_t)rt_u_abs,
+                .flags = rt_flags,
+                .permission_bits = ride_control_get_permission_bits(),
+                .debug_flags = ride_control_get_debug_flags(),
+                .session_state = ride_control_get_session_state(),
+                .qzero_state = qzero_diag_state_isr,
+                .assist_level = MS.assist_level,
+                .theta_q15 = (int16_t)(q31_rotorposition_absolute >> 16),
+                .hall_age_ticks = ui16_erps_counter,
+                .hall_state = ui8_hall_state,
+                .rotor_trusted = rotor_angle_state.trusted,
+                .bridge_lifecycle = bridge_lifecycle,
+                .pwm_on = ui_8_PWM_ON_Flag != 0U,
+                .pas_ab = pas_sampler_state(),
+                .pas_direction_state = (uint8_t)pas_direction_get_state(),
+                .pas_backpedal = pas_direction_backpedal_confirmed(),
+                .direction_inhibit = pas_direction_direction_inhibit_active(),
+                .start_phase = start_phase != 0U,
+                .active_profile_bank = assist_modes_get_active_bank()
+            };
+            ride_telemetry_capture(&rt);
+        }
+#endif
         /*
          * FW-098 success metric, measured AFTER the whole pipeline has run so it counts what
          * actually reached the motor, not what was requested.
@@ -4004,6 +4094,7 @@ void runPIcontrol(void){
 			.id_integral = PI_id.integral_part
 		};
 		quiet_zero_tick(&quiet_zero_state, &qz_in, &qz);
+		qzero_diag_state_isr = (uint8_t)quiet_zero_state.state;
 		#if STOP_TRACE_ENABLE
 		stop_trace_qzero_events=(qz.entered?ST_ENTRY:0U)|
 			(qz.low_speed_release?ST_HANDBACK:0U)|(qz.exited?ST_EXIT:0U)|
@@ -4446,6 +4537,7 @@ void ADC0_1_IRQHandler(void)
     	// tick after ANY of the several ui_8_PWM_ON_Flag=0 sites in main(), without needing to
     	// touch each of them individually.
 		foc_current_feedback_invalidate();
+		qzero_diag_state_isr = 0U;
     }
 #if STOP_TRACE_ENABLE
     if(stop_trace_fast_needed()){
@@ -5929,6 +6021,7 @@ static void diag_diagnostics_init(void)
 	qs_transition_diag_init();
 	qs_transition_dump_init(&diag_can_ops);
 	diag_session_init(&diag_can_ops, &diag_ops);
+	ride_telemetry_init(&diag_can_ops);
 }
 
 /*

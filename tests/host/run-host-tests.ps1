@@ -627,6 +627,10 @@ IncludeDirs = @((Join-Path $PSScriptRoot 'common\host_stubs'), (Join-Path $PSScr
        Harness = Join-Path $PSScriptRoot 'fw144_soc_core_parity_host.c'
        Modules = @(Join-Path $root 'src\soc_core.c')
        IncludeDirs = @(Join-Path $PSScriptRoot 'common') },
+    @{ Name = 'FW-145 continuous Level-4 ride telemetry (real module pacing, priority and wire schema)'
+       Harness = Join-Path $PSScriptRoot 'ride_telemetry_host.c'
+       Modules = @((Join-Path $root 'src\ride_telemetry.c'))
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=1', '-DCAN_RIDE_TELEMETRY_ENABLE=1') }
     @{ Name = 'FW-112 PATCH B0 pedal-assist gate scenario proof (S1-S10 + M1-M9)'
        Harness = Join-Path $PSScriptRoot 'fw112_b0_gate_host.c'
        # Same real-module chain as the FW-109 v2 ride control suite: the pedal_assist_gate

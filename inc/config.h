@@ -64,6 +64,21 @@
 #if (CAN_DIAGNOSTICS_ENABLE != 0) && (CAN_DIAGNOSTICS_ENABLE != 1)
 #error "CAN_DIAGNOSTICS_ENABLE must be 0 or 1"
 #endif
+
+// --- Continuous Level-4 live-ride telemetry (0x10400..0x10407) ---
+// Default: follow CAN_DIAGNOSTICS_ENABLE. Normal riding builds stay completely silent; a
+// developer/diagnostic build publishes a best-effort ~48 Hz coherent snapshot for CANable.
+// It may be overridden independently at compile time (for example, diagnostics on but live
+// telemetry off while doing a one-shot dump). The stream never uses the critical CAN FIFO.
+#ifndef CAN_RIDE_TELEMETRY_ENABLE
+#define CAN_RIDE_TELEMETRY_ENABLE CAN_DIAGNOSTICS_ENABLE
+#endif
+#if (CAN_RIDE_TELEMETRY_ENABLE != 0) && (CAN_RIDE_TELEMETRY_ENABLE != 1)
+#error "CAN_RIDE_TELEMETRY_ENABLE must be 0 or 1"
+#endif
+#if (CAN_RIDE_TELEMETRY_ENABLE != 0) && (CAN_DIAGNOSTICS_ENABLE == 0)
+#error "CAN_RIDE_TELEMETRY_ENABLE requires CAN_DIAGNOSTICS_ENABLE=1"
+#endif
 // --- Optional standalone torque-sensor CAN emulation stream (0x81F83100) ---
 // FW-110: this used to be silently tied to CAN_DIAGNOSTICS_ENABLE even though nothing in this
 // firmware reads the frame back - it exists only for an external bus logger/tool that wants to

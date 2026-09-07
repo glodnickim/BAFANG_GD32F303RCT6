@@ -52,6 +52,7 @@ src/rotor_angle.c
 src/ride_control.c
 src/ride_episode.c
 src/ride_session.c
+src/ride_telemetry.c
 src/ride_wheel.c
 src/rearm_delay_diag.c
 src/rider_input.c

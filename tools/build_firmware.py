@@ -405,9 +405,9 @@ def main() -> int:
     print(f"SHA256:    {sha256(final)}")
     print("==================================================")
 
-    # Copy final BIN to releases/<version>/ (canonical releases only)
+    # Copy final BIN to releases/<version>_M820_BL820.bin (canonical releases only)
     if version_source == "auto_global":
-        releases_dir = ROOT / "releases" / version
+        releases_dir = ROOT / "releases"
         releases_dir.mkdir(parents=True, exist_ok=True)
         dest = releases_dir / final.name
         shutil.copy2(final, dest)

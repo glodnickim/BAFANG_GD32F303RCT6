@@ -89,6 +89,15 @@ QZERO is also executed in this full backend. The motor parameters in the virtual
 parameters, not claimed M820 measurements; tests therefore assert architecture/invariants and
 safe state transitions rather than tuning production constants to the plant.
 
+### Walk Assist full electrical SIL
+
+Walk Assist is also driven through the same real FOC/PMSM/Hall backend. The deterministic matrix
+uses 10/15/20/30/40/50/60 chainring rpm, three virtual loads and all six Hall-sector starts
+(126 cases). 70/80/>80 rpm are range/limiter tests, not normal Walk targets. Exact low-load rpm
+tracking is reported as a quality metric; small speed float is not a FAIL. Safety/lifecycle
+invariants (start, no runaway, current ceiling, safe stall, release/brake/fault/wheel-cut behavior)
+are the hard gate. See `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`.
+
 ## Current motor-control fixes in this branch
 
 - FW139: reject physically impossible PAS reverse bounce before direction safety.
@@ -97,5 +106,7 @@ safe state transitions rather than tuning production constants to the plant.
 - FW141: make FAST/RUN torque filters depend on elapsed 4 kHz time, not foreground call count.
 - FW142: extract the existing PI/vector-saturation math into one production module used unchanged
   by both target firmware and electrical SIL; no algorithm change is intended by the extraction.
+- FW143: make Walk target range 10..60 chainring rpm from one shared source of truth and add a
+  126-case real-FOC/PMSM/Hall Walk matrix; speed float is evidence, not a virtual-motor tuning gate.
 
-See `VERIFICATION_STATUS_2026-09-06_PL.md` for current evidence and remaining hardware gate.
+See `VERIFICATION_STATUS_2026-09-07_PL.md` for current evidence and remaining hardware gate.

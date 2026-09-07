@@ -6586,7 +6586,7 @@ uint16_t walk_assist_iq_request(void){
 			.motor_iq_reference = MS.i_q_setpoint,
 			//FW-042/043/051: walk_assist_speed repurposed as target CHAINRING rpm, now banked.
 			//It was x100 (km/h), but that made every value above 6 unreachable: Canable
-			//clamped at 6. Raw rpm now uses a validated 20..60 range; stale stored
+			//clamped at 6. Raw rpm now uses a validated 10..60 range; stale stored
 			//values such as 600 are repaired to the default.
 			.target_chainring_rpm = assist_modes_get_wa_target_rpm(),
 			//FW-130: the bank's Walk current percentage finally reaches the motor. It had

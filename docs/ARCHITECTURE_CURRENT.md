@@ -1,4 +1,4 @@
-# EVistDrive FW142 — current architecture map
+# EVistDrive FW143 — current architecture map
 
 ## Control flow
 
@@ -113,6 +113,20 @@ final Iq slew
 QZERO also executes in this backend.
 
 The PMSM parameters are test parameters, not claimed measured M820 constants. Do not tune production FOC/QZERO to the virtual plant unless hardware evidence confirms the parameter domain.
+
+## Walk Assist
+
+Walk has a separate demand owner but shares the downstream electrical FOC path. Its normal target domain is:
+
+```text
+10..60 chainring/output rpm
+default 30 rpm
+```
+
+The Walk governor may float slightly around a low target under very small load; exact rpm tracking is not a
+safety invariant. The verification hard-gates no-runaway (<80 rpm in the current electrical SIL contract),
+correct current ceilings, safe stall, Hall/lifecycle behavior and true-zero safety exits. Out-of-range target
+values such as 70/80 rpm are rejected/fallback inputs, never valid normal targets.
 
 ## User-facing functionality rule
 

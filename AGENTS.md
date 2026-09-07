@@ -1,6 +1,6 @@
 # EVistDrive — agent entry point
 
-This repository is the current FW142 testable baseline. Start here before changing production code.
+This repository is the current FW143 testable baseline. Start here before changing production code.
 
 ## 1. Required reading order
 
@@ -62,6 +62,13 @@ Torque filters use elapsed 4 kHz time. Do not replace elapsed-time catch-up with
 ### FW142 FOC testability
 `foc_current_loop.c` is production code used by both target firmware and electrical SIL. Do not fork/copy this math into a simulator-only implementation.
 
+### FW143 Walk range and verification
+Walk target is **10..60 chainring/output rpm** with 30 rpm as the safe default. Do not raise the normal
+target above 60 rpm. 70/80/>80 are negative/range tests only. Small low-load speed float is acceptable;
+do not tune production Walk to force exact tracking in the virtual PMSM. Hard failures are safety/lifecycle
+violations: no start, runaway, current-ceiling violation, unsafe stall, or broken release/brake/fault/wheel cut.
+Read `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md` before changing Walk.
+
 ## 5. Verification gate
 
 Before any production-code change:
@@ -98,6 +105,7 @@ Prefer invariants and end-to-end scenarios over isolated expected constants. At 
 - loaded start;
 - PAS bounce and true reverse;
 - steady 20/40/60/80 rpm riding;
+- Walk 10/15/20/30/40/50/60 rpm across load/Hall-start matrix;
 - stop -> ARMED_ZERO -> restart;
 - current/power/speed/thermal limiter transitions;
 - missed foreground ticks;

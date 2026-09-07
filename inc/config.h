@@ -233,11 +233,13 @@
 // separate safety decision, not a slider.
 // A controller with an older value stored in Para1[36] keeps it until it is changed in Canable.
 #define WALK_ASSIST_CURRENT_DEFAULT 25 // % of phase_current_max stored in Para1[36]
-// FW-130 zamknięcie 2026-09-03: 20 -> 30. 20 było domyślne od FW-051, ale jazda pokazała, że pod
-// obciążeniem silnik przy celu 20 nie dociąga (18-19 ERPS z pełnym prądem, poniżej pasa regulacji)
-// i pracuje nierówno. 30 jest wartością potwierdzoną jazdą razem z Walk current 25 %.
+// FW-130 zamknięcie 2026-09-03: domyślny target 30 rpm został potwierdzony jazdą pod obciążeniem.
+// FW-143: konfigurowalny zakres rozszerzony w dół do 10 rpm; 30 rpm pozostaje domyślne, bo jest
+// sprawdzonym punktem pracy. 10..60 rpm to zakres targetu zębatki/wyjścia przekładni. 70/80 rpm
+// nie są normalnymi targetami Walk i służą wyłącznie jako test przekroczenia zakresu. Przy bardzo
+// małym obciążeniu governor może lekko pływać wokół niskiego targetu - nie jest to błąd bezpieczeństwa.
 #define WALK_ASSIST_RPM_DEFAULT     30 // raw chainring RPM stored in Para1[60..61]
-#define WALK_ASSIST_RPM_MIN         20
+#define WALK_ASSIST_RPM_MIN         10
 #define WALK_ASSIST_RPM_MAX         60
 
 //---------------------------------------------------------------------
@@ -274,11 +276,11 @@
 
 // Gear-RPM governor. The band is CENTRED on the bank's own target (owner requirement
 // 2026-09-03: "sterowanie ma oscylowac wokol ustawionej predkosci rpm"), and proportional so the
-// feel is the same at 20 and at 60 chainring rpm. Full current up to target-band, zero at
+// feel is consistent across the supported 10..60 chainring rpm range. Full current up to target-band, zero at
 // target+band, linear between. Start wide (FW-130 card SS34/43): a narrow band without an
 // integrator is high gain and invites hunting. Tighten only after a ride log.
 #define WA_GOV_BAND_PCT             15  // % of the target ERPS
-#define WA_GOV_BAND_MIN_ERPS         4  // floor so the low end of the 20..60 rpm range stays sane
+#define WA_GOV_BAND_MIN_ERPS         4  // low-speed stability floor; narrow bands at 10 rpm are high-gain and invite hunting
 
 // Wheel speed is the fuse, never the controlled value: it tapers the ceiling below the per-bank
 // cut-off, forces an immediate zero AT the cut-off (a safety limit may clamp without a ramp),

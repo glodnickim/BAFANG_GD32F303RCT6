@@ -683,19 +683,20 @@ walk_fields:
     since: 1
     access: legacy_rw
     per_level: false
-    value: {type: u8, scale: 1, unit: percent_phase_limit, min: 0, max: 100, default: 30}
+    value: {type: u8, scale: 1, unit: percent_phase_limit, min: 0, max: 100, default: 25}
     legacy_binding: Para1[36]
     implementation: active_legacy
     ui_group: walk
 
-  - key: walk_assist_speed_kph
+  - key: walk_target_chainring_rpm
     wire_id: null
     since: 1
     access: legacy_rw
     per_level: false
-    value: {type: u16, scale: 0.01, unit: kilometre_per_hour, min: 0, max: 10, default: 6}
+    value: {type: u16, scale: 1, unit: chainring_rpm, min: 10, max: 60, default: 30}
     legacy_binding: Para1[60..61]
-    implementation: active_legacy
+    legacy_aliases: [walk_assist_speed_kph]
+    implementation: active_legacy_repurposed
     ui_group: walk
 
   - key: walk_target_erps

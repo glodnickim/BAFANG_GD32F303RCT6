@@ -5,6 +5,7 @@ Two complementary binaries are built from production C:
 1) foc_electrical_sil: real FOC.c + PI/current-loop + SVPWM + PWM geometry against a PMSM plant.
 2) evist_full_foc_sil: real PAS/torque/assist/limits/final-Iq path plus the same real FOC/PMSM,
    with physical rotor motion generating Hall timing that is reconstructed by production rotor_angle.c.
+   The same full backend also runs production Walk Assist across its supported RPM/load matrix.
 
 The fast supervisory SIL remains separate because it can fuzz many more cases cheaply.
 """
@@ -27,7 +28,7 @@ SUPERVISORY_MODULES = [
     'tests/host/common/motor_service_stub.c'
 ]
 FOC_MODULES = ['src/FOC.c','src/foc_current_loop.c','src/pwm_geometry.c']
-FULL_EXTRA = ['src/rotor_angle.c','src/quiet_zero.c']
+FULL_EXTRA = ['src/rotor_angle.c','src/quiet_zero.c','src/walk_assist_motor.c','src/walk_speed_controller.c']
 
 
 def build(exe: Path, sources: list[str], *, full=False, sanitize=False) -> None:

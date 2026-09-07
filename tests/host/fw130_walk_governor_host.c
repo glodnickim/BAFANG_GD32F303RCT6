@@ -10,8 +10,8 @@
  *                       FASTER. That asymmetry is the overshoot.
  *   T2 BAND IS CENTRED  the owner's requirement (2026-09-03): the governor must oscillate AROUND
  *                       the configured rpm, so at measured == target the ceiling is exactly half.
- *   T3 BAND SCALES      20 and 60 chainring rpm must feel the same, i.e. half ceiling at target in
- *                       both, and the band width must grow with the target.
+ *   T3 BAND SCALES      every supported 10..60 chainring-rpm target must be accepted and the
+ *                       centred band must remain proportional across the range.
  *   T4 NO WIND-UP       after a long spell below target - which is exactly what wound law A's
  *                       integrator - crossing above the band must still collapse to zero in about
  *                       one fall ramp, not in seconds.
@@ -38,8 +38,8 @@
 #include "walk_assist_motor.h"
 
 #define MAX_WHEEL_X100    700
-#define TARGET_RPM_LOW     20U   /* -> 27 ERPS, band 4  -> full 23, zero 31 */
-#define TARGET_ERPS_LOW    27
+#define TARGET_RPM_LOW     10U   /* -> 13 ERPS; 4-ERPS stability floor -> full 9, zero 17 */
+#define TARGET_ERPS_LOW    13
 #define TARGET_RPM_HIGH    60U   /* -> 80 ERPS, band 12 -> full 68, zero 92 */
 #define TARGET_ERPS_HIGH   80
 #define WALK_IQ_MAX_TEST  105    /* 15 % of PH_CURRENT_MAX 700: the new default strength */
@@ -216,28 +216,35 @@ int main(void)
 	}
 
 	/* ==================================================================
-	 * T3: the band scales with the target, so 20 and 60 rpm feel the same.
+	 * T3: every supported 10..60 rpm target is accepted and centred.
 	 * ================================================================== */
 	{
+		static const uint16_t rpms[] = {10U, 15U, 20U, 30U, 40U, 50U, 60U};
+		for (uint32_t k = 0; k < sizeof(rpms) / sizeof(rpms[0]); k++) {
+			drive_t d;
+			walk_motor_output_t out;
+			uint16_t expected_erps = (uint16_t)(((uint32_t)rpms[k] * 4U + 1U) / 3U);
+			spin_up(&d, &out, rpms[k]);
+			drive_set_erps(&d, expected_erps);
+			for (uint32_t i = 0; i < 4000U; i++) {
+				drive_tick(&d, &out);
+			}
+			CHECK(out.target_erps == expected_erps,
+				"T3: supported target maps to the expected chainring-derived ERPS");
+			CHECK(out.gear_factor_q8 == 128,
+				"T3: measured == target leaves exactly half the centred gear ceiling");
+		}
+
+		/* At the high end the proportional band is wider than at 10 rpm. */
 		drive_t d;
 		walk_motor_output_t out;
 		spin_up(&d, &out, TARGET_RPM_HIGH);
-		drive_set_erps(&d, (uint16_t)TARGET_ERPS_HIGH);
-		for (uint32_t i = 0; i < 4000U; i++) {
-			drive_tick(&d, &out);
-		}
-		CHECK(out.target_erps == (uint16_t)TARGET_ERPS_HIGH,
-			"T3: 60 chainring rpm maps to 80 ERPS (setup)");
-		CHECK(out.gear_factor_q8 == 128,
-			"T3: half ceiling at target at 60 rpm too - the band is proportional");
-
-		/* 6 ERPS above target is outside the low band but still inside the high one. */
 		drive_set_erps(&d, (uint16_t)(TARGET_ERPS_HIGH + 6));
 		for (uint32_t i = 0; i < 4000U; i++) {
 			drive_tick(&d, &out);
 		}
 		CHECK(out.gear_factor_q8 > 0,
-			"T3: the wider band at 60 rpm still allows current 6 ERPS above target");
+			"T3: the 60-rpm band still allows current 6 ERPS above target");
 	}
 
 	/* ==================================================================
@@ -466,6 +473,24 @@ int main(void)
 		}
 		CHECK(peak < WALK_IQ_MAX_TEST / 2,
 			"T10: and nowhere near the full walk ceiling");
+	}
+
+	/* ==================================================================
+	 * T11 (FW-143): configuration range is exactly 10..60 rpm. Values
+	 * below/above the supported range must not become hidden 70/80-rpm
+	 * Walk targets; the module falls back to the safe 30-rpm default.
+	 * ================================================================== */
+	{
+		static const uint16_t invalid[] = {0U, 9U, 61U, 70U, 80U, 100U};
+		for (uint32_t k = 0; k < sizeof(invalid) / sizeof(invalid[0]); k++) {
+			drive_t d;
+			walk_motor_output_t out;
+			walk_motor_release();
+			drive_reset(&d, invalid[k]);
+			drive_tick(&d, &out);
+			CHECK(out.target_erps == 40U,
+				"T11: out-of-range Walk RPM falls back to the 30-rpm/40-ERPS default");
+		}
 	}
 
 	if (host_test_failures == 0) {

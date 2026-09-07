@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "assist_modes.h"
+#include "assist_limits.h"
 #include "cadence_filter.h"
 #include "config.h"
 #include "motor_core.h"
@@ -33,6 +34,7 @@
 #include "quiet_zero.h"
 #include "rotor_angle.h"
 #include "rotor_motion.h"
+#include "walk_assist_motor.h"
 #endif
 
 #define CTRL_HZ 4000U
@@ -926,6 +928,195 @@ static void run_scenario(const char *name, double rpm, double cadence_ripple_fra
 }
 
 #ifdef EVD_SIL_REAL_FOC
+typedef struct {
+    uint32_t tick;
+    uint32_t first_hall_tick;
+    uint32_t limit_ticks;
+    uint32_t stall_ticks;
+    uint32_t samples;
+    double rpm_sum;
+    double rpm_sq_sum;
+    double rpm_min;
+    double rpm_max;
+    int32_t iq_peak;
+    uint16_t measured_erps_last;
+    uint16_t target_erps_last;
+    uint8_t final_state;
+    uint16_t final_reason;
+    int32_t final_iq;
+} walk_sil_metrics_t;
+
+static void walk_sil_init(MotorState_t *ms, plant_t *p, double breakaway_iq,
+                          double start_angle_rev)
+{
+    motor_core_init(ms);
+    ms->hall_angle_detect_flag = 1U;
+    foc_current_feedback_reset(ms);
+    ride_control_init(); /* owns/resets the one final Iq mailbox used by Walk BYPASS too */
+    walk_motor_release();
+    plant_init(p, breakaway_iq);
+    plant_set_start_angle(p, start_angle_rev);
+}
+
+static void walk_sil_ctrl_tick(MotorState_t *ms, plant_t *p, uint32_t ctrl_tick,
+                               uint16_t target_rpm, int32_t walk_iq_max,
+                               uint16_t wheel_speed_x100, walk_sil_metrics_t *m)
+{
+    p->hall_edge_this_ctrl = false;
+    walk_motor_input_t in = {
+        .active = true,
+        .brake = false,
+        .fault = false,
+        .wheel_speed_x100 = wheel_speed_x100,
+        .max_wheel_speed_x100 = 700U,
+        .motor_hall_ticks = p->last_capture_500k,
+        .motor_erps_age_ticks = p->hall_age_ticks,
+        .motor_iq_actual = ms->i_q,
+        .motor_iq_reference = ms->i_q_setpoint,
+        .target_chainring_rpm = target_rpm,
+        .walk_iq_max = walk_iq_max
+    };
+    walk_motor_output_t out;
+    int32_t iq = walk_motor_update(&in, &out);
+
+    /* Same ordinary shared limiter used by main.c after walk_motor_update(). */
+    assist_limits_input_t lim = {
+        .voltage_raw = TEST_VOLTAGE_RAW,
+        .voltage_min_raw = VOLTAGE_MIN,
+        .controller_temperature_c = TEST_TEMP_C,
+        .source = ASSIST_LIMIT_SOURCE_NON_PEDAL,
+        .speed_x100 = wheel_speed_x100,
+        .speed_limit_x100 = SPEEDLIMIT,
+        .legal_enabled = true,
+        .offroad = false,
+        .walk_active = true
+    };
+    iq = assist_limits_apply(iq, &lim);
+    if (iq < 0) iq = 0;
+    if (iq > 65535) iq = 65535;
+
+    fast_iq_slew_publish(ride_control_final_iq_slew_mailbox(), iq,
+                         FIS_MODE_BYPASS, 0U, 0U, FIS_ZERO_POLICY_NONE);
+    for (unsigned k = 0; k < INNER_PER_CTRL; k++) {
+        plant_inner_tick(p, ms, iq, ctrl_tick);
+    }
+    if (p->hall_edge_this_ctrl) {
+        p->hall_age_ticks = 0U;
+        if (m && m->first_hall_tick == 0U) m->first_hall_tick = ctrl_tick;
+    } else if (p->hall_age_ticks < 0xFFFFU) {
+        p->hall_age_ticks++;
+    }
+
+    if (m) {
+        if (out.state == (uint8_t)WA_STATE_LIMIT) m->limit_ticks++;
+        if (out.state == (uint8_t)WA_STATE_STALL) m->stall_ticks++;
+        if (ms->i_q_setpoint > m->iq_peak) m->iq_peak = ms->i_q_setpoint;
+        m->measured_erps_last = out.measured_erps;
+        m->target_erps_last = out.target_erps;
+        m->final_state = out.state;
+        m->final_reason = out.reason;
+        m->final_iq = ms->i_q_setpoint;
+        if (ctrl_tick > 3U * CTRL_HZ) {
+            double rpm = p->erps * 0.75; /* M820: chainring rpm = electrical ERPS * 3/4 */
+            if (m->samples == 0U) { m->rpm_min = rpm; m->rpm_max = rpm; }
+            if (rpm < m->rpm_min) m->rpm_min = rpm;
+            if (rpm > m->rpm_max) m->rpm_max = rpm;
+            m->rpm_sum += rpm;
+            m->rpm_sq_sum += rpm * rpm;
+            m->samples++;
+        }
+    }
+}
+
+static int run_walk_foc_matrix(void)
+{
+    static const uint16_t rpms[] = {10U, 15U, 20U, 30U, 40U, 50U, 60U};
+    static const double loads[] = {3.0, 10.0, 20.0};
+    static const double starts[] = {0.00, 1.0/6.0, 2.0/6.0, 3.0/6.0, 4.0/6.0, 5.0/6.0};
+    int failures = 0;
+    int tracking_warnings = 0;
+    int safe_stall_cases = 0;
+    double worst_first_hall_ms = 0.0;
+    double worst_mean_error_pct = 0.0;
+    double worst_pp = 0.0;
+
+    for (uint32_t ri = 0; ri < sizeof(rpms)/sizeof(rpms[0]); ri++) {
+        for (uint32_t li = 0; li < sizeof(loads)/sizeof(loads[0]); li++) {
+            for (uint32_t si = 0; si < sizeof(starts)/sizeof(starts[0]); si++) {
+                MotorState_t ms;
+                plant_t p;
+                walk_sil_metrics_t m = {0};
+                walk_sil_init(&ms, &p, loads[li], starts[si]);
+                const uint32_t duration = 6U * CTRL_HZ;
+                for (uint32_t t = 1U; t <= duration; t++) {
+                    walk_sil_ctrl_tick(&ms, &p, t, rpms[ri], 105, 0U, &m);
+                }
+                double first_hall_ms = m.first_hall_tick ?
+                    1000.0 * (double)m.first_hall_tick / CTRL_HZ : 1e9;
+                double mean = m.samples ? m.rpm_sum / (double)m.samples : 0.0;
+                double err_pct = rpms[ri] ? fabs(mean - (double)rpms[ri]) * 100.0 / rpms[ri] : 0.0;
+                double pp = m.samples ? (m.rpm_max - m.rpm_min) : 0.0;
+                if (first_hall_ms > worst_first_hall_ms && first_hall_ms < 1e8) worst_first_hall_ms = first_hall_ms;
+                if (err_pct > worst_mean_error_pct) worst_mean_error_pct = err_pct;
+                if (pp > worst_pp) worst_pp = pp;
+
+                /* The virtual PMSM R/L/flux/inertia/load are test parameters, not measured M820
+                 * values. Hard-gate only architecture and safety facts that must hold independently
+                 * of that tuning. Exact rpm tracking remains an evidence metric below. A deliberately
+                 * heavy virtual load may either keep moving or reach the production LIMIT/STALL
+                 * safety latch; if it stalls, final Iq must be zero. */
+                uint16_t expected_erps = (uint16_t)(((uint32_t)rpms[ri] * 4U + 1U) / 3U);
+                bool stall_safe = m.stall_ticks == 0U ||
+                    (m.final_state == (uint8_t)WA_STATE_STALL && m.final_iq == 0);
+                bool ok = m.target_erps_last == expected_erps &&
+                          m.first_hall_tick != 0U && first_hall_ms < 1500.0 &&
+                          m.iq_peak <= 157 && p.max_angle_error_deg <= 61.0 &&
+                          m.rpm_max <= 80.0 && stall_safe;
+                if (m.stall_ticks != 0U && stall_safe) safe_stall_cases++;
+                if (err_pct > 25.0 || pp > ((double)rpms[ri] * 1.5 + 5.0)) {
+                    tracking_warnings++;
+                }
+                if (!ok) {
+                    failures++;
+                    fprintf(stderr,
+                        "WALK FOC FAIL rpm=%u load=%.1f start=%.0fdeg hall=%.1fms "
+                        "mean=%.2f pp=%.2f err=%.1f%% limit=%u stall=%u finalState=%u finalIq=%d "
+                        "iqPeak=%d angle=%.2fdeg targetErps=%u measuredErps=%u reason=0x%04X\n",
+                        rpms[ri], loads[li], starts[si]*360.0, first_hall_ms, mean, pp, err_pct,
+                        m.limit_ticks, m.stall_ticks, m.final_state, m.final_iq, m.iq_peak,
+                        p.max_angle_error_deg, m.target_erps_last, m.measured_erps_last,
+                        m.final_reason);
+                }
+            }
+        }
+    }
+
+    /* Values above the supported target range are never allowed to become hidden 70/80-rpm
+     * commands. Production policy for corrupt/out-of-range input is the safe 30-rpm default. */
+    {
+        static const uint16_t invalid[] = {0U, 9U, 61U, 70U, 80U, 100U};
+        for (uint32_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++) {
+            MotorState_t ms;
+            plant_t p;
+            walk_sil_metrics_t m = {0};
+            walk_sil_init(&ms, &p, 3.0, 0.0);
+            walk_sil_ctrl_tick(&ms, &p, 1U, invalid[i], 105, 0U, &m);
+            if (m.target_erps_last != 40U) {
+                failures++;
+                fprintf(stderr, "WALK RANGE FAIL input=%u targetErps=%u expected default 40\n",
+                        invalid[i], m.target_erps_last);
+            }
+        }
+    }
+
+    printf("WALK FOC MATRIX 7 targets x 3 loads x 6 Hall starts = 126: failures=%d "
+           "safeStalls=%d trackingWarnings=%d worstFirstHall=%.2fms worstMeanErr=%.1f%% "
+           "worstSteadyPP=%.2frpm %s\n",
+           failures, safe_stall_cases, tracking_warnings, worst_first_hall_ms,
+           worst_mean_error_pct, worst_pp, failures ? "FAIL" : "PASS");
+    return failures ? 1 : 0;
+}
+
 static int run_hall_start_angle_sweep(void)
 {
     int failures = 0;
@@ -976,6 +1167,7 @@ int main(int argc, char **argv)
     run_scenario("pedal80", 80.0, 0.30, 1800.0, 700.0, false, 6.0, true, 8.0);
 #ifdef EVD_SIL_REAL_FOC
     if (run_hall_start_angle_sweep() != 0) return 1;
+    if (run_walk_foc_matrix() != 0) return 1;
 #endif
     if (run_stop_restart_scenario() != 0) return 1;
     return 0;

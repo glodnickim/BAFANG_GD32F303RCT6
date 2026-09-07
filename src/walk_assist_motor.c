@@ -1,5 +1,6 @@
 #include "walk_assist_motor.h"
 
+#include "config.h"
 #include "walk_speed_controller.h"
 
 /*
@@ -11,9 +12,9 @@
 #define WA_MOTOR_SAFE_LIMIT_IQ           15
 #define WA_MOTOR_START_MAX_IQ            40
 
-#define WA_MOTOR_TARGET_RPM_DEFAULT      30  /* fallback dla wejścia spoza zakresu; zgodny z bankiem */
-#define WA_MOTOR_TARGET_RPM_MIN          20
-#define WA_MOTOR_TARGET_RPM_MAX          60
+#define WA_MOTOR_TARGET_RPM_DEFAULT      WALK_ASSIST_RPM_DEFAULT
+#define WA_MOTOR_TARGET_RPM_MIN          WALK_ASSIST_RPM_MIN
+#define WA_MOTOR_TARGET_RPM_MAX          WALK_ASSIST_RPM_MAX
 #define WA_MOTOR_TARGET_ERPS_DEFAULT     40  /* 30 obr/min x 4/3 */
 #define WA_MOTOR_MAX_WHEEL_X100         700
 

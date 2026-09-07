@@ -201,7 +201,7 @@ int main(void)
 			"T2: the 2x guard band is present - without it the bound sits exactly on the steady "
 			"state boundary and nibbles at every reading through ordinary jitter");
 
-		/* Walk Assist is limited to 20..60 chainring rpm; erps = rpm * 4/3. Ride speeds go far
+		/* Walk Assist is limited to 10..60 chainring rpm; erps = rpm * 4/3. Ride speeds go far
 		 * higher. Sweep well past both ends. */
 		int bound_bit_at_steady = 0;
 		for (uint32_t erps = 3; erps <= 400; erps++) {
@@ -285,7 +285,7 @@ int main(void)
 		CHECK(strstr(wac, "ui16_erps") == NULL,
 			"T6: walk_assist_motor.c never references ui16_erps. It builds its own estimate from "
 			"the raw Hall interval and uses the edge-age clock for liveness (FW-130/130.1), so no "
-			"Walk Assist target - 20 rpm or 60 - can be disturbed by this change");
+			"Walk Assist target - 10 rpm through 60 rpm - can be disturbed by this change");
 		CHECK(strstr(mainc, ".motor_hall_ticks = wa_hall_ticks,") != NULL &&
 			strstr(mainc, ".motor_erps_age_ticks = wa_erps_age,") != NULL,
 			"T6: and the two things it IS given are the raw interval and the edge age");

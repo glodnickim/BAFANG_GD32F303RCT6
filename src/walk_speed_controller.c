@@ -321,7 +321,7 @@ int32_t walk_speed_controller_update(
 
 /*
  * Gear-RPM governor. The band is centred on the bank's own target and scales with it,
- * so 20 and 60 chainring rpm feel the same. Full ceiling at or below target-band, zero
+ * across the supported 10..60 chainring rpm range. Full ceiling at or below target-band, zero
  * at or above target+band, linear between. 2*band is at least 2*WA_GOV_BAND_MIN_ERPS,
  * so the divisor can never be zero.
  */

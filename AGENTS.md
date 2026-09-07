@@ -82,7 +82,46 @@ Read `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md` before changing Walk.
 through production C. A real-bike bug should become a registered replay case before its fix is considered closed.
 Read `docs/FW144_LEVEL4_VIRTUAL_BIKE.md` and `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`.
 
-## 5. Verification gate
+## 5. Build i numeracja wersji
+
+### Tryby build
+
+| Tryb | Polecenie | Wersja | Zastosowanie |
+|------|-----------|--------|--------------|
+| `developer` | `python tools/build_firmware.py --mode developer` | `DEV-NONCANONICAL` | Szybka weryfikacja, bramka, debug — **bez numeru kanonicznego** |
+| `auto` | `python tools/build_firmware.py --mode auto` | `0.601`, `0.602`... | **Wydanie kanoniczne** — rezerwuje numer z globalnego allocatora |
+| `repro` | `python tools/build_firmware.py --mode repro --version 0.601` | dokładnie `0.601` | Odtworzenie konkretnego历史的 builda |
+
+Na Windowsie kanoniczny entry point to `VERIFY_AND_BUILD_WINDOWS.bat` (wykonuje pełną bramkę + build z `--mode developer`).
+
+### Allocator wersji
+
+Globalny licznik żyje w `.ebics-version-state/M820_BL820.json` (poziom wyżej niż repo motor-controller-firmware). Format: `X.YYY` (trzy miejsca po przecinku). Obecny HWM = 601 (następny: 0.602).
+
+```powershell
+# Inicjalizacja (jeśli stan nie istnieje)
+python tools/build_firmware.py --init-state 600
+
+# Rezerwacja następnego numeru
+python tools/build_firmware.py --toolchain "..." --mode auto --variant normal
+
+# Sprawdzanie aktualnego HWM
+type ..\..\..\.ebics-version-state\M820_BL820.json
+```
+
+**Zasada:** każde kanoniczne wydanie (FLASHowane na rower) musi rezerwować numer przez `--mode auto`. Buildy developerskie (bramka, testy) używają `--mode developer`.
+
+### FW-xxx vs BUILD version
+
+```text
+FW145     = etykieta funkcjonalna w dokumentacji (baseline, owner rules)
+0.601     = kanoniczny numer builda (z allocatora, monotonny, traceable)
+DEV-NONCANONICAL = build developerski (nie wydany, bez numeru)
+```
+
+Nie mieszaj tych systemów — `docs/19_BUILD_VERSION_AND_TOOLING_GOVERNANCE.md` §Build ID != Feature ID.
+
+## 6. Verification gate
 
 Before any production-code change:
 
@@ -111,6 +150,8 @@ VERIFY_AND_BUILD_WINDOWS.bat
 A change is not accepted because a local unit test passes. The full gate must stay green.
 
 ## 6. Test philosophy
+
+> Uwaga: sekcja "Verification gate" została przeniesiona pod §5 (Build i numeracja wersji).
 
 Prefer invariants and end-to-end scenarios over isolated expected constants. At minimum consider:
 

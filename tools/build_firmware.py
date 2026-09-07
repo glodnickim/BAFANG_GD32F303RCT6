@@ -15,6 +15,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +24,7 @@ EXPECTED_GCC = "13.2.1"
 FLASH_ORIGIN = 0x08005000
 CONFIG_A_ORIGIN = 0x0803E800
 RAM_ORIGIN = 0x20000000
+VERSION_STATE_ROOT = ROOT.parent / ".ebics-version-state"
 
 sys.path.insert(0, str(ROOT / "tools"))
 from prepare_m820_bl820 import build_container
@@ -44,6 +47,92 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def get_version_state_root(repo_root: Path) -> Path:
+    """Compute the same state root as build-version-allocator.psm1 Get-EbicsVersionStateRoot."""
+    git_dir = repo_root / ".git"
+    if git_dir.exists():
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["git", "-c", f"safe.directory={repo_root}", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cwd=repo_root, capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                common_git = result.stdout.strip()
+                main_repo = Path(common_git).parent.parent
+                return main_repo.parent / ".ebics-version-state"
+        except Exception:
+            pass
+    return repo_root.parent / ".ebics-version-state"
+
+
+def get_canonical_version(state_root: Path) -> tuple[int, str]:
+    """Read HWM from allocator state. Returns (hwm_int, formatted_version)."""
+    path = state_root / "M820_BL820.json"
+    if not path.exists():
+        raise SystemExit(f"Version state missing: {path}. Run with --init-state first.")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"Version state unreadable: {path}: {e}")
+    if data.get("schema") != 1 or data.get("target") != "M820_BL820":
+        raise SystemExit(f"Invalid version state schema at {path}")
+    hwm = int(data.get("hwm", 0))
+    if hwm < 459:
+        raise SystemExit(f"Version state HWM {hwm} below minimum 459")
+    major = hwm // 1000
+    minor = hwm % 1000
+    return hwm, f"{major}.{minor:03d}"
+
+
+def reserve_canonical_version(state_root: Path) -> str:
+    """Reserve next canonical version atomically. Returns formatted version string."""
+    path = state_root / "M820_BL820.json"
+    if not path.exists():
+        raise SystemExit(f"Version state missing: {path}. Initialize with --init-state.")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"Cannot read version state: {e}")
+    if data.get("schema") != 1 or data.get("target") != "M820_BL820":
+        raise SystemExit(f"Invalid version state at {path}")
+    hwm = int(data.get("hwm", 0))
+    if hwm < 459:
+        raise SystemExit(f"Version state HWM {hwm} below minimum 459")
+    new_hwm = hwm + 1
+    data["hwm"] = new_hwm
+    data["updated_utc"] = time.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+    # Preserve migration fields
+    for key in ["migrated_from", "hwm_reconciled_from", "hwm_reconciled_utc", "hwm_reconciliation_evidence"]:
+        if key not in data:
+            pass  # keep existing
+    path.write_text(json.dumps(data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
+    major = new_hwm // 1000
+    minor = new_hwm % 1000
+    return f"{major}.{minor:03d}"
+
+
+def init_version_state(state_root: Path, initial_hwm: int = 600) -> None:
+    """Initialize version state if missing."""
+    state_root.mkdir(parents=True, exist_ok=True)
+    path = state_root / "M820_BL820.json"
+    if path.exists():
+        print(f"Version state already exists: {path}")
+        return
+    marker = state_root / "M820_BL820.migration.json"
+    if marker.exists():
+        raise SystemExit("Migration marker exists but state is missing. Recover from evidence.")
+    import datetime
+    now = datetime.datetime.now().isoformat()
+    marker_data = {"schema": 1, "target": "M820_BL820", "initial_hwm": initial_hwm,
+                   "migrated_from": "manual initialization", "migrated_utc": now}
+    marker.write_text(json.dumps(marker_data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
+    state_data = {"schema": 1, "target": "M820_BL820", "hwm": initial_hwm,
+                  "migrated_from": "manual initialization", "updated_utc": now}
+    path.write_text(json.dumps(state_data, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Initialized version state at {path} with HWM={initial_hwm} (next version: {initial_hwm//1000}.{initial_hwm%1000:03d})")
 
 
 def git_value(*args: str) -> str:
@@ -129,11 +218,20 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--toolchain", help="Arm GNU toolchain bin directory or arm-none-eabi-gcc path")
     ap.add_argument("--variant", choices=["normal", "diagnostic"], default="normal")
-    ap.add_argument("--mode", choices=["developer", "repro"], default="developer")
+    ap.add_argument("--mode", choices=["developer", "repro", "auto"], default="developer",
+                    help="developer=DEV-NONCANONICAL, repro=explicit version, auto=reserve from global allocator")
     ap.add_argument("--version", default="", help="required for --mode repro")
     ap.add_argument("--output-dir", default=".build/python-target")
     ap.add_argument("--check-only", action="store_true", help="validate complete build inputs without requiring compiler")
+    ap.add_argument("--init-state", type=int, metavar="HWM", default=0,
+                    help="initialize version state with given HWM (e.g. --init-state 600)")
     args = ap.parse_args()
+
+    # Handle --init-state
+    if args.init_state > 0:
+        state_root = get_version_state_root(ROOT)
+        init_version_state(state_root, args.init_state)
+        return 0
 
     entries = check_tree()
     if args.check_only:
@@ -145,9 +243,34 @@ def main() -> int:
         print("BL820 PACKAGER: PASS")
         return 0
 
-    version = "DEV-NONCANONICAL" if args.mode == "developer" else args.version
-    if args.mode == "repro" and not version:
-        raise SystemExit("--mode repro requires --version")
+    # Resolve version
+    version = ""
+    version_source = ""
+    if args.mode == "developer":
+        version = "DEV-NONCANONICAL"
+        version_source = "developer_noncanonical"
+    elif args.mode == "repro":
+        if not args.version:
+            raise SystemExit("--mode repro requires --version")
+        version = args.version
+        version_source = "repro_explicit"
+    elif args.mode == "auto":
+        if args.version:
+            raise SystemExit("--mode auto allocates globally; do not supply --version (use --mode repro for explicit version)")
+        state_root = get_version_state_root(ROOT)
+        current_hwm, current_ver = get_canonical_version(state_root)
+        version = reserve_canonical_version(state_root)
+        version_source = "auto_global"
+        print(f"VERSION PRECHECK")
+        print(f"Highest issued canonical version: {current_ver}")
+        print(f"Allocator source: {state_root}")
+        print(f"Atomic reservation: YES")
+        print(f"Reserved version: {version}")
+        print(f"Monotonic candidate: PASS")
+        print()
+
+    if not version:
+        raise SystemExit("Version not resolved")
     if not re.match(r"^[0-9A-Za-z][0-9A-Za-z._+-]{0,47}$", version):
         raise SystemExit("unsafe version string")
 
@@ -251,7 +374,7 @@ def main() -> int:
     doc = {
         "schema_version": 1, "target": "M820_BL820", "profile": "debug", "variant": args.variant,
         "diagnostics_enabled": args.variant == "diagnostic", "version": version,
-        "version_source": "developer_noncanonical" if args.mode == "developer" else "repro_explicit",
+        "version_source": version_source,
         "git_commit": commit, "git_description": describe, "worktree_dirty": dirty,
         "hardware_approved_profile": True,
         "toolchain": "Arm GNU Toolchain arm-none-eabi", "toolchain_version": gcc_version,

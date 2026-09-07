@@ -129,7 +129,13 @@ def iter_canable(path: Path) -> Iterable[Frame]:
             m = LINE_RE.match(raw.strip())
             if not m:
                 continue
-            can_id = int(m.group("id"), 16)
+            raw_id = int(m.group("id"), 16)
+            # CANable logs the driver can_id verbatim, so an extended frame keeps
+            # CAN_EFF_FLAG and RTR/ERR frames set 0x60000000. Mask exactly like the rest
+            # of the project does before comparing against the telemetry ID block.
+            if raw_id & 0x60000000:
+                continue
+            can_id = raw_id & 0x1FFFFFFF
             dlc = int(m.group("dlc"))
             tokens = [x for x in m.group("data").strip().split() if x]
             try:

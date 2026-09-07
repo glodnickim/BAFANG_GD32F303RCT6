@@ -1151,7 +1151,12 @@ int main(int argc, char **argv)
         if (argc >= 4) fuzz_state = (uint32_t)strtoul(argv[3], NULL, 0);
         return run_fuzz(count);
     }
-    system("mkdir -p .build/sil");
+    /* glibc marks system() warn_unused_result; the SIL build is -Werror, and every
+       scenario below writes into this directory, so a failure must stop the run. */
+    if (system("mkdir -p .build/sil") != 0) {
+        fprintf(stderr, "evist_sil: cannot create .build/sil\n");
+        return 1;
+    }
     run_scenario("clean_start", 40.0, 0.0, 1800.0, 0.0, false, 6.0, false, 4.0);
     run_scenario("loaded_start", 40.0, 0.0, 1800.0, 0.0, false, 15.0, false, 4.0);
     run_scenario("pas_bounce", 60.0, 0.0, 1800.0, 300.0, true, 6.0, false, 4.0);

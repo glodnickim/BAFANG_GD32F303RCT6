@@ -4,6 +4,8 @@ import csv, json, subprocess, sys, tempfile
 from pathlib import Path
 R=Path(__file__).resolve().parents[1]
 BASE=0x10400
+# A real capture logs the driver can_id verbatim: extended frames keep CAN_EFF_FLAG.
+EFF=0x80000000
 
 def u16(v): return [(v>>8)&255,v&255]
 def i16(v): return u16(v&0xffff)
@@ -17,6 +19,8 @@ def main():
         tick=0x12345; us=1000000
         rows=[]
         rows.append(line(us,0x83106302,[0]*8)); us+=100 # ordinary CAN noise must be ignored
+        # An ERR/RTR frame whose masked ID would land inside the block must never be decoded.
+        rows.append(line(us,0x20010400,[0]*8)); us+=100
         payloads=[
           u16(987)+u16(321)+u16(654),
           i16(501)+i16(440)+i16(333),
@@ -26,9 +30,9 @@ def main():
           [0x9B,0x42,(5|(2<<4)|(3<<6)),83,79,0],
           i16(-12345)+u16(234)+[(5|(1<<3)|(6<<4)|(1<<7)),(3|(2<<2)|(1<<4)|(1<<5)|(1<<6))],
         ]
-        for idx,p in enumerate(payloads): rows.append(line(us,BASE+idx,frame(tick,idx,p))); us+=3000
+        for idx,p in enumerate(payloads): rows.append(line(us,EFF|(BASE+idx),frame(tick,idx,p))); us+=3000
         meta=[1,1,(tick>>24)&255,(tick>>16)&255,(tick>>8)&255,tick&255,0,7]
-        rows.append(line(us,BASE+7,meta)); us+=3000
+        rows.append(line(us,EFF|(BASE+7),meta)); us+=3000
         # second snapshot: deliberately omit MOTOR. It must remain replayable, time must advance,
         # and metadata must report exactly one missing fragment instead of hiding the loss.
         tick2=tick+84

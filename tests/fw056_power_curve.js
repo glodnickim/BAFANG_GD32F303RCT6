@@ -215,7 +215,7 @@ for (let x = 0; x <= 1000; x += 25) {
 }
 
 // --- the Canable chart must run this exact table, not a copy that drifted ---
-const CANABLE_LUT = path.join(__dirname, '..', '..', '..', 'bafang_canable_pro', 'ui', 'js', 'power-curve-lut.js');
+const CANABLE_LUT = path.join(__dirname, '..', '..', 'canable-web', 'ui', 'js', 'evistdrive', 'power-curve-lut.js');
 if (fs.existsSync(CANABLE_LUT)) {
     const js = fs.readFileSync(CANABLE_LUT, 'utf8');
     const jsNumbers = (marker) => {

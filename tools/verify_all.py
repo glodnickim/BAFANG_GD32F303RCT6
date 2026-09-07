@@ -7,7 +7,7 @@ and source-manifest hygiene. If the exact Arm GNU toolchain is available, --targ
 the debug Developer target build using the cross-platform Python builder.
 """
 from __future__ import annotations
-import argparse, os, shutil, subprocess, sys, time
+import argparse, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 R=Path(__file__).resolve().parents[1]
 
@@ -37,6 +37,15 @@ def diff_gate():
     p=subprocess.run(['git','diff','--check'],cwd=R,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     if p.returncode: print(p.stdout); raise SystemExit(p.returncode)
     print('PASS git diff --check')
+
+def sanitizers_available() -> bool:
+    cc=os.environ.get('CC','gcc')
+    with tempfile.TemporaryDirectory() as td:
+        src=os.path.join(td,'probe.c'); exe=os.path.join(td,'probe'+( '.exe' if os.name=='nt' else ''))
+        with open(src,'w',encoding='ascii') as f: f.write('int main(void){return 0;}\n')
+        p=subprocess.run([cc,'-fsanitize=address,undefined',src,'-o',exe],
+                         cwd=R,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return p.returncode==0
 
 def target_build(require, variant):
     gcc=shutil.which('arm-none-eabi-gcc') or shutil.which('arm-none-eabi-gcc.exe')
@@ -72,15 +81,22 @@ def main():
     step('independent BL820 container regression',[sys.executable,'tests/tools_prepare_m820_bl820.py'])
     step('real-module host suites',[sys.executable,'tools/run_host_tests.py'])
     step('whole-pipeline deterministic regression',[sys.executable,'tools/run_regression.py'])
+    san_ok=(not a.quick) and sanitizers_available()
+    if a.quick:
+        san_tag=''
+    elif san_ok:
+        san_tag=' + ASan/UBSan'
+    else:
+        san_tag=' (ASan/UBSan SKIP: no sanitizer runtime linkable with CC=%s)'%os.environ.get('CC','gcc')
     sil=[sys.executable,'tools/run_sil.py','--fuzz','1000' if a.quick else '10000']
-    if not a.quick: sil += ['--sanitize','--sanitize-fuzz','1000']
-    step('closed-loop SIL + deterministic fuzz'+('' if a.quick else ' + ASan/UBSan'),sil)
+    if san_ok: sil += ['--sanitize','--sanitize-fuzz','1000']
+    step('closed-loop SIL + deterministic fuzz'+san_tag,sil)
     electrical=[sys.executable,'tools/run_electrical_sil.py','--full-fuzz','250' if a.quick else '1000']
-    if not a.quick: electrical += ['--sanitize','--sanitize-fuzz','100']
-    step('real FOC/PMSM/Hall electrical SIL'+('' if a.quick else ' + ASan/UBSan'),electrical)
+    if san_ok: electrical += ['--sanitize','--sanitize-fuzz','100']
+    step('real FOC/PMSM/Hall electrical SIL'+san_tag,electrical)
     level4=[sys.executable,'tools/run_level4.py','--fuzz','25' if a.quick else '100']
-    if not a.quick: level4 += ['--sanitize']
-    step('Level-4 virtual rider + bicycle + battery/SOC + real FOC'+('' if a.quick else ' + ASan/UBSan'),level4)
+    if san_ok: level4 += ['--sanitize']
+    step('Level-4 virtual rider + bicycle + battery/SOC + real FOC'+san_tag,level4)
     step('recorded-ride import/replay deterministic regression',[sys.executable,'tools/run_replay_regression.py'])
     step('CANable FW145 raw-log decode -> canonical -> native replay',[sys.executable,'tests/test_canable_ride_decode.py'])
     if a.target or a.require_target: target_build(a.require_target, a.target_variant)

@@ -1152,8 +1152,13 @@ int main(int argc, char **argv)
         return run_fuzz(count);
     }
     /* glibc marks system() warn_unused_result; the SIL build is -Werror, and every
-       scenario below writes into this directory, so a failure must stop the run. */
+       scenario below writes into this directory, so a failure must stop the run.
+       Windows cmd.exe has no `mkdir -p`; use the equivalent cmd spell. */
+#if defined(_WIN32)
+    if (system("if not exist .build/sil mkdir .build/sil") != 0) {
+#else
     if (system("mkdir -p .build/sil") != 0) {
+#endif
         fprintf(stderr, "evist_sil: cannot create .build/sil\n");
         return 1;
     }

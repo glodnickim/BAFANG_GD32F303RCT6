@@ -47,11 +47,11 @@
  *     available is a stale one left over from before the rotor stopped. The manufacturer refuses
  *     to estimate speed from a single uncertain sample after a standstill, and so does this now.
  *
- * BUMPLESS HANDOVER falls out of the centre rule. The two formulas agree at exactly one place -
- * where the interpolation passes the sector midpoint - so a change of trust waits for that point.
- * The only exception is losing trust because the rotor stopped or the timing went invalid: no
- * further edge is coming, so it happens at once. That is the zone where FW-048 keeps the release
- * current-free anyway.
+ * STOP-CLICK: a midpoint threshold alone did not guarantee continuity: a late switch could
+ * replace a 60-degree offset with 30 degrees. Every formula change now preserves the previous
+ * output and removes the difference at a bounded rate. Timeout always clears edge history,
+ * including when already untrusted. Production supplies real Hall sequence numbers; timer
+ * rollover is not movement. The fallback timer comparison remains for legacy host callers.
  *
  * A/B: CANONICAL_ANGLE_ENABLE in inc/config.h. 0 keeps main.c's legacy branches untouched.
  */
@@ -68,12 +68,19 @@
 /* Hall edges needed since the anchor before the timing may be believed (Fake Taxi: >= 2). */
 #define ROTOR_ANGLE_TRUST_EDGES 2U
 
+/* Limit only the change of angle formula, not normal rotor rotation.
+ * A 30-degree fallback takes 160 FOC ticks (10 ms at 16 kHz). */
+#define ROTOR_ANGLE_TRANSFER_STEP (ROTOR_ANGLE_DEG_30 / 160)
+
 typedef struct {
 	uint8_t trusted;         /* 1 = live interpolation, 0 = sector centre */
 	uint8_t edges;           /* valid Hall edges since the anchor, saturating at the trust count */
 	int8_t last_direction;   /* latched: a standstill keeps the sign it last measured */
 	uint16_t prev_tim2;      /* previous tick's time-since-edge, for edge detection */
 	uint8_t have_prev_tim2;
+	uint8_t have_output;
+	int32_t last_output, transfer_offset;
+	uint32_t prev_hall_sequence;
 } rotor_angle_state_t;
 
 typedef struct {
@@ -83,7 +90,7 @@ typedef struct {
 	uint32_t tim2_recent;       /* Hall-timer ticks since the last edge */
 	uint32_t tics_filtered_8;   /* filtered sector period, shifted left by 3 (uint32_tics_filtered) */
 	bool want_untrusted;        /* speed hysteresis says the timing is no longer trustworthy */
-	bool stalled;               /* no edge for far longer than a sector: give up without waiting */
+	bool stalled;               /* real 4 kHz Hall age exceeded 4 measured periods; clear history */
 	/*
 	 * FW-131.1: the sign to use for the sector centre before this session has ever measured a
 	 * direction - a cold boot at standstill. The caller passes -MP.reverse, which is exactly what
@@ -91,6 +98,9 @@ typedef struct {
 	 * MEASURED direction latches and rules from then on.
 	 */
 	int32_t fallback_sign;
+	/* Explicit accepted Hall-edge sequence avoids mistaking 16-bit timer wrap for motion. */
+	uint32_t hall_sequence;
+	bool hall_sequence_valid;
 } rotor_angle_input_t;
 
 void rotor_angle_reset(rotor_angle_state_t *state);

@@ -44,6 +44,7 @@ src/pas_raw.c
 src/pas_trace.c
 src/power_curve.c
 src/quiet_zero.c
+src/stop_trace.c
 src/rotor_angle.c
 src/ride_control.c
 src/ride_episode.c

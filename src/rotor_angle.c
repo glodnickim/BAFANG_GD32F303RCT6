@@ -27,6 +27,10 @@ void rotor_angle_reset(rotor_angle_state_t *state)
 	state->last_direction = 0;
 	state->prev_tim2 = 0U;
 	state->have_prev_tim2 = 0U;
+	state->have_output = 0U;
+	state->last_output = 0;
+	state->transfer_offset = 0;
+	state->prev_hall_sequence = 0U;
 }
 
 int32_t rotor_angle_sector_offset(const rotor_angle_input_t *input)
@@ -81,6 +85,9 @@ int32_t rotor_angle_update(rotor_angle_state_t *state, const rotor_angle_input_t
 		return 0;
 	}
 
+	bool direction_changed = state->last_direction != 0 && input->direction != 0 &&
+		((input->direction > 0) != (state->last_direction > 0));
+	if (direction_changed) state->edges = 0U;
 	/* Latch the measured direction so a standstill keeps the sign it last actually saw. */
 	if (input->direction > 0) {
 		state->last_direction = 1;
@@ -93,7 +100,11 @@ int32_t rotor_angle_update(rotor_angle_state_t *state, const rotor_angle_input_t
 	 * counting DOWN is the edge - the same technique walk_assist_motor.c uses on the same signal.
 	 */
 	uint16_t tim2 = (uint16_t)((input->tim2_recent > 0xFFFFU) ? 0xFFFFU : input->tim2_recent);
-	bool edge = state->have_prev_tim2 != 0U && tim2 < state->prev_tim2;
+	bool edge = state->have_prev_tim2 != 0U &&
+		(input->hall_sequence_valid ? input->hall_sequence != state->prev_hall_sequence : tim2 < state->prev_tim2);
+	bool lost_timing = input->stalled || (state->have_prev_tim2 && input->hall_sequence_valid &&
+		!edge && tim2 < state->prev_tim2);
+	state->prev_hall_sequence = input->hall_sequence;
 	state->prev_tim2 = tim2;
 	state->have_prev_tim2 = 1U;
 	if (edge && state->edges < ROTOR_ANGLE_TRUST_EDGES) {
@@ -112,11 +123,14 @@ int32_t rotor_angle_update(rotor_angle_state_t *state, const rotor_angle_input_t
 	 *     standstill the only period available is a stale one from before the stop, and one
 	 *     uncertain sample is not a speed. This is the manufacturer's rule, not an invention.
 	 */
-	bool may_trust = !input->want_untrusted &&
+	uint8_t was_trusted = state->trusted;
+	/* A timeout clears history even if trust was already dropped by hysteresis. */
+	if (lost_timing) state->edges = 0U;
+	bool may_trust = !input->want_untrusted && !lost_timing &&
 		state->edges >= ROTOR_ANGLE_TRUST_EDGES;
 
 	if (state->trusted != (may_trust ? 1U : 0U)) {
-		if (!may_trust && (input->stalled || state->edges < ROTOR_ANGLE_TRUST_EDGES)) {
+		if (!may_trust && (lost_timing || state->edges < ROTOR_ANGLE_TRUST_EDGES)) {
 			/*
 			 * Losing trust because the rotor stopped or the timing became meaningless cannot
 			 * wait for a midpoint that no further edge will bring. Drop to the centre now, and
@@ -135,6 +149,21 @@ int32_t rotor_angle_update(rotor_angle_state_t *state, const rotor_angle_input_t
 		}
 	}
 
-	int32_t base = input->hall_angle + input->angle_correction;
-	return base + (state->trusted ? interp : centre);
+	/* Modular arithmetic is required at the signed q31 wrap. Preserve the previous
+	 * applied angle on a formula change, then remove the offset at a bounded rate.
+	 * Merely testing interp >= 30 degrees does NOT imply the formulas agree. */
+	uint32_t raw = (uint32_t)input->hall_angle + (uint32_t)input->angle_correction +
+		(uint32_t)(state->trusted ? interp : centre);
+	if (state->have_output && (was_trusted != state->trusted || direction_changed)) {
+		state->transfer_offset = (int32_t)((uint32_t)state->last_output - raw);
+	} else if (state->transfer_offset > ROTOR_ANGLE_TRANSFER_STEP) {
+		state->transfer_offset -= ROTOR_ANGLE_TRANSFER_STEP;
+	} else if (state->transfer_offset < -ROTOR_ANGLE_TRANSFER_STEP) {
+		state->transfer_offset += ROTOR_ANGLE_TRANSFER_STEP;
+	} else {
+		state->transfer_offset = 0;
+	}
+	state->last_output = (int32_t)(raw + (uint32_t)state->transfer_offset);
+	state->have_output = 1U;
+	return state->last_output;
 }

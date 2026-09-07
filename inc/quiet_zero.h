@@ -90,11 +90,10 @@ typedef enum {
 #define QZERO_HANDBACK_PCT 50
 
 /*
- * FW-136.2: how long the handback takes. The entry fade is 10 ms; this is deliberately longer,
- * because entry removes nothing (current is already zero at the reference) while the exit removes
- * a real braking torque. 50 ms is four times the entry fade and still far below what a leg can
- * feel, and there is plenty of room for it: after FW-136 the handback happens at half the release
- * speed, with the whole rest of the run-down still to come.
+ * Minimum fresh-speed handback duration: 800 ticks = 50 ms. Its integral slew is bounded by
+ * the entry/current integral divided by this duration. A moving target can extend settling;
+ * loss of Hall freshness releases the existing integral directly to normal PI, without waiting
+ * for this duration or inventing a new BEMF target from a decaying speed estimate.
  */
 #define QZERO_HANDBACK_FADE_TICKS 800U
 #define QZERO_HANDBACK_RECIP (1.0f / (float)QZERO_HANDBACK_FADE_TICKS)
@@ -107,6 +106,8 @@ typedef struct {
 	float    id_integral_entry;  /* PI_id.integral_part as it stood at the entry edge */
 	int32_t  erps_entry;         /* QZERO-3: rotor speed at the entry edge, for the handback seed */
 	int32_t  prev_iq_ref;    /* previous tick's final Iq reference, for the entry edge */
+	float handback_iq, handback_id; /* actual integral at handback, including interrupted BLEND */
+	float handback_step_q, handback_step_d;
 	/*
 	 * QZERO-2: previous tick's QUIET verdict, for the SECOND entry edge. v1 armed only on the
 	 * non-zero -> zero edge of the reference, so a release that happened while the current had
@@ -136,7 +137,8 @@ typedef struct {
  * iq_measured       measured Iq (MS.i_q), in PH_CURRENT_MAX counts
  * id_measured       measured Id (MS.i_d), same counts
  * abort_current     |Iq| or |Id| at or above this aborts the hold (QZERO_ABORT_CURRENT)
- * rotor_erps        measured rotor speed in erps (ui16_erps), the same fact FW-048 reads
+ * rotor_erps        speed from the latest real valid Hall interval, NOT liveness ui16_erps
+ * speed_fresh       that interval is still within its two-period confidence window
  * min_brake_erps    the hold is only allowed at or above this (RIDE_COAST_RELEASE_ERPS)
  * iq_integral       PI_iq.integral_part as it stands right now (captured at the entry edge)
  * id_integral       PI_id.integral_part as it stands right now
@@ -148,6 +150,7 @@ typedef struct {
 	int32_t id_measured;
 	int32_t abort_current;
 	int32_t rotor_erps;
+	bool speed_fresh;          /* real Hall interval still fresh, never the age-decayed estimate */
 	int32_t min_brake_erps;
 	float   iq_integral;
 	float   id_integral;

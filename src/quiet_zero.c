@@ -35,6 +35,8 @@ void quiet_zero_reset(quiet_zero_t *qz)
 	qz->id_integral_entry = 0.0f;
 	qz->erps_entry = 0;
 	qz->prev_iq_ref = 0;
+	qz->handback_iq = qz->handback_id = 0.0f;
+	qz->handback_step_q = qz->handback_step_d = 0.0f;
 	/*
 	 * QZERO-2: seeded to 1, not 0, and that is deliberate. This reset runs where the bridge is
 	 * being switched off in the same breath (cold PREPARE, dwell failsafe, hall calibration). If
@@ -109,7 +111,7 @@ void quiet_zero_tick(
 	 */
 	if (qz->state == (uint32_t)QZERO_INACTIVE) {
 		if ((qz->prev_iq_ref > 0 || policy_edge) && in->zero_policy_quiet &&
-			in->rotor_erps >= in->min_brake_erps) {
+			in->speed_fresh && in->rotor_erps >= in->min_brake_erps) {
 			qz->state = (uint32_t)QZERO_BLEND;
 			qz->blend_tick = 0U;
 			qz->iq_integral_entry = in->iq_integral;
@@ -126,6 +128,19 @@ void quiet_zero_tick(
 	}
 
 	qz->prev_iq_ref = 0;
+
+	/* Unknown speed is not a new BEMF measurement. Return the live integral to
+	 * ordinary zero-current PI; do not seed, reset or extrapolate it here. */
+	if (!in->speed_fresh) {
+		qz->state = (uint32_t)QZERO_INACTIVE;
+		qz->blend_tick = 0U;
+		qz->low_speed_exits++;
+		out->low_speed_release = true;
+		out->exited = true;
+		out->clear_aw_edge = true;
+		out->state = qz->state;
+		return;
+	}
 
 	/*
 	 * LOW-SPEED HANDBACK. The rotor has reached the zone where the commutation angle advances in
@@ -177,6 +192,14 @@ void quiet_zero_tick(
 	 * a genuine overcurrent can still cut it short.
 	 */
 	if (qz->state != (uint32_t)QZERO_HANDBACK && in->rotor_erps < handback_erps) {
+		qz->handback_iq = qz->state == (uint32_t)QZERO_HOLD ? 0.0f : in->iq_integral;
+		qz->handback_id = qz->state == (uint32_t)QZERO_HOLD ? 0.0f : in->id_integral;
+		float q = qz->iq_integral_entry < 0 ? -qz->iq_integral_entry : qz->iq_integral_entry;
+		float d = qz->id_integral_entry < 0 ? -qz->id_integral_entry : qz->id_integral_entry;
+		float start_q = in->iq_integral < 0 ? -in->iq_integral : in->iq_integral;
+		float start_d = in->id_integral < 0 ? -in->id_integral : in->id_integral;
+		qz->handback_step_q = (q > start_q ? q : start_q) * QZERO_HANDBACK_RECIP;
+		qz->handback_step_d = (d > start_d ? d : start_d) * QZERO_HANDBACK_RECIP;
 		qz->state = (uint32_t)QZERO_HANDBACK;
 		qz->blend_tick = 0U;
 		qz->low_speed_exits++;
@@ -232,8 +255,20 @@ void quiet_zero_tick(
 		}
 		qz->blend_tick++;
 		out->apply_integral = true;
-		out->id_integral = 0.0f;
-		if (qz->blend_tick >= QZERO_HANDBACK_FADE_TICKS) {
+		/* Rate-limit the integral itself, including a changing speed target. Starting
+		 * at zero here caused a step whenever handback interrupted the entry fade. */
+		float dq = target - qz->handback_iq;
+		float dd = -qz->handback_id;
+		if (dq > qz->handback_step_q) dq = qz->handback_step_q;
+		if (dq < -qz->handback_step_q) dq = -qz->handback_step_q;
+		if (dd > qz->handback_step_d) dd = qz->handback_step_d;
+		if (dd < -qz->handback_step_d) dd = -qz->handback_step_d;
+		qz->handback_iq += dq;
+		qz->handback_id += dd;
+		out->iq_integral = qz->handback_iq;
+		out->id_integral = qz->handback_id;
+		if (qz->blend_tick >= QZERO_HANDBACK_FADE_TICKS &&
+			qz->handback_iq == target && qz->handback_id == 0.0f) {
 			/* Fully handed back. freeze_aw is deliberately NOT set: the PI owns the axis now. */
 			qz->state = (uint32_t)QZERO_INACTIVE;
 			qz->blend_tick = 0U;
@@ -241,7 +276,6 @@ void quiet_zero_tick(
 			out->state = qz->state;
 			return;
 		}
-		out->iq_integral = target * ((float)qz->blend_tick * QZERO_HANDBACK_RECIP);
 		out->freeze_aw = true;
 		out->state = qz->state;
 		return;

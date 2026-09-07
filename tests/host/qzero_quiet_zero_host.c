@@ -159,6 +159,7 @@ static quiet_zero_input_t make_input(int32_t iq_ref, bool quiet, float iq_i, flo
 	in.id_measured = 0;
 	in.abort_current = MODEL_ABORT_CURRENT;
 	in.rotor_erps = MODEL_CRUISE_ERPS;
+	in.speed_fresh = true;
 	in.min_brake_erps = MODEL_MIN_BRAKE_ERPS;
 	in.iq_integral = iq_i;
 	in.id_integral = id_i;
@@ -988,8 +989,9 @@ static void production_wiring_checks(void)
 			"T14: main.c supplies the service subset from the calibration flag itself");
 		/* One threshold, two consumers: the ISR and FW-048 must read the same constant. */
 		CHECK(strstr(main_c, ".min_brake_erps = RIDE_COAST_RELEASE_ERPS,") != NULL &&
-			strstr(main_c, ".rotor_erps = (int32_t)ui16_erps,") != NULL,
-			"T14: the ISR gates the hold on FW-048's own threshold and its own rotor-speed fact");
+			strstr(main_c, ".rotor_erps = (int32_t)rotor_motion.edge_erps,") != NULL &&
+			strstr(main_c, ".speed_fresh = rotor_motion_speed_fresh(&rotor_motion, ui16_erps_counter),") != NULL,
+			"T14: QZERO uses a fresh real Hall interval, never the age-decayed liveness speed");
 		CHECK(count_all(ride_c, "#define RIDE_COAST_RELEASE_ERPS") == 0 &&
 			strstr(ride_c, "rider->motor_erps < RIDE_COAST_RELEASE_ERPS") != NULL,
 			"T14: ride_control.c no longer keeps a private copy of that threshold but still uses it");

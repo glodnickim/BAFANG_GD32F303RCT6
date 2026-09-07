@@ -60,6 +60,8 @@ OF SUCH DAMAGE.
 #include "current_feedback.h"    /* FW-127D: validity, last-valid and sample age       */
 #include "iq_chain.h"            /* FW-128A: named q-current demand stages             */
 #include "quiet_zero.h"          /* QZERO: controlled PI integral fade at Iq_ref == 0  */
+#include "stop_trace.h"          /* Passive, explicitly armed stop recorder */
+#include "rotor_motion.h"
 #include "rotor_angle.h"         /* FW-131: one canonical rotor angle, bumpless handover */
 #include "pas_sampler.h"         /* PRE-FW128: PAS sampled in the 4 kHz ISR, not main  */
 #include "pas_cadence.h"         /* PRE-FW128: cadence period, epoch and validity      */
@@ -352,6 +354,10 @@ volatile uint32_t foc_aw_sat_ticks = 0;
  * through a new field. See inc/quiet_zero.h.
  */
 static quiet_zero_t quiet_zero_state;
+#if STOP_TRACE_ENABLE
+static uint32_t stop_trace_foc_tick;
+static uint16_t stop_trace_qzero_events;
+#endif
 
 /*
  * FOC-AW1: derive this controller's Q15 tracking gain Kaw = 1/gain_p, once, at boot.
@@ -690,6 +696,8 @@ uint16_t pwm_applied[3];  /* FW-127A: APPLIED geometry - what the timer actually
 //i.e. a safety path.
 volatile uint16_t ui16_erps=0;
 volatile uint16_t ui16_erps_counter=0;
+static volatile uint32_t rotor_hall_sequence;
+static volatile rotor_motion_t rotor_motion;
 int16_t i16_ph1_current=0;
 int16_t i16_ph2_current=0;
 int16_t i16_ph3_current=0;
@@ -1277,6 +1285,11 @@ int main(void)
     	 */
     	can_multiframe_step(control_time_ticks);
     	can_tx_queue_service(control_time_ticks);
+#if STOP_TRACE_ENABLE
+        stop_trace_dump_step(control_time_ticks,
+            MS.i_q_setpoint==0 && ui16_erps_counter>=2000U &&
+            MS.Speedx100==0 && !can_multiframe_busy());
+#endif
     	/*
     	 * FW-110 v4: apply side effects whose precondition is "this exact multiframe reply was
     	 * CONFIRMED delivered end to end" - 0x6029's diag_peak_reset is the one. The transfer id
@@ -2207,6 +2220,11 @@ void nvic_config(void)
 
     //timer2 interrupt for Halls
     nvic_priority_group_set(NVIC_PRIGROUP_PRE1_SUB3);
+#if STOP_TRACE_ENABLE
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0U;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+#endif
     nvic_irq_enable(TIMER1_IRQn, 0, 0);
     nvic_irq_enable(TIMER2_IRQn, 0, 0);
     nvic_irq_enable(ADC0_1_IRQn, 0, 0);
@@ -2249,6 +2267,14 @@ void TIMER1_IRQHandler(void) // regular ADC processing and common slow timing ta
         /* clear channel 0 interrupt bit */
         timer_interrupt_flag_clear(TIMER1,TIMER_INT_FLAG_UP);
 
+        /* Real Hall age and speed decay must progress even if foreground is late.
+         * TIMER1 and TIMER2 share a preemption priority, so no partial IIR update races. */
+        ui16_erps_counter = rotor_motion_age_next(ui16_erps_counter);
+        uint16_t limited_erps = rotor_motion_speed_ceiling(ui16_erps, ui16_erps_counter);
+        if (limited_erps != ui16_erps) {
+            ui16_erps = limited_erps;
+            ui32_erps_cumulated = (uint32_t)limited_erps << 5;
+        }
         control_time_ticks++; //FW-103/104: the real 4 kHz timebase; never gated on the main loop
         reg_ADC_flag=1;
         /*
@@ -2308,6 +2334,15 @@ void TIMER2_IRQHandler(void)
     if(SET == timer_interrupt_flag_get(TIMER2,TIMER_INT_FLAG_CH0)){
         /* clear channel 0 interrupt bit */
         timer_interrupt_flag_clear(TIMER2,TIMER_INT_FLAG_CH0);
+        /* Reject unchanged/illegal Hall captures before resetting motion age or dividing. */
+        uint8_t new_hall = (GPIO_ISTAT(GPIOC) >> 6) & 7U;
+        uint8_t changed = new_hall ^ ui8_hall_state;
+        if (new_hall == 0U || new_hall == 7U || changed == 0U) return;
+        if (ui8_hall_state >= 1U && ui8_hall_state <= 6U && (changed & (changed - 1U)) != 0U) return;
+        if (timer_channel_capture_value_register_read(TIMER2,TIMER_CH_0) == 0U) return;
+        rotor_motion_note_edge(&rotor_motion, ui16_erps_counter,
+            timer_channel_capture_value_register_read(TIMER2,TIMER_CH_0));
+        rotor_hall_sequence++;
 
        // if(TIM2->CCR1>20)ui16_timertics = TIM2->CCR1; //debounce hall signals
             /* read channel 0 capture value */
@@ -3031,46 +3066,6 @@ void reg_ADC_processing(void)
     //report's list of remaining main-loop-dependent counters.
     //FW-103/104: control_time_ticks replaces Speed_counter - incremented in TIMER1_IRQHandler itself.
     if(uint16_half_rotation_counter<64000)uint16_half_rotation_counter++;
-    if(ui16_erps_counter<64000)ui16_erps_counter++;
-    /*
-     * FW-137: the edge-age ceiling. THE fix for "the speed reading freezes above every threshold
-     * that was supposed to catch a stop".
-     *
-     * Three Hall sensors 120 degrees apart give six states per electrical revolution, so every
-     * edge is exactly 60 degrees. That makes the time SINCE the last edge a measurement in its
-     * own right: if 60 degrees have not been completed in the elapsed time, the rotor cannot be
-     * turning faster than one edge per that time. This is not a filter and not an estimate - it
-     * is an upper bound that follows from the edge NOT having arrived.
-     *
-     * Why it was needed: ui16_erps only ever changes inside the Hall ISR, so a stopping rotor
-     * stops updating it and the last value survives forever. Measured on the bike (FW-136.0,
-     * 2026-09-05): the lowest value ever reported during a coast was 24, against thresholds of
-     * 10 (FW-048 coast release, QZERO handback), 3 (FW-041 gear preload) and 0 (smooth start).
-     * All four were unreachable. They were not broken - they were never called.
-     *
-     * Two properties make this safe to put under everything at once:
-     *   - it can only ever LOWER the reading, and only when an edge is overdue;
-     *   - with the 2x guard band it cannot bind at a steady speed, where the next edge always
-     *     arrives within one expected interval. Without that band it would sit exactly on the
-     *     boundary and nibble at every reading through ordinary jitter.
-     *
-     * The accumulator is pulled down with the output on purpose. Clamping only the reported value
-     * would let the stale 32-edge average put it straight back on the next edge, and threshold
-     * tests would then chatter instead of latching.
-     */
-    if(ui16_erps > 0U){
-        uint32_t edges_per_s = (uint32_t)ui16_erps * 6U;
-        uint32_t expected_ticks = (uint32_t)CONTROL_TIMEBASE_HZ / edges_per_s;
-        if((uint32_t)ui16_erps_counter > (2U * expected_ticks) + 1U){
-            uint32_t ceiling = (uint32_t)CONTROL_TIMEBASE_HZ /
-                ((uint32_t)ui16_erps_counter * 6U);
-            if(ceiling < (uint32_t)ui16_erps){
-                ui16_erps = (uint16_t)ceiling;
-                ui32_erps_cumulated = (uint32_t)ui16_erps << 5;
-            }
-        }
-    }
-
     //--- Walk Assist physical button (PA4), debounce z histereza (press + release) ---
     uint8_t wa_btn_in_range=(adc_value[5]>=WA_BUTTON_THRESHOLD_LOW && adc_value[5]<=WA_BUTTON_THRESHOLD_HIGH);
     if(!ui8_walk_btn_state){
@@ -4012,12 +4007,18 @@ void runPIcontrol(void){
 			 * standstill. Same fact and same threshold FW-048 itself reads, so the two cannot
 			 * disagree - see RIDE_COAST_RELEASE_ERPS in inc/config.h.
 			 */
-			.rotor_erps = (int32_t)ui16_erps,
+			.rotor_erps = (int32_t)rotor_motion.edge_erps,
+			.speed_fresh = rotor_motion_speed_fresh(&rotor_motion, ui16_erps_counter),
 			.min_brake_erps = RIDE_COAST_RELEASE_ERPS,
 			.iq_integral = PI_iq.integral_part,
 			.id_integral = PI_id.integral_part
 		};
 		quiet_zero_tick(&quiet_zero_state, &qz_in, &qz);
+		#if STOP_TRACE_ENABLE
+		stop_trace_qzero_events=(qz.entered?ST_ENTRY:0U)|
+			(qz.low_speed_release?ST_HANDBACK:0U)|(qz.exited?ST_EXIT:0U)|
+			(qz.aborted?ST_ABORT:0U);
+		#endif
 	}
 	if(qz.apply_integral){
 		PI_iq.integral_part = qz.iq_integral;
@@ -4260,6 +4261,13 @@ void autodetect(void) {
 
 void ADC0_1_IRQHandler(void)
 {
+#if STOP_TRACE_ENABLE
+    const uint32_t stop_trace_irq_start = DWT->CYCCNT;
+    const bool stop_trace_was_active = stop_trace_fast_needed();
+    ++stop_trace_foc_tick; /* independent of sample-context resets and bridge state */
+    stop_trace_qzero_events=0U;
+    bool stop_trace_foc_ran=false;
+#endif
 	/* Read before clearing ADC1 EOIC. This is the only proof that this ISR corresponds to a newly
 	 * completed inserted group; it is deliberately separate from PWM-window validity. */
 	const uint8_t foc_adc1_eoic_at_entry = (ADC_STAT(ADC1) & ADC_STAT_EOIC) ? 1U : 0U;
@@ -4352,7 +4360,6 @@ void ADC0_1_IRQHandler(void)
     	 * 36 deg mid-sector) and why any current flowing at that instant stepped with it.
     	 */
     	{
-    		uint32_t ra_period = uint32_tics_filtered >> 3;
     		rotor_angle_input_t ra_in = {
     			.hall_angle = q31_rotorposition_hall,
     			.angle_correction = MP.angle_correction,
@@ -4360,10 +4367,9 @@ void ADC0_1_IRQHandler(void)
     			.tim2_recent = ui16_tim2_recent,
     			.tics_filtered_8 = uint32_tics_filtered,
     			.want_untrusted = ui8_6step_flag != 0,
+                .hall_sequence = rotor_hall_sequence, .hall_sequence_valid = true,
     			/* No edge for several sector periods: the rotor has stopped, none is coming. */
-    			.stalled = (ra_period > 0U) &&
-    				((uint32_t)ui16_tim2_recent >
-    					ra_period * CANONICAL_ANGLE_STALL_PERIODS),
+			.stalled = rotor_motion_angle_stale(&rotor_motion, ui16_erps_counter),
     			/*
     			 * FW-131.1: the sign the legacy six-step branch used, for a cold boot that has
     			 * not measured a direction yet. The first MEASURED direction latches inside the
@@ -4429,6 +4435,9 @@ void ADC0_1_IRQHandler(void)
 							q31_rotorposition_absolute,
 							(((int16_t) MP.reverse * i8_reverse_flag)
 									* MS.i_q_setpoint), &MS, &MP);
+#if STOP_TRACE_ENABLE
+                stop_trace_foc_ran=true;
+#endif
 			} else {
 				/*
 				 * Nothing trustworthy has been measured in this run yet AND this sample cannot
@@ -4486,6 +4495,36 @@ void ADC0_1_IRQHandler(void)
     	// touch each of them individually.
 		foc_current_feedback_invalidate();
     }
+#if STOP_TRACE_ENABLE
+    if(stop_trace_fast_needed()){
+        /* Observe AFTER FOC and PWM, including when the bridge is OFF. VALID
+         * means a fresh, geometrically valid sample was used THIS tick, not
+         * merely that a last-valid substitute allowed FOC to execute. */
+        const stop_trace_sample_t st={
+            .tick=stop_trace_foc_tick,
+            .iq_ref=(int16_t)(MP.reverse*i8_reverse_flag*MS.i_q_setpoint),
+            .iq=(int16_t)MS.i_q, .id=(int16_t)MS.i_d,
+            .uq=(int16_t)MS.u_q, .ud=(int16_t)MS.u_d,
+            .piq=(int16_t)PI_iq.integral_part, .pid=(int16_t)PI_id.integral_part,
+            .theta=(uint16_t)((uint32_t)q31_rotorposition_absolute>>16),
+            .hall_age=ui16_erps_counter, .hall_timer=ui16_tim2_recent,
+            .erps=ui16_erps, .vbus_10mv=(uint16_t)(MS.Voltage/10U),
+            .flags=stop_trace_qzero_events |
+                ((TIMER_CCHP(TIMER0)&TIMER_CCHP_POEN)?ST_MOE:0U) |
+                (ui_8_PWM_ON_Flag?ST_PWM:0U) |
+                (fast_iq_slew_current_zero_policy()==FIS_ZERO_POLICY_QUIET?ST_QUIET:0U) |
+                (foc_adc1_eoic_at_entry?ST_FRESH:0U) |
+                (stop_trace_foc_ran && foc_adc1_eoic_at_entry && sample_ctx->state!=CURRENT_SAMPLE_INVALID?ST_VALID:0U) |
+                ((CANONICAL_ANGLE_ENABLE && rotor_angle_state.trusted)?ST_TRUSTED:0U) |
+                (i8_recent_rotor_direction<0?ST_REVERSE:0U) |
+                (foc_aw_saturated?ST_SATURATED:0U) |
+                ((!stop_trace_foc_ran || !foc_adc1_eoic_at_entry || sample_ctx->state==CURRENT_SAMPLE_INVALID)?ST_BAD_SAMPLE:0U) |
+                (stop_trace_foc_ran?ST_FOC_RAN:0U),
+            .hall=ui8_hall_state, .qzero=(uint8_t)quiet_zero_state.state
+        };
+        stop_trace_tick(&st);
+    }
+#endif
 	/* QS-1: single-writer, read-only snapshot.  This is deliberately after the actual
 	 * PWM writes above, never changes their inputs, and never sends CAN from the ISR. */
 	{
@@ -4506,6 +4545,9 @@ void ADC0_1_IRQHandler(void)
 		};
 		qs_transition_diag_fast_tick(&qs);
 	}
+#if STOP_TRACE_ENABLE
+    if (stop_trace_was_active) stop_trace_timing(DWT->CYCCNT - stop_trace_irq_start, SystemCoreClock);
+#endif
     __enable_irq();
 
 }

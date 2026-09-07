@@ -53,6 +53,13 @@ $walkAssistMotorCPathForward = (Join-Path $root 'src\walk_assist_motor.c') -repl
 
 # Every harness and the module(s) it links. Add new ones here.
 $suites = @(
+    @{ Name = 'STOP-CLICK Hall confidence and continuous stop/restart (real modules)'
+       Harness = Join-Path $PSScriptRoot 'stop_click_regression_host.c'
+       Modules = @((Join-Path $root 'src\rotor_angle.c'), (Join-Path $root 'src\quiet_zero.c')) },
+    @{ Name = 'STOP-TRACE passive stop capture and confirmed indexed replay'
+       Harness = Join-Path $PSScriptRoot 'stop_trace_host.c'
+       Modules = @(Join-Path $root 'src\stop_trace.c')
+       Defines = @('-DCAN_DIAGNOSTICS_ENABLE=0') },
     @{ Name = 'FW-100 Extended Boost'
        Harness = Join-Path $PSScriptRoot 'fw100_extended_boost_host.c'
        Modules = @(Join-Path $root 'src\assist_extended_boost.c') },

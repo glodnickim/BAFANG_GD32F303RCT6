@@ -25,6 +25,7 @@
 #include "fw112_ab.h"          /* FW112_AB_EFID_*         (FW-112 A/B) */
 #include "fw117_trace.h"       /* FW117_TRACE_EFID_*      (FW-117, TEMPORARY) */
 #include "rolling_no_assist_diag.h" /* ROLLING_NO_ASSIST_EFID_* (rolling no-assist diagnostic) */
+#include "stop_trace.h"           /* NORMAL on-demand stop capture, 10300..10307 */
 
 /* QS-1 explicit FOC-rate transition dump: header plus six raw sample fragments. */
 #define DIAG_EFID_QS_LO           0x00010250U
@@ -55,6 +56,15 @@
 /* --- the check ----------------------------------------------------------------------------- */
 
 #define DIAG_EFID_DISJOINT(a_lo, a_hi, b_lo, b_hi) (((a_hi) < (b_lo)) || ((b_hi) < (a_lo)))
+
+#define ST_DISJOINT(lo,hi) DIAG_EFID_DISJOINT(STOP_TRACE_DATA_ID, STOP_TRACE_DATA_ID+7U, lo, hi)
+_Static_assert(ST_DISJOINT(DIAG_EFID_QS_LO,DIAG_EFID_QS_HI) &&
+    ST_DISJOINT(DIAG_EFID_RNA_LO,DIAG_EFID_RNA_HI) &&
+    ST_DISJOINT(DIAG_EFID_REARM_LO,DIAG_EFID_REARM_HI) &&
+    ST_DISJOINT(DIAG_EFID_FW112_DIAG_LO,DIAG_EFID_FW112_DIAG_HI) &&
+    ST_DISJOINT(DIAG_EFID_FW112_AB_LO,DIAG_EFID_FW112_AB_HI) &&
+    ST_DISJOINT(DIAG_EFID_FW117_LO,DIAG_EFID_FW117_HI), "STOP-TRACE CAN ID collision");
+#undef ST_DISJOINT
 
 _Static_assert(DIAG_EFID_DISJOINT(DIAG_EFID_RNA_LO, DIAG_EFID_RNA_HI,
                                   DIAG_EFID_REARM_LO, DIAG_EFID_REARM_HI),

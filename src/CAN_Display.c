@@ -37,6 +37,7 @@
 #include "can_tx_queue.h"
 #include "can_multiframe.h"
 #include "can_reply_effects.h"
+#include "stop_trace.h"
 #if CAN_DIAGNOSTICS_ENABLE
 #include "rolling_no_assist_dump.h"
 #include "qs_transition_diag.h"
@@ -360,7 +361,16 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 		switch (Ext_ID_Rx.operation){
 			case WRITE_CMD:
 
-				if (receive_message.rx_dlen==1 && receive_message.rx_data[0]>8 && Ext_ID_Rx.source==5){
+				if(Ext_ID_Rx.command==0x6033 || Ext_ID_Rx.command==0x6034){
+					/* Explicit ARM / replay. Read requests never change the capture. */
+					uint8_t accepted=0U;
+					if(Ext_ID_Rx.source==5U && receive_message.rx_dlen==0U){
+						accepted=(Ext_ID_Rx.command==0x6033 ? stop_trace_arm() :
+							stop_trace_dump_request()) ? 1U : 0U;
+					}
+					sendWriteResult(Ext_ID_Rx.command,accepted);
+				}
+				else if (receive_message.rx_dlen==1 && receive_message.rx_data[0]>8 && Ext_ID_Rx.source==5){
 					Rx_MF_active=Ext_ID_Rx.command;
 					rx_data_length=receive_message.rx_data[0];
 				}
@@ -478,6 +488,7 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 				//generic ACK must not fire for it either.
 				if(!(Ext_ID_Rx.command>=0x6300 && Ext_ID_Rx.command<=0x6304)
 				   && Ext_ID_Rx.command!=0x3203 && Ext_ID_Rx.command!=0x6200
+				   && Ext_ID_Rx.command!=0x6033 && Ext_ID_Rx.command!=0x6034
 #if CAN_DIAGNOSTICS_ENABLE
 				   && Ext_ID_Rx.command!=0x602C
 				   && Ext_ID_Rx.command!=0x6030
@@ -489,7 +500,13 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 				/* FW-136.0: answered in every build, so the image that clicks is the image that
 				 * gets measured. Tool only (source 5) and zero-length, like every other
 				 * side-effect-free status read here. */
-				if(Ext_ID_Rx.command==0x6032 && Ext_ID_Rx.source==5U && receive_message.rx_dlen==0U){
+				if(Ext_ID_Rx.command==0x6033){
+					if(Ext_ID_Rx.source==5U && receive_message.rx_dlen==0U){
+						uint8_t data[8]; stop_trace_status(data);
+						can_tx_queue_enqueue(0x022A6033U,8U,data);
+					}
+				}
+				else if(Ext_ID_Rx.command==0x6032 && Ext_ID_Rx.source==5U && receive_message.rx_dlen==0U){
 					send_click_zone_status();
 				}
 #if CAN_DIAGNOSTICS_ENABLE

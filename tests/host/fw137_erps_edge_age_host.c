@@ -45,6 +45,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "rotor_motion.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -165,18 +166,9 @@ static void model_edge(erps_model_t *m, uint32_t sample_erps)
 /* One 4 kHz control tick with no edge. */
 static void model_tick(erps_model_t *m)
 {
-	if (m->age_ticks < 64000U) m->age_ticks++;
-	if (m->erps > 0U) {
-		uint32_t edges_per_s = (uint32_t)m->erps * 6U;
-		uint32_t expected_ticks = CONTROL_TIMEBASE_HZ / edges_per_s;
-		if ((uint32_t)m->age_ticks > (2U * expected_ticks) + 1U) {
-			uint32_t ceiling = CONTROL_TIMEBASE_HZ / ((uint32_t)m->age_ticks * 6U);
-			if (ceiling < (uint32_t)m->erps) {
-				m->erps = (uint16_t)ceiling;
-				m->cumulated = (uint32_t)m->erps << 5;
-			}
-		}
-	}
+	m->age_ticks = rotor_motion_age_next(m->age_ticks);
+	uint16_t limited = rotor_motion_speed_ceiling(m->erps, m->age_ticks);
+	if (limited != m->erps) { m->erps=limited; m->cumulated=(uint32_t)limited<<5; }
 }
 
 /* Settle the model at a constant speed. */
@@ -199,14 +191,14 @@ int main(void)
 
 	/* ==== T1: the bound can only ever lower the estimate ==== */
 	{
-		CHECK(strstr(mainc, "if(ceiling < (uint32_t)ui16_erps){") != NULL,
+		CHECK(strstr(mainc, "rotor_motion_speed_ceiling(ui16_erps, ui16_erps_counter)") != NULL,
 			"T1: the ceiling is applied only when it is BELOW the current estimate - a bound that "
 			"could raise the reading would be a second source of speed, not a bound on the first");
 	}
 
 	/* ==== T2: silent at steady speed, across the whole usable range ==== */
 	{
-		CHECK(strstr(mainc, "(2U * expected_ticks) + 1U") != NULL,
+		CHECK(rotor_motion_speed_ceiling(41,33)==41 && rotor_motion_speed_ceiling(41,34)<41,
 			"T2: the 2x guard band is present - without it the bound sits exactly on the steady "
 			"state boundary and nibbles at every reading through ordinary jitter");
 
@@ -302,14 +294,18 @@ int main(void)
 
 	/* ==== T7: the fix must live where it still runs when nothing happens ==== */
 	{
-		const char *ceiling = strstr(mainc, "uint32_t expected_ticks = (uint32_t)CONTROL_TIMEBASE_HZ");
-		const char *counter = strstr(mainc, "if(ui16_erps_counter<64000)ui16_erps_counter++;");
+		const char *ceiling = strstr(mainc, "rotor_motion_speed_ceiling(ui16_erps, ui16_erps_counter)");
+		const char *counter = strstr(mainc, "ui16_erps_counter = rotor_motion_age_next(ui16_erps_counter)");
+		const char *timer1 = strstr(mainc, "void TIMER1_IRQHandler(void)");
+		const char *timer2 = strstr(mainc, "void TIMER2_IRQHandler(void)");
 		CHECK(ceiling != NULL, "T7: the ceiling exists");
 		CHECK(counter != NULL, "T7: the periodic edge-age counter exists");
 		CHECK(ceiling != NULL && counter != NULL && counter < ceiling,
 			"T7: the ceiling sits in the periodic path right after the edge-age counter, NOT in "
 			"the Hall ISR - an interrupt that is not firing cannot correct a value that is wrong "
 			"BECAUSE it is not firing");
+		CHECK(timer1 && timer2 && counter && ceiling && timer1<counter && ceiling<timer2,
+			"T7: production age and ceiling are in real TIMER1 ISR, not delayed foreground");
 	}
 
 	free(mainc); free(wac);

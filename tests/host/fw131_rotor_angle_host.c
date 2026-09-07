@@ -266,8 +266,15 @@ int main(void)
 		int32_t theta = rotor_angle_update(&st, &stalled);
 		CHECK(st.trusted == 0U,
 			"T6: a stall gives up at once - no edge is coming to reach the midpoint");
+		int32_t before = theta;
+		for (int i = 0; i < 400; ++i) {
+			theta = rotor_angle_update(&st, &stalled);
+			CHECK(abs32((int32_t)((uint32_t)theta - (uint32_t)before)) <= ROTOR_ANGLE_TRANSFER_STEP,
+				"T6: fallback is rate limited even when no midpoint is coming");
+			before = theta;
+		}
 		CHECK(theta == HALL_ANGLE + ANGLE_CORRECTION + ROTOR_ANGLE_DEG_30,
-			"T6: and it falls back to the sector centre, the manufacturer's safe answer");
+			"T6: fallback settles at the sector centre without an instantaneous step");
 		CHECK(st.edges == 0U,
 			"T6: the edge count is cleared, so the next spin-up has to earn trust again");
 	}

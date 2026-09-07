@@ -467,17 +467,21 @@ void processCAN_Rx(MotorParams_t* MP, MotorState_t* MS){
 				}
 				else if(Ext_ID_Rx.command==0x6200 && Ext_ID_Rx.source==5){ //Hall/position sensor calibration (Canable/BESST only)
 					/*
-					 * FW-110 v4: Hall/position calibration is DISABLED in both firmware variants.
-					 * 0x6200 must not be able to reach autodetect() from CAN - autodetect() drives
-					 * the motor open-loop for >5 s, and the only entry point that ever existed
-					 * (the FW-110 v3 supervisor, src/hall_calibration.c) is gone. A properly
-					 * directed WRITE 0x6200 from Canable/BESST (source=5) gets exactly ONE reply:
-					 * ERROR_ACK (operation 3, "function unavailable"). There is NEVER a NORMAL_ACK
-					 * here, and no code path in this file - or in src/main.c - can call autodetect().
-					 * Re-enabling remote calibration is a separate future card with its own safety
-					 * design and bench test.
+					 * FW-110 v5: a properly directed WRITE 0x6200 from Canable/BESST (source=5) is
+					 * offered to hall_calibration_request() (src/main.c), which accepts it ONLY if
+					 * the standstill gate has held continuously for a full second, and then merely
+					 * arms it - main()'s while(1) runs the procedure, never this parser.
+					 *
+					 * The reply is therefore meaningful again instead of always refusing:
+					 *   NORMAL_ACK (2) - accepted, the motor is about to turn for >5 s;
+					 *   ERROR_ACK  (3) - refused, the bike was not confirmed standing still.
+					 *
+					 * FW-110 v4 answered ERROR_ACK unconditionally because the supervisor that
+					 * mediated this was deleted with it, which left every controller stuck on the
+					 * compiled-in HALL_DEF_* table permanently. See inc/main.h for the honest
+					 * limitation that remains: the check is point-in-time, not continuous.
 					 */
-					sendWriteResult(0x6200, 0);
+					sendWriteResult(0x6200, hall_calibration_request() ? 1U : 0U);
 				}
 
 				else sendCAN_Tx(MP,MS);

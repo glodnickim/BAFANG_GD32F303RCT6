@@ -75,10 +75,19 @@ void runPIcontrol(void);
 void write_virtual_eeprom(void);
 void read_virtual_eeprom(void);
 /*
- * FW-110 v4: autodetect() drives the motor open-loop for >5 s. It is UNREACHABLE from any
- * CAN command: the FW-110 v3 supervisor that used to mediate 0x6200 requests is removed, and
- * 0x6200 itself answers with a single ERROR_ACK in both firmware variants (see
- * src/CAN_Display.c). autodetect()'s body is deliberately untouched by this card.
+ * FW-110 v5: autodetect() drives the motor open-loop for >5 s. It is reachable again from
+ * CAN command 0x6200, but ONLY through hall_calibration_request() below, which refuses unless
+ * the standstill gate has held continuously for AUTODETECT_STANDSTILL_MS. The request is not
+ * executed inside the CAN parser: it sets a flag that main()'s while(1) services, so the CAN
+ * receive path never blocks for the length of the procedure. autodetect()'s body remains
+ * deliberately untouched, including its own third standstill check.
+ *
+ * Why this was re-enabled: FW-110 v4 removed the trigger and the FW-110 v3 supervisor
+ * (src/hall_calibration.c) together, which left every controller running the compiled-in
+ * HALL_DEF_* table for good. Measured on a bike, the six stored angles were bit-identical to
+ * those defaults, and the resulting field orientation drove Iq_actual opposite to Iq_ref in
+ * about two thirds of moving samples while the battery still supplied current. A calibration
+ * that cannot be run is not a safety feature.
  *
  * HONEST LIMITATION (not mitigated by this card): once this function starts, IT is the main
  * loop for the whole of its own >5 s run - nothing else in main()'s while(1) executes until it
@@ -90,6 +99,12 @@ void read_virtual_eeprom(void);
  * motor-control work outside this card's CAN-queueing scope, not something a comment can supply.
  */
 void autodetect(void);
+/*
+ * FW-110 v5: the ONE entry point for a CAN-originated calibration request. Returns true when
+ * the standstill gate accepted it (the caller answers NORMAL_ACK), false otherwise (ERROR_ACK).
+ * Accepting only arms the request; main()'s while(1) runs it.
+ */
+bool hall_calibration_request(void);
 extern uint16_t slow_loop_counter;
 /* FW-127A: the REQUESTED SVPWM geometry, signed. svpwm()'s arithmetic can legitimately go
  * negative and can exceed ARR (see inc/pwm_geometry.h for the proof); storing it unsigned made

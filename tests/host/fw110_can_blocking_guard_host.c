@@ -29,21 +29,31 @@
  *      genuinely never happens while allow_new_tx is false, across many ticks and pacing
  *      intervals, and that the abort-on-ride-resume path is never gated by it. This check is
  *      the cheap, fast structural half of that guarantee, not the whole of it.
- *   5. FW-110 v4: src/CAN_Display.c contains ZERO active `autodetect();` calls AND ZERO active
- *      `hall_calibration_request(` calls. The v3 supervisor (src/hall_calibration.c) is REMOVED;
- *      Hall/position calibration is DISABLED in both firmware variants. 0x6200's WRITE handler
- *      (operation and source already checked there) answers with EXACTLY ONE ERROR_ACK
- *      (sendWriteResult(0x6200, 0) - operation 3) and nothing else: no NORMAL_ACK, no code path
- *      to autodetect(). A READ 0x6200 does nothing at all - there is deliberately NO `case
- *      0x6200` anywhere in sendCAN_Tx(). This card is what makes "autodetect() is unreachable
- *      from CAN" true structurally.
+ *   5. FW-110 v5: src/CAN_Display.c still contains ZERO active `autodetect();` calls - the CAN
+ *      parser runs at any time, including while riding, and must never itself run the >5 s
+ *      open-loop procedure. What changed from v4 is the ROUTE, not that protection: 0x6200's
+ *      WRITE handler now goes through EXACTLY ONE `hall_calibration_request(` call, whose own
+ *      body refuses unless the standstill gate has held for a full second, and which only ARMS
+ *      the request for main()'s loop to run. The reply is that function's result, so a refusal
+ *      is still ERROR_ACK; an UNCONDITIONAL NORMAL_ACK for 0x6200 is forbidden outright. A READ
+ *      0x6200 still does nothing - there is deliberately NO `case 0x6200` in sendCAN_Tx().
+ *
+ *      Why v4's "zero calls" rule was replaced rather than kept: it made the calibration
+ *      permanently unreachable, so every controller stayed on the compiled-in HALL_DEF_* table.
+ *      Measured on a bike, all six stored angles were bit-identical to those defaults and the
+ *      resulting orientation drove Iq_actual opposite to Iq_ref in about two thirds of moving
+ *      samples. This guard now pins the SAFE route instead of forbidding every route.
  *   6. src/CAN_Display.c's sendCAN_3100() (the 0x81F83100 torque-sensor emulation stream)
  *      contains NO call to can_tx_queue_enqueue( anywhere in its body - it must never compete
  *      with critical HMI/ACK/multiframe frames for can_tx_queue's 16 reserved slots. Its one
  *      can_message_transmit( call - confirmed to be the ONLY one left in this file, everything
  *      else having moved to can_tx_queue in this same card - is its own separate, best-effort,
  *      single-attempt path.
- *   7. FW-110 v4: src/main.c contains ZERO active `autodetect();` CALLS, and wires the REAL
+ *   7. FW-110 v5: src/main.c contains EXACTLY ONE active `autodetect();` call and it falls
+ *      strictly inside hall_calibration_service() - the deferred, gated runner. Zero would mean
+ *      the trigger was lost again; a call anywhere else would put the >5 s blocking procedure
+ *      back on a riding path, which is the regression this whole file exists to prevent. Also
+ *      wires the REAL
  *      completed-reply side-effect module instead of the removed calibration supervisor:
  *      can_reply_effects_init_wrapper() is called EXACTLY once at startup, and the (exactly one)
  *      `diag_peak_reset = 1;` statement sits inside main.c's own `if (fx ==
@@ -193,17 +203,22 @@ int main(void)
 					"processCAN_Rx() runs at any time, including while riding, and must never "
 					"run the >5 s open-loop procedure");
 				int calib_request_calls = count_active(clean, NULL, "hall_calibration_request(", NULL);
-				CHECK(calib_request_calls == 0,
-					"GUARD: src/CAN_Display.c contains ZERO active hall_calibration_request( "
-					"calls - the FW-110 v3 supervisor is REMOVED, calibration is disabled, and "
-					"0x6200 must answer with the single ERROR_ACK checked below, nothing more");
+				CHECK(calib_request_calls == 1,
+					"GUARD: src/CAN_Display.c routes WRITE 0x6200 through EXACTLY ONE "
+					"hall_calibration_request( call - that function owns the standstill gate, so "
+					"one call is the only way in and a second would be a second, ungated route");
 
-				/* --- 0x6200: exactly one ERROR_ACK, no NORMAL_ACK, no READ case ------------- */
-				int err_ack = count_active(clean, NULL, "sendWriteResult(0x6200, 0);", NULL);
-				CHECK(err_ack == 1,
-					"GUARD: src/CAN_Display.c sends EXACTLY ONE `sendWriteResult(0x6200, 0);` "
-					"(operation 3 = ERROR_ACK) for WRITE 0x6200 - one reply, never a NORMAL_ACK, "
-					"never a second reply");
+				/* --- 0x6200: the reply IS the gate's verdict, never an unconditional yes ---- */
+				int gated_ack = count_active(clean, NULL,
+					"sendWriteResult(0x6200, hall_calibration_request() ? 1U : 0U);", NULL);
+				CHECK(gated_ack == 1,
+					"GUARD: src/CAN_Display.c answers WRITE 0x6200 with EXACTLY ONE reply whose "
+					"value is the gate's own verdict - NORMAL_ACK only when the request was "
+					"accepted, ERROR_ACK when the bike was not confirmed standing still");
+				int uncond_ack = count_active(clean, NULL, "sendWriteResult(0x6200, 1", NULL);
+				CHECK(uncond_ack == 0,
+					"GUARD: src/CAN_Display.c NEVER sends an unconditional NORMAL_ACK for 0x6200 - "
+					"a literal 1 here would report success without the motor ever being gated");
 				int read_case = count_active(clean, NULL, "case 0x6200:", NULL);
 				CHECK(read_case == 0,
 					"GUARD: src/CAN_Display.c contains NO `case 0x6200:` - a READ 0x6200 must do "
@@ -353,11 +368,25 @@ int main(void)
 						"stay in sync instead of the diagnostic stream, which is backwards");
 				}
 
-				/* --- FW-110 v4: main.c never CALLS autodetect() itself ---------------------- */
+				/* --- FW-110 v5: exactly one autodetect() call, inside the gated runner ------ */
 				int autodetect_calls_main = count_active(clean, NULL, "autodetect();", NULL);
-				CHECK(autodetect_calls_main == 0,
-					"GUARD: src/main.c contains ZERO active autodetect(); CALLS - it must never "
-					"be called directly from main.c's loop again");
+				CHECK(autodetect_calls_main == 1,
+					"GUARD: src/main.c contains EXACTLY ONE active autodetect(); call - zero means "
+					"the trigger was lost again and the controller is stuck on HALL_DEF_*; two or "
+					"more means a second, unreviewed route to the >5 s open-loop procedure");
+				const char *cal_svc = strstr(clean, "static void hall_calibration_service(void)");
+				CHECK(cal_svc != NULL,
+					"GUARD: src/main.c defines hall_calibration_service() - the deferred runner "
+					"that main()'s while(1) calls, so the procedure never runs inside the CAN parser");
+				if (cal_svc) {
+					const char *cal_svc_end = strstr(cal_svc, "\n}");
+					int in_service = count_active(cal_svc, cal_svc_end, "autodetect();", NULL);
+					CHECK(in_service == 1,
+						"GUARD: that single autodetect(); call falls strictly INSIDE "
+						"hall_calibration_service() - the same containment rule check 2 applies to "
+						"the blocking wait, for the same reason: a call outside it would be back on "
+						"a riding path even though the count alone would still look right");
+				}
 
 				/* --- FW-110 v4: the removed supervisor is gone, the side-effect module wired -- */
 				int sup_init = count_active(clean, NULL, "hall_cal_supervisor_init();", NULL);

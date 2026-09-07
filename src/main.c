@@ -504,6 +504,39 @@ bool hall_calibration_standstill_confirmed(void)
 {
 	return autodetect_standstill_ticks >= AUTODETECT_STANDSTILL_TICKS;
 }
+
+/*
+ * FW-110 v5: the trigger FW-110 v4 removed, restored with the gate it never had.
+ *
+ * Three checks, the same shape FW-110 v3 documented inside autodetect():
+ *   1. here, at the instant the CAN request is accepted - a request while the bike could be
+ *      moving is refused outright and answered ERROR_ACK;
+ *   2. the deferral itself - the procedure never runs inside the CAN parser, so a malformed or
+ *      repeated frame cannot re-enter it;
+ *   3. autodetect()'s own check at the top of its body, unchanged.
+ *
+ * The HONEST LIMITATION in inc/main.h still stands and is NOT fixed here: once the procedure
+ * starts it owns the main loop for >5 s, so check 3 is point-in-time, not continuous. Nothing
+ * in software stops a rider who starts pedalling one tick after it begins. That is why the
+ * request is gated on a full second of confirmed standstill and why the tool asks the operator
+ * to secure the bike first.
+ */
+static volatile uint8_t hall_calibration_pending = 0U;
+
+bool hall_calibration_request(void)
+{
+	if(!hall_calibration_standstill_confirmed()) return false;
+	hall_calibration_pending = 1U;
+	return true;
+}
+
+/* Call from main()'s while(1), never from the CAN parser. */
+static void hall_calibration_service(void)
+{
+	if(!hall_calibration_pending) return;
+	hall_calibration_pending = 0U;   /* cleared BEFORE the run: a failed attempt must not repeat */
+	autodetect();
+}
 volatile uint16_t pas_fwd_accum=0; //FW-027 diag: free-running count of forward quadrature steps (never reset, wraps at 65535). Log analysis diffs consecutive frames; nonzero delta while crank is stopped => phantom (EMI) transitions.
 //FW-097 MEASUREMENT ONLY: every reverse quadrature step, latched for the 0x0001020A frame.
 //No decision anywhere reads these. See the note at the backward-step branch in the decoder.
@@ -1254,6 +1287,8 @@ int main(void)
     		receive_flag = RESET;
     		processCAN_Rx(&MP, &MS);
     	}
+    	/* FW-110 v5: runs an accepted calibration request here, outside the CAN parser. */
+    	hall_calibration_service();
 
 #endif
     	//FW-050: the offroad decimal-code accumulator is gone (see level_gesture.c).

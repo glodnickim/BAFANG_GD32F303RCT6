@@ -4,7 +4,7 @@ This repository snapshot is intended to be self-contained for continued EVistDri
 
 ## 1. Authoritative baseline
 
-Current checkpoint: FW143 development state on top of the verified FW142 electrical-SIL baseline.
+Current checkpoint: FW144 Level-4 development state on top of the verified FW143 Walk/electrical-SIL baseline.
 
 Read in this order before changing production code:
 
@@ -13,8 +13,9 @@ Read in this order before changing production code:
 3. `docs/ARCHITECTURE_CURRENT.md`
 4. `README_TESTING.md`
 5. `VERIFICATION_STATUS_2026-09-07_PL.md`
-6. `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`
-7. only then inspect historical/reference material in `docs/reference/`.
+6. `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`
+7. `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`
+8. only then inspect historical/reference material in `docs/reference/`.
 
 Do not reconstruct the architecture from old ticket names or old chats. The current ownership map in `AGENTS.md` and `docs/ARCHITECTURE_CURRENT.md` wins when old documents describe superseded implementations.
 
@@ -26,7 +27,8 @@ Do not reconstruct the architecture from old ticket names or old chats. The curr
 - exact source manifest and build scripts (`scripts/`);
 - cross-platform Python build/verification tools (`tools/`);
 - real-module host tests and whole-pipeline regression (`tests/`);
-- supervisory and real electrical FOC/PMSM/Hall/QZERO/Walk SIL (`sim/`);
+- supervisory, real electrical FOC/PMSM/Hall/QZERO/Walk SIL and Level-4 virtual bike/battery (`sim/`);
+- recorded-ride import/replay/regression tooling (`sim/replay/`, `tools/import_ride_log.py`, `tools/run_replay.py`);
 - protocol/config schema (`protocol/`);
 - current architecture and agent handoff documentation;
 - selected G532/Fake Taxi/TSDZ2/M820 reverse-engineering references under `docs/reference/`;

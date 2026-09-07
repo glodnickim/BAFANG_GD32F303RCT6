@@ -57,6 +57,39 @@ def run(exe: Path, args: list[str], env=None) -> str:
     return p.stdout
 
 
+
+def xorshift32(x: int) -> int:
+    x &= 0xFFFFFFFF
+    x ^= (x << 13) & 0xFFFFFFFF
+    x ^= (x >> 17)
+    x ^= (x << 5) & 0xFFFFFFFF
+    return x & 0xFFFFFFFF
+
+def advance_real_foc_fuzz_seed(seed: int, cases: int) -> int:
+    # sim/evist_sil.c consumes exactly 7 xorshift words per EVD_SIL_REAL_FOC fuzz case:
+    # rpm, cadence ripple, mean torque, torque ripple, breakaway Iq, bounce, start angle.
+    # Keep this beside the sharding code so a future fuzz-input change cannot be missed.
+    x=seed & 0xFFFFFFFF
+    for _ in range(cases * 7): x=xorshift32(x)
+    return x
+
+def run_sharded(exe: Path, total: int, seed_text: str, jobs: int, env=None) -> str:
+    if total <= 0: return ''
+    jobs=max(1,min(jobs,total)); base=int(seed_text,0)
+    counts=[total//jobs + (1 if i < total%jobs else 0) for i in range(jobs)]
+    procs=[]; offset=0
+    for i,n in enumerate(counts):
+        seed=advance_real_foc_fuzz_seed(base,offset)
+        cmd=[str(exe),'--fuzz',str(n),hex(seed)]
+        procs.append((i,n,seed,subprocess.Popen(cmd,cwd=R,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env)))
+        offset += n
+    chunks=[]
+    for i,n,seed,p in procs:
+        out=p.communicate()[0]; print(out,end=''); chunks.append(f'SHARD {i+1}/{jobs} cases={n} seed={hex(seed)}\n'+out)
+        if p.returncode: raise SystemExit(p.returncode)
+    print(f'FUZZ SHARDS PASS total={total} jobs={jobs} baseSeed={seed_text}')
+    return ''.join(chunks)
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--full-fuzz',type=int,default=1000,
@@ -64,6 +97,7 @@ def main() -> None:
     ap.add_argument('--seed',default='0xE7157A39')
     ap.add_argument('--sanitize',action='store_true')
     ap.add_argument('--sanitize-fuzz',type=int,default=100)
+    ap.add_argument('--jobs',type=int,default=min(4,os.cpu_count() or 1),help='parallel deterministic fuzz shards')
     a=ap.parse_args()
 
     standalone=OUT/'foc_electrical_sil'
@@ -73,7 +107,7 @@ def main() -> None:
     full=OUT/'evist_full_foc_sil'
     build(full,['sim/evist_sil.c',*SUPERVISORY_MODULES,*FOC_MODULES,*FULL_EXTRA],full=True)
     fixed=run(full,[])
-    fuzz=run(full,['--fuzz',str(a.full_fuzz),a.seed])
+    fuzz=run_sharded(full,a.full_fuzz,a.seed,a.jobs)
     report += '\nEND-TO-END ASSIST -> REAL FOC -> PMSM -> HALL\n'+fixed+'\n'+fuzz
 
     if a.sanitize:
@@ -82,7 +116,7 @@ def main() -> None:
         env=os.environ.copy()
         env['ASAN_OPTIONS']='detect_leaks=1:halt_on_error=1'
         env['UBSAN_OPTIONS']='halt_on_error=1'
-        sout=run(san,['--fuzz',str(a.sanitize_fuzz),a.seed],env)
+        sout=run_sharded(san,a.sanitize_fuzz,a.seed,min(2,a.jobs),env)
         report += '\nFULL FOC SANITIZERS ASan+UBSan\n'+sout
 
     path=OUT/'REPORT.txt'

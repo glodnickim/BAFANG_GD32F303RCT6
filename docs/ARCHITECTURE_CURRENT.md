@@ -1,4 +1,4 @@
-# EVistDrive FW143 — current architecture map
+# EVistDrive FW144 — current architecture map
 
 ## Control flow
 
@@ -167,3 +167,17 @@ host modules PASS
 + exact Arm GCC 13.2.1 target build PASS
 + BL820 packaging/CRC/identity PASS
 ```
+
+
+## Level 4 virtual bicycle and battery
+
+The next layer closes physical rider, road and battery feedback around the same production controller:
+
+```text
+rider -> PAS/torque -> production controller -> real FOC/PMSM -> drivetrain/bike/grade -> sensors -> controller
+battery truth/SOC/sag -> Vbus/current -> production limits + soc_core -> controller/display SOC
+```
+
+`sim/l4/` contains plant assumptions only. `src/soc_core.c` is production SOC math and is shared by target and
+simulator. Real captures are normalized and replayed by `sim/replay/`; accepted hardware regressions become
+persistent cases under `sim/replay/cases/`.

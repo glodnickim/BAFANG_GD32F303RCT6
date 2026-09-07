@@ -1,7 +1,7 @@
 # EVistDrive v3 — testable motor-control project
 
 This tree is based on `EvistDrive06092026v3.zip` and contains the production GD32/M820 sources,
-portable host/regression tests, two closed-loop SIL backends, an electrical FOC/PMSM/Hall SIL,
+portable host/regression tests, closed-loop supervisory/electrical SIL backends, a Level-4 rider/bicycle/battery digital twin,
 and a cross-platform M820_BL820 developer build path.
 
 ## One-command PC verification
@@ -29,6 +29,8 @@ The gate covers:
 - all six Hall sectors / 24 electrical start angles;
 - QZERO stop/restart lifecycle;
 - deterministic fuzz;
+- Level-4 rider/bike/road/battery/SOC routes + randomized physics;
+- recorded-ride import/replay determinism and registered hardware regressions;
 - AddressSanitizer + UndefinedBehaviorSanitizer.
 
 ## Exact M820 target build
@@ -108,5 +110,36 @@ are the hard gate. See `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md`.
   by both target firmware and electrical SIL; no algorithm change is intended by the extraction.
 - FW143: make Walk target range 10..60 chainring rpm from one shared source of truth and add a
   126-case real-FOC/PMSM/Hall Walk matrix; speed float is evidence, not a virtual-motor tuning gate.
+- FW144: share the existing production SOC math through `soc_core.c`, add the Level-4 rider/bike/road/battery/SOC
+  digital twin, and add canonical import/replay/registration of real-ride logs. The virtual battery/vehicle parameters
+  are plant assumptions; the production control/SOC code is shared, not reimplemented.
 
 See `VERIFICATION_STATUS_2026-09-07_PL.md` for current evidence and remaining hardware gate.
+
+
+## Level 4 and real-ride replay
+
+Run Level 4 directly:
+
+```bash
+python tools/run_level4.py --quick
+python tools/run_level4.py --fuzz 100 --sanitize
+```
+
+Normalize and replay a captured ride:
+
+```bash
+python tools/import_ride_log.py raw.csv canonical.csv
+python tools/run_replay.py canonical.csv
+```
+
+Register a reviewed fixed hardware case:
+
+```bash
+python tools/register_ride_case.py raw.csv BUG_NAME --accept-current
+```
+
+Every registered case is subsequently executed by `tools/verify_all.py`.
+
+The heavy electrical fuzz supports deterministic non-overlapping sharding through `tools/run_electrical_sil.py`;
+this reduces wall time without reducing the requested case count or reusing random cases.

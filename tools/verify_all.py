@@ -2,7 +2,7 @@
 """Single local quality gate for EVistDrive.
 
 Runs the real-module host suites, deterministic whole-pipeline regression, closed-loop
-supervisory SIL, real electrical FOC/PMSM/Hall SIL, stress fuzzing, ASan/UBSan, BL820 packaging
+supervisory SIL, real electrical FOC/PMSM/Hall SIL, Level-4 rider/bike/battery/SOC, recorded-ride replay, stress fuzzing, ASan/UBSan, BL820 packaging
 and source-manifest hygiene. If the exact Arm GNU toolchain is available, --target also performs
 the debug Developer target build using the cross-platform Python builder.
 """
@@ -76,6 +76,10 @@ def main():
     electrical=[sys.executable,'tools/run_electrical_sil.py','--full-fuzz','250' if a.quick else '1000']
     if not a.quick: electrical += ['--sanitize','--sanitize-fuzz','100']
     step('real FOC/PMSM/Hall electrical SIL'+('' if a.quick else ' + ASan/UBSan'),electrical)
+    level4=[sys.executable,'tools/run_level4.py','--fuzz','25' if a.quick else '100']
+    if not a.quick: level4 += ['--sanitize']
+    step('Level-4 virtual rider + bicycle + battery/SOC + real FOC'+('' if a.quick else ' + ASan/UBSan'),level4)
+    step('recorded-ride import/replay deterministic regression',[sys.executable,'tools/run_replay_regression.py'])
     if a.target or a.require_target: target_build(a.require_target)
     print('\n==================================================')
     print('EVistDrive PC VERIFICATION: PASS')

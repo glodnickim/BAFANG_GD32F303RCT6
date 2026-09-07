@@ -1,14 +1,16 @@
 # EVistDrive — agent entry point
 
-This repository is the current FW143 testable baseline. Start here before changing production code.
+This repository is the current FW144 Level-4 testable baseline. Start here before changing production code.
 
 ## 1. Required reading order
 
 1. `AGENTS.md` (this file)
 2. `README_TESTING.md`
-3. `VERIFICATION_STATUS_2026-09-06_PL.md`
+3. `VERIFICATION_STATUS_2026-09-07_PL.md`
 4. `docs/ARCHITECTURE_CURRENT.md`
-5. `verification_evidence/FINAL_GATE_SUMMARY.md`
+5. `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`
+6. `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`
+7. `verification_evidence/FW144_FINAL_GATE_SUMMARY.md`
 
 Do not start from old FW/QS ticket notes and do not recreate removed workarounds without new evidence.
 
@@ -23,6 +25,8 @@ Current documented history:
 - `18d81e0` FW141 elapsed-time-invariant torque filters
 - `2599bc7` FW142 shared production PI/vector limiter + electrical FOC/Hall SIL
 - `7ef4779` one-command exact target gate on Windows
+- FW143 Walk 10..60 rpm + full Walk FOC matrix
+- FW144 production SOC-core parity + Level-4 rider/bike/battery + recorded-ride replay
 
 Use `git log --oneline` to confirm the current checkout before work.
 
@@ -68,6 +72,13 @@ target above 60 rpm. 70/80/>80 are negative/range tests only. Small low-load spe
 do not tune production Walk to force exact tracking in the virtual PMSM. Hard failures are safety/lifecycle
 violations: no start, runaway, current-ceiling violation, unsafe stall, or broken release/brake/fault/wheel cut.
 Read `docs/FW143_WALK_ASSIST_10_60_TEST_CONTRACT.md` before changing Walk.
+
+
+### FW144 Level 4 and SOC/replay
+`soc_core.c` is the production SOC math shared with Level 4. Do not fork the SOC algorithm into the simulator.
+`sim/l4/` owns only virtual physics/rider/battery assumptions. `sim/replay/` replays recorded sensor history
+through production C. A real-bike bug should become a registered replay case before its fix is considered closed.
+Read `docs/FW144_LEVEL4_VIRTUAL_BIKE.md` and `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`.
 
 ## 5. Verification gate
 

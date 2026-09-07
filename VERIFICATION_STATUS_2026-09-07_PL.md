@@ -181,3 +181,82 @@ SIL nie zastępuje ostatniego gate na realnym M820. Po exact target build trzeba
 7. rzeczywisty runtime bank/config dump.
 
 Nie stroić FOC/QZERO/Walk pod parametry wirtualnego PMSM bez potwierdzenia sprzętowego.
+
+---
+
+# FW144 UPDATE — LEVEL 4 VIRTUAL BIKE / BATTERY / SOC / REPLAY
+
+Ta sekcja nadpisuje liczby FW143 tam, gdzie projekt ma już dodatkowe moduły/testy.
+
+## Produkcyjna zmiana testowalności SOC
+
+Matematyka SOC została wydzielona z `main.c` do produkcyjnego `src/soc_core.c`. Ten sam moduł jest linkowany
+przez firmware i Level 4. Nie jest to nowy algorytm SOC: host parity porównuje OCV, limp i 20 000 losowych
+przejść 1 Hz ze starą implementacją — PASS.
+
+## Level 4
+
+Pętla obejmuje wirtualnego rowerzystę, torque/PAS, produkcyjny supervisory control, realny final-Iq/FOC/PI/SVPWM,
+wirtualny PMSM, rower/drogę/nachylenie oraz fizyczny model baterii z napięciem, R0, dynamic sag i true SOC.
+
+Fixed routes: **9/9 PASS** (0/5/10/15% grade, cadence do 120 rpm, SOC 90/80/50/30/20/10/5%, high sag,
+matched i mismatched chemistry).
+
+SOC endurance:
+- start 100/90/80/60/40/20/10/5%;
+- matched LG profile: max abs error ~0.19% — PASS;
+- FEB21700G test profile: mismatch produkcyjnej OCV mapy dochodzi do ~14% w części zakresu — evidence/open,
+  nie ukryty PASS i nie automatyczna zgoda na zmianę algorytmu.
+
+Level-4 randomized physics:
+- **100/100 PASS**;
+- `safePhysicalStalls=34` — rider fizycznie nie ma wystarczającego momentu;
+- `marginalStarts=10` — zapas statyczny 2..15%, osobna klasa;
+- robust start (>15% zapasu momentu) wymaga normalnego assist/Hall start;
+- Level-4 ASan/UBSan fuzz **25/25 PASS**.
+
+## Real-ride replay
+
+Dodano:
+- `tools/import_ride_log.py` — alias/mapping -> canonical CSV;
+- `tools/run_replay.py` — replay sensor history przez produkcyjne moduły C;
+- `tools/run_replay_regression.py` — deterministic smoke + registered hardware cases;
+- `tools/register_ride_case.py` — zapis realnego problemu jako permanent regression;
+- `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md` — kontrakt loggera;
+- `tools/analyze_l4_trace.py` — szybki raport amplitud/SOC/replay delta.
+
+Smoke na istniejącym `RUN_60_ride.csv`: **24 000 / 24 000 rows**, repeated replay byte-identical PASS.
+Stary recorded output różni się od bieżącego kodu (max `Iq_ref` delta 124 counts), co jest raportowane zamiast
+maskowane; trace nie zawiera V/I/ERPS, więc replay jawnie zgłasza brakujące kanały/defaulty.
+
+## Aktualny host/build gate po FW144
+
+- source manifest: **60/60 production C**, 86 total entries — PASS;
+- real-module host suites: **70/70 PASS**;
+- whole-pipeline: **18/18 PASS**, missed-tick + determinism PASS;
+- supervisory closed-loop fuzz: **10 000/10 000 PASS**;
+- supervisory ASan/UBSan: **1000/1000 PASS**;
+- electrical real-FOC/PMSM/Hall fuzz: **1000/1000 PASS** (deterministic non-overlapping shards);
+- electrical ASan/UBSan: **100/100 PASS**;
+- Hall-start sweep: **48/48 PASS**;
+- Walk real-FOC/PMSM/Hall matrix: **126/126 safety/lifecycle PASS**;
+- QZERO STOP -> safe exit -> restart: PASS in the current virtual plant;
+- Level 4 fixed routes: **9/9 PASS**;
+- Level 4 randomized whole-bike physics: **100/100 PASS**, including 34 expected physical stalls and 10 marginal starts classified separately from firmware no-start;
+- Level 4 ASan/UBSan: **25/25 PASS**;
+- matched-chemistry LG SOC endurance: max abs estimator error ~**0.19%**;
+- FEB21700G virtual-profile comparison: up to ~**14%** estimator mismatch in part of the SOC range — OPEN evidence for future real-data calibration, not a test failure;
+- ride replay smoke: **24 000/24 000 rows**, repeated output byte-identical; registration/accepted-baseline workflow self-test PASS;
+- BL820 build-tree/packager checks: PASS.
+
+The integrated `verify_all.py` contains all of these gates. In this execution environment one monolithic full run exceeds the per-process wall-time while entering the heavy electrical stage, so the full stress stages were also executed separately and all results above are PASS. This is a tooling wall-time limitation, not a skipped test or hidden FAIL.
+
+## Source of truth dla Level 4
+
+Przeczytaj:
+- `docs/FW144_LEVEL4_VIRTUAL_BIKE.md`;
+- `sim/l4/README.md`;
+- `sim/replay/README.md`;
+- `protocol/EVISTDRIVE_LIVE_RIDE_LOG_CONTRACT.md`.
+
+Nie przedstawiać parametrów PMSM/bike/rider/sag z Level 4 jako zmierzonych stałych M820. To plant testowy.

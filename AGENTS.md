@@ -120,6 +120,13 @@ releases\0.602_M820_BL820.bin
 
 Tylko plik `.bin` — żadnych dodatkowych artifactów (manifest, ELF, MAP pozostają w `.build\`).
 
+**ZASADAKANONICZNA:**
+1. Każdy kanoniczny build musi używać `--mode auto` (rezerwuje numer z globalnego allocatora).
+2. Wynikowy BIN leży w `releases/<version>_M820_BL820.bin` — **bez podkatalogów**.
+3. Build developerski (`--mode developer`) NIGDY nie kopiuje do `releases/`.
+4. Przed flashowaniem sprawdź SHA256 z konsoli — musi być identyczne z tym w terminalu.
+5. Żaden agent nie tworzy nowych folderów w `releases/` (np. `releases/latest`, `releases/final`) — zawsze `<wersja>_M820_BL820.bin`.
+
 ### FW-xxx vs BUILD version
 
 ```text

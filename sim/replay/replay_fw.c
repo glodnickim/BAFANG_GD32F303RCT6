@@ -73,6 +73,31 @@ int main(int argc,char **argv)
     FILE *in=fopen(argv[1],"rb"); if(!in){perror(argv[1]);return 2;}
     FILE *out=fopen(argv[2],"wb"); if(!out){perror(argv[2]);fclose(in);return 2;}
     char line[4096]; if(!fgets(line,sizeof(line),in)){fprintf(stderr,"empty replay\n");return 2;}
+    /*
+     * AP-0a: motor voltage utilisation is a CLOSED-LOOP quantity (|Vd,Vq| out of the current
+     * regulators, FOC.h _U_MAX domain, 2048 = full scale). This harness has no motor model, so
+     * it cannot derive one honestly - and the recorded W1 rides carry neither motor_erps nor
+     * iq_actual to reconstruct it from.
+     *
+     * It used to be hard-wired to 0, which is NOT a neutral choice: at u_abs = 0
+     * launch_blend_permille() (src/assist_modes.c) returns 0, so finish_power_request() emits
+     * the pure LAUNCH ANCHOR term computed against the fixed ASSIST_LAUNCH_REFERENCE_U_ABS,
+     * and the measured-duty branch (power_to_phase_iq with the real u_abs) NEVER EXECUTES.
+     * Every number produced that way describes the standstill anchor stretched across a whole
+     * ride, not the branch the bike actually runs.
+     *
+     * So it is now an explicit knob instead of a hidden constant. DEFAULT IS UNCHANGED (0) on
+     * purpose: sim/replay/cases/<x>/manifest.json pins accepted_output_sha256, and silently
+     * moving the default would invalidate every registered regression without a decision.
+     * Set REPLAY_U_ABS to sweep it; the value used is reported on the summary line. Since we
+     * do not know the true value, the honest use is a SWEEP that shows how sensitive a
+     * conclusion is to it - not a single invented number presented as the operating point.
+     */
+    int32_t cfg_u_abs=0;
+    {
+        const char *e=getenv("REPLAY_U_ABS");
+        if(e&&*e){ long v=strtol(e,NULL,10); if(v<0)v=0; if(v>2048)v=2048; cfg_u_abs=(int32_t)v; }
+    }
     fprintf(out,"time_s,cadence_rpm,torque_ckg,wheel_speed_kph,battery_v,battery_a,iq_request_new,iq_ref_new,iq_request_recorded,iq_ref_recorded,delta_request,delta_ref,debug_flags\n");
 
     torque_input_init(); torque_input_startup_zero(TORQUE_ZERO_TARGET_NATIVE);
@@ -111,6 +136,12 @@ int main(int argc,char **argv)
         ri.torque_assist_now_native=ts->assist_delta_native; ri.torque_assist_filtered=ts->assist_delta_filtered_native;
         ri.torque_run_filtered=ts->assist_delta_run_native; ri.torque_load_centikg=ts->load_centikg;
         ri.cadence_rpm=cadence; ri.wheel_speed_x100=speed_x100; ri.motor_erps=erps;
+        /* AP-0a: THIS is the field finish_power_request() actually reads (assist_modes.c uses
+         * rider_input_t.motor_voltage_utilization, not ride_control_input_t.u_abs - the latter
+         * only feeds the battery-current cap). The harness never set it at all, so it was a
+         * zero-initialised 0 and the launch/measured crossfade could never leave the anchor.
+         * Both are driven from the same knob so they cannot silently disagree. */
+        ri.motor_voltage_utilization=(uint16_t)cfg_u_abs;
         ri.pas_forward=pedaling; ri.pas_backward=reverse; ri.pedaling_active=pedaling;
         ri.crank_forward_steps=(uint8_t)(forward_steps>250?250:forward_steps); ri.crank_direction_ok=pedaling;
         ri.real_stop=!pedaling&&!reverse; ri.wheel_valid=speed_x100>0; ri.direction_inhibit_active=reverse;
@@ -123,7 +154,7 @@ int main(int argc,char **argv)
         ci.battery_voltage_mv=(uint32_t)llround(vb*1000.0); ci.iq_scale=PH_CURRENT_MAX;
         ci.ride_core_iq_limit=PH_CURRENT_MAX; ci.phase_current_max=PH_CURRENT_MAX;
         ci.battery_current_mA=(int32_t)llround(ia*1000.0); ci.battery_current_max=BATTERYCURRENT_MAX;
-        ci.u_abs=0; ci.cal_i=CAL_I; ci.current_iq=iq_actual; ci.current_id=0;
+        ci.u_abs=cfg_u_abs; ci.cal_i=CAL_I; ci.current_iq=iq_actual; ci.current_id=0;
         ci.voltage_raw=(uint16_t)llround(vb*1000.0/(double)CAL_BAT_V); ci.voltage_min_raw=VOLTAGE_MIN;
         ci.controller_temperature_c=25; ci.cadence_filtered_x8=(uint16_t)cadence*8U; ci.speed_limit_x100=SPEEDLIMIT;
         ci.legal_enabled=true; ci.offroad=false; ci.walk_active=isfinite(r.walk)&&r.walk!=0.0;
@@ -143,8 +174,9 @@ int main(int argc,char **argv)
     }
     fclose(in); fclose(out);
     double mae=compared?sum_ref_delta/(double)compared:0.0;
-    printf("REPLAY PASS rows=%llu compared=%llu maxReqDelta=%.1f maxRefDelta=%.1f meanAbsRefDelta=%.3f defaults=%u output=%s\n",
-           (unsigned long long)rows,(unsigned long long)compared,max_req_delta,max_ref_delta,mae,defaults,argv[2]);
+    printf("REPLAY PASS rows=%llu compared=%llu maxReqDelta=%.1f maxRefDelta=%.1f meanAbsRefDelta=%.3f defaults=%u u_abs=%ld%s output=%s\n",
+           (unsigned long long)rows,(unsigned long long)compared,max_req_delta,max_ref_delta,mae,defaults,
+           (long)cfg_u_abs,cfg_u_abs==0?" (LAUNCH-ANCHOR ONLY - measured-duty branch not exercised)":"",argv[2]);
     if(tolerance>=0.0&&compared&&max_ref_delta>tolerance){
         fprintf(stderr,"REPLAY COMPARE FAIL maxRefDelta %.1f > tolerance %.1f\n",max_ref_delta,tolerance);return 1;
     }

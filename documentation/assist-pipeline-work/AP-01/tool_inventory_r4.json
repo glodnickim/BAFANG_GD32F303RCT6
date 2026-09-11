@@ -1,0 +1,181 @@
+{
+  "purpose": "AP01-R4 / AP01-V2-04: for each scenario category the Controller Lab CLI cannot express, record what existing host/pipeline/Level4 code was found, HOW STRONG that finding is, and what remains uncovered.",
+  "evidence_levels": {
+    "FILE_EXISTS": "the file was located in the repository; its content was not read in this session",
+    "READ_IN_THIS_SESSION": "the file (or the cited region) was read in this session; the description below reflects what the source and its own comments say",
+    "EXECUTED_IN_THIS_SESSION": "the suite was compiled and run in this session and its result observed"
+  },
+  "scope_statement": "REV3 correction (AP01-V2-04). NOTHING in this inventory is at EXECUTED_IN_THIS_SESSION. No existing host suite was compiled or run during AP-01. Reading a test file shows what it INTENDS to assert; it does not establish that the assertion currently passes, nor that the property holds for the full assist chain. REV2 wrongly wrote 'correctness already proven exhaustively', 'does not need new evidence' and 'proof already complete' on the strength of reading alone. Those claims are withdrawn. Where a file's own header claims exhaustiveness, that is reported as the file's claim about its own module, not as a verified property of the pipeline.",
+  "note_on_flag_syntax": "controller_lab.c parses key=value arguments (parse_arg, KEY(name) over 'arg=value'). All extension proposals use key=value. No CLI change is made in this rework; the shared harness stays READ_ONLY.",
+  "csv_emitting_harnesses": {
+    "correction": "REV2 claimed Controller Lab is the only harness producing a metrics.py-consumable CSV. That is FALSE and is withdrawn.",
+    "found": [
+      {
+        "file": "sim/l4/virtual_bike_l4.c:473",
+        "evidence_level": "READ_IN_THIS_SESSION",
+        "csv_columns": "time_s,distance_m,speed_kph,cadence_rpm,rider_torque_nm,torque_ckg,battery_v,battery_a,true_soc,fw_soc,iq_request,iq_ref,iq_actual,motor_erps,u_abs,limp,session,debug,battery_limit,hall_age",
+        "significance": "Carries iq_actual, motor_erps and u_abs - precisely the channels Controller Lab cannot provide (u_abs and battery current are fixed at zero there). Any future need for actual/bridge-side channels should start from this harness, not from a Controller Lab extension. Not exercised in AP-01."
+      },
+      {
+        "file": "sim/replay/replay_fw.c:76",
+        "evidence_level": "READ_IN_THIS_SESSION",
+        "csv_columns": "time_s,cadence_rpm,torque_ckg,wheel_speed_kph,battery_v,battery_a,iq_request_new,iq_ref_new,iq_request_recorded,iq_ref_recorded,delta_request,delta_ref,debug_flags",
+        "significance": "Replays a recorded sensor history through production C and emits new-vs-recorded deltas. sim/replay/cases/ currently contains only README.md, i.e. zero registered real-ride cases, so this path has no recorded input to replay today."
+      },
+      {
+        "file": "tools/analyze_l4_trace.py",
+        "evidence_level": "READ_IN_THIS_SESSION",
+        "significance": "Existing consumer of the Level-4 trace CSV (reads iq_request/iq_ref/iq_actual/motor_erps/u_abs). Relevant prior art if AP-01 metrics are ever applied to L4 traces."
+      }
+    ],
+    "consequence_for_the_gap_statement": "The residual gaps below are gaps in EXPRESSING a scenario as forced input to a full-chain harness that exports a comparable CSV, and in localising the assist request at the transition. They are NOT 'no CSV exists anywhere'."
+  },
+  "categories": [
+    {
+      "id": "load_step_during_pas",
+      "existing_coverage": [
+        {
+          "file": "tests/host/fw141_torque_elapsed_time_host.c",
+          "region": "rise_case / fall_case",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Drives torque_input.c with the same physical interval expressed as dense vs sparse calls (140 calls x 1 tick vs 35 calls x 4 ticks) and asserts the filtered FAST/RUN values are equal, i.e. the filter is elapsed-time based, not call-count based.",
+          "channels_or_metrics": "assist_delta_filtered_native / assist_delta_run_native read from the snapshot struct; no time series export",
+          "not_covered": "Stops at torque_input's own snapshot: no assist_modes/limits/fast_iq_slew, and no iq_ref trajectory, so no rise time / overshoot on the assist request."
+        }
+      ],
+      "residual_gap": "No forced mid-ride torque step through the full chain with a comparable CSV export. Controller Lab takes one scalar torque_nm/torque_ripple_pct for the whole run.",
+      "extension_needed": "controller_lab.c: optional step_at_s=, step_torque_nm=, step_torque_ripple_pct= keys applied in the synthetic-sensor section only; no production module touched. NOT implemented (shared harness READ_ONLY)."
+    },
+    {
+      "id": "load_release_during_pas",
+      "existing_coverage": [
+        {
+          "file": "tests/host/fw141_torque_elapsed_time_host.c",
+          "region": "fall_case",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Mirror of the rise case for a high-to-zero torque transition, same call-density invariance assertion.",
+          "channels_or_metrics": "same snapshot fields",
+          "not_covered": "same as load_step_during_pas"
+        }
+      ],
+      "residual_gap": "Mirror of load_step_during_pas.",
+      "extension_needed": "same key=value step fields."
+    },
+    {
+      "id": "stop_then_restart_before_release_complete",
+      "existing_coverage": [
+        {
+          "file": "tests/host/fw112_2_rolling_coast_host.c",
+          "region": "test_s3_coast_resume_no_cold_gate",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "The file states it links the shipped ride_control.c / ride_session.c / pas_direction.c / pas_quadrature.c / rider_input.c / ride_wheel.c chain and asserts that a forward resume after a coast re-arms immediately without the cold-start gate. It also documents mutation kills M1-M5 against production source.",
+          "channels_or_metrics": "session state, latched flag, cold_start_ready - boolean assertions, no CSV",
+          "not_covered": "Not executed in this session. Session-state assertions say nothing about the Iq trajectory shape across the restart (no ripple/latency figures), which is what an AP-03 baseline/candidate comparison needs."
+        },
+        {
+          "file": "tests/host/ride_control_rearm_host.c",
+          "region": "int main and its named rearm scenarios (1152 lines)",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Integration coverage of permission-vs-demand and rearm behaviour over the real chain.",
+          "channels_or_metrics": "assertions at chosen ticks; no time-series export",
+          "not_covered": "Not executed in this session; not a measurement instrument for AP-01's metric definitions."
+        }
+      ],
+      "residual_gap": "A measured Iq trajectory across a restart that arrives before the release completes. The state-machine behaviour is addressed by the suites above (as read); the missing item is the measurement, not necessarily the correctness.",
+      "extension_needed": "controller_lab.c: an ordered list of pedalling intervals (ride_start2_s=/ride_stop2_s=) or a ride_restart_s= key. NOT implemented."
+    },
+    {
+      "id": "rolling_restart",
+      "existing_coverage": [
+        {
+          "file": "tests/host/fw112_2_rolling_coast_host.c",
+          "region": "test_s2_coast_retains, test_s13_repeated_coast_resume, test_s14_rocking_with_coast",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Scenarios S1-S14 described in the file header cover coast retention with the wheel still rolling, repeated coast/resume cycles, and long rocking sequences, asserted against the real session chain.",
+          "channels_or_metrics": "session state, latched flag, wheel-freshness boolean",
+          "not_covered": "Not executed in this session; no Iq time-series metrics."
+        }
+      ],
+      "residual_gap": "Same as above: the measurement, not the state contract.",
+      "extension_needed": "same restart-interval extension; speed_kph is already independent of the pedalling interval in the current CLI."
+    },
+    {
+      "id": "jitter_missed_ticks",
+      "existing_coverage": [
+        {
+          "file": "tests/host/fw141_torque_elapsed_time_host.c",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Call-density invariance of the torque filter - the nearest existing proxy for sparser-than-real-time foreground calls.",
+          "not_covered": "A call carrying a larger elapsed value is not the same as a call that never happens. Does not touch cadence_filter / pas_sampler under a dropped edge or a skipped control tick."
+        },
+        {
+          "file": "tests/host/fw137_erps_edge_age_host.c",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Header describes an edge-age upper bound so the rotor speed estimate decays instead of freezing when Hall edges stop arriving (properties T1-T3).",
+          "not_covered": "Rotor Hall edge timing, not PAS/foreground scheduling; no assist-chain channels."
+        }
+      ],
+      "residual_gap": "Least covered of the categories: nothing found that skips a foreground control tick or drops a PAS edge through the full chain.",
+      "extension_needed": "controller_lab.c: miss_tick_every_n=<int>. BLOCKED on a design decision first - see clock_separation_note.",
+      "clock_separation_note": "controller_lab.c runs a fixed CTRL_HZ=4000 loop and does not model the sensor/PAS timebase, the 4 kHz foreground and the 16 kHz FOC ISR as independently schedulable clocks the way main.c's interrupt structure does. A skip injected in the harness's outer loop would stop ALL of them together, which is not what a missed foreground tick means on the target: the ISR would still have run. Which clock the skip applies to must be decided before implementation, or the resulting numbers will describe a stall that cannot occur."
+    },
+    {
+      "id": "reverse_pedalling",
+      "existing_coverage": [
+        {
+          "file": "tests/host/pas_direction_host.c",
+          "region": "test_every_transition_cell and the sequence-property block",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "The file states it drives the real pas_direction.c over every state x event cell and over all 797,160 forward/reverse/invalid sequences up to length 12, checking a closed-form property rather than a parallel model.",
+          "channels_or_metrics": "state enum, fwd_run counter, inhibit reason enum",
+          "not_covered": "Not executed in this session, so this is the file's claim about its own module, not a verified result here. Unit scope: pas_direction.c only - it does not by itself establish an end-to-end safety property of the whole assist path, and it produces no Iq time series."
+        },
+        {
+          "file": "tests/host/fw112_2_rolling_coast_host.c",
+          "region": "test_s4_reverse_coast_forward, test_s7_true_stop_after_reverse",
+          "evidence_level": "READ_IN_THIS_SESSION",
+          "what_the_source_shows": "Reverse -> coast -> forward and reverse -> true stop at session-integration level; the header states no assist is granted during reverse or coast.",
+          "not_covered": "Not executed here; no measured inhibit latency."
+        }
+      ],
+      "residual_gap": "A measured time-to-inhibit on the assist request after reverse onset. Direction-safety behaviour is addressed by the suites above as read; this session did not run them and does not claim the full-chain property.",
+      "extension_needed": "controller_lab.c: reverse_at_s=<float> flipping the crank angle rate. Must be reviewed against the FW139 note in motor-controller-firmware/AGENTS.md so the synthetic generator does not mask or duplicate pas_direction.c's own logic. NOT implemented."
+    },
+    {
+      "id": "sensor_invalid",
+      "correction": "REV2 stated no test forces torque_sensor_valid. That is FALSE and is withdrawn - see the three distinct inputs below, which REV2 also conflated.",
+      "three_distinct_inputs": [
+        {
+          "input": "PAS quadrature INVALID step (an undecodable A/B transition)",
+          "existing_coverage": {
+            "file": "tests/host/pas_direction_host.c",
+            "region": "transition-cell block, case A2",
+            "evidence_level": "READ_IN_THIS_SESSION",
+            "what_the_source_shows": "A lone invalid decode step is asserted to enter DIRECTION_INHIBIT exactly like a reverse step, with a separate diagnostic cause (the FW-109 v2 change described in the file header).",
+            "not_covered": "Unit scope, not executed here, no Iq series."
+          }
+        },
+        {
+          "input": "pas_sensor_valid = false (the PAS sensor reported invalid, distinct from an undecodable step)",
+          "existing_coverage": {
+            "file": "tests/host/fw100_extended_boost_host.c:201",
+            "evidence_level": "READ_IN_THIS_SESSION",
+            "what_the_source_shows": "Sets in.pas_sensor_valid = false and asserts the extended boost stops in the same tick with cancel reason ASSIST_EXT_BOOST_CANCEL_SENSOR_INVALID.",
+            "not_covered": "Scope is assist_extended_boost only, in a boost-running precondition. Partial coverage of this input - not the full chain, and not a general assist-inhibit property."
+          }
+        },
+        {
+          "input": "torque_sensor_valid = false",
+          "existing_coverage": {
+            "file": "tests/host/fw100_extended_boost_host.c:200",
+            "evidence_level": "READ_IN_THIS_SESSION",
+            "what_the_source_shows": "Sets in.torque_sensor_valid = false and asserts the same same-tick boost cancellation with the SENSOR_INVALID reason.",
+            "not_covered": "Same limited scope as above. No coverage found of torque_sensor_valid through torque_input/assist_modes to iq_ref outside the boost feature."
+          }
+        }
+      ],
+      "residual_gap": "For all three inputs: no forced-input, full-chain, CSV-exporting scenario, so no recovery-latency measurement. Coverage found is partial and feature-local (extended boost) or unit-local (pas_direction), and none of it was executed in this session.",
+      "extension_needed": "controller_lab.c hardcodes r.torque_sensor_valid = true and r.pas_sensor_valid = true. Proposal: torque_invalid_from_s=/torque_invalid_to_s= and the PAS equivalents, toggling those fields in the synthetic observation struct only. NOT implemented."
+    }
+  ]
+}

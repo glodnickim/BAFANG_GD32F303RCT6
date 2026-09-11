@@ -1,0 +1,47 @@
+floor_above_profile_repro        window=[3.0, 8.0] iq_ref mean=175.00 pp=0.00 rel_ripple=0.000 bias=+20.01 [LIMITED_UPSTREAM]
+  stage profile_limit        REDUCED   [129.0, 179.0] -> [7.0, 7.0]  (profile Iq limit (max_iq_pct) per assist_modes.c)
+  stage post_mode_request    RAISED    [7.0, 7.0] -> [175.0, 175.0]  (cause not attributable from these columns)
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+floor_default_profile1_repro     window=[3.0, 8.0] iq_ref mean=14.00 pp=0.00 rel_ripple=0.000 bias=-140.99 [LIMITED_UPSTREAM]
+  stage profile_limit        REDUCED   [129.0, 179.0] -> [7.0, 7.0]  (profile Iq limit (max_iq_pct) per assist_modes.c)
+  stage post_mode_request    RAISED    [7.0, 7.0] -> [14.0, 14.0]  (cause not attributable from these columns)
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+linear72_baseline                window=[3.0, 8.0] iq_ref mean=154.99 pp=50.00 rel_ripple=0.097 bias=+0.00
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+stop_release_cad72               window=[3.0, 5.0] iq_ref mean=155.69 pp=50.00 rel_ripple=0.101 bias=+0.70
+  stop iq_ref: CONFIRMED confirmed=5.2 bracket=[5.195, 5.2] hold=4.8 excursions_before=0
+sweep_mode1_cad110               window=[3.0, 8.0] iq_ref mean=153.91 pp=31.00 rel_ripple=0.059 bias=-1.08
+  stop iq_ref: CONFIRMED confirmed=8.195 bracket=[8.19, 8.195] hold=1.8049999999999997 excursions_before=0
+sweep_mode1_cad120               window=[3.0, 8.0] iq_ref mean=153.56 pp=27.00 rel_ripple=0.053 bias=-1.43
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+sweep_mode1_cad20                window=[3.0, 8.0] iq_ref mean=170.74 pp=136.00 rel_ripple=0.261 bias=+15.75
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+sweep_mode1_cad30                window=[3.0, 8.0] iq_ref mean=159.17 pp=104.00 rel_ripple=0.193 bias=+4.18
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+sweep_mode1_cad40                window=[3.0, 8.0] iq_ref mean=154.05 pp=82.00 rel_ripple=0.165 bias=-0.94
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+sweep_mode1_cad60                window=[3.0, 8.0] iq_ref mean=155.13 pp=60.00 rel_ripple=0.116 bias=+0.14
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+sweep_mode1_cad72                window=[3.0, 8.0] iq_ref mean=154.99 pp=50.00 rel_ripple=0.097 bias=+0.00
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+sweep_mode1_cad90                window=[3.0, 8.0] iq_ref mean=154.30 pp=39.00 rel_ripple=0.077 bias=-0.69
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+uneven_legs_asym0                window=[3.0, 8.0] iq_ref mean=154.84 pp=39.00 rel_ripple=0.091 bias=-0.16
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+uneven_legs_asym30               window=[3.0, 8.0] iq_ref mean=156.23 pp=82.00 rel_ripple=0.154 bias=+1.23
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+uneven_legs_asym60               window=[3.0, 8.0] iq_ref mean=161.12 pp=127.00 rel_ripple=0.252 bias=+6.13
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+uneven_legs_asym8                window=[3.0, 8.0] iq_ref mean=154.99 pp=50.00 rel_ripple=0.097 bias=+0.00
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+window180_repro                  window=[3.0, 8.0] iq_ref mean=154.99 pp=50.00 rel_ripple=0.097 bias=+0.00
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+window30_repro                   window=[3.0, 8.0] iq_ref mean=154.99 pp=50.00 rel_ripple=0.097 bias=+0.00
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+window360_repro                  window=[3.0, 8.0] iq_ref mean=154.99 pp=50.00 rel_ripple=0.097 bias=+0.00
+  stop iq_ref: CONFIRMED confirmed=8.2 bracket=[8.195, 8.2] hold=1.8000000000000007 excursions_before=0
+without_rotation_off_repro       window=[3.0, 8.0] iq_ref mean=0.00 pp=0.00 rel_ripple=N/A bias=-154.99 [ZERO_NO_ASSIST]
+  stop iq_ref: CONFIRMED confirmed=8.0 bracket=[None, 8.0] hold=2.0 excursions_before=0
+without_rotation_repro           window=[3.0, 8.0] iq_ref mean=0.00 pp=0.00 rel_ripple=N/A bias=-154.99 [LIMITED_UPSTREAM]
+  stage post_mode_request    REDUCED   [285.0, 285.0] -> [0.0, 0.0]  (cause not attributable from these columns)
+  stop iq_ref: CONFIRMED confirmed=8.0 bracket=[None, 8.0] hold=2.0 excursions_before=0

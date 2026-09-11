@@ -1,0 +1,217 @@
+ABORTED: RequiredCaseFailed: required case 'deliberately_bad' failed: exit=2 stderr=sample_ticks=0 must be in [1,40000] 4 kHz ticks
+=== A. Metric/window tests ===
+event_windows
+  PASS  start pre window starts 1.0 s before the start
+  PASS  stop post window is empty - the restart follows before the settle allowance
+  PASS  restart pre window is clipped by the stop, not 1.0 s long
+  PASS  a clipped window is reported as not full length
+step_response on an analytically known step
+  PASS  status MEASURED
+  PASS  reference levels are the window means, reported explicitly
+  PASS  10-90% latency matches the analytic 0.80 s within one sampling interval
+  PASS  the located crossings are the samples the thresholds fall on
+  PASS  a clean step is not flagged as ripple-ambiguous
+
+=== B. CSV column contract ===
+CSV column contract
+  PASS  header is exactly the accepted 30 columns followed by the appended ones
+  PASS  the first 30 header names are the accepted series, unmoved
+  PASS  every row validates against the contract
+  PASS  sample_ticks=1 really emits one row per 4 kHz tick
+CSV contract rejects the D010-01 defect
+  PASS  a row missing one field is rejected
+  PASS  a row whose ride_interval contradicts pedalling is rejected
+  PASS  a right-length header with wrong names is rejected
+  PASS  a cumulative counter going backwards is rejected
+
+=== C. CLI tests (requires native binary) ===
+CLI: new keys accepted and produce the expected columns
+  PASS  exit code 0
+  PASS  column 'crank_direction' present
+  PASS  column 'pas_transition_index' present
+  PASS  column 'pas_invalid_seq_active' present
+  PASS  column 'fast_iq_slew_ticks' present
+  PASS  column 'pas_edge_drop_active' present
+  PASS  column 'fg_last_resume_elapsed' present
+  PASS  header has the contracted number of columns
+  PASS  crank_direction reaches -1 during the reverse window
+  PASS  the reverse window matches the commanded 0.3 .. 0.5 s
+  PASS  crank_angle goes backwards while reversing
+CLI: contradictory new keys rejected with exit code 2
+  PASS  rejected: torque_invalid from > to
+  PASS  rejected: pas_invalid_seq window too short
+  PASS  rejected: miss_tick_every_n=1
+  PASS  rejected: fg_delay_at_s without fg_delay_ticks
+  PASS  rejected: miss_tick window without miss_tick_every_n
+  PASS  rejected: miss_tick_from_s without miss_tick_to_s
+  PASS  rejected: pas_edge_drop without every_n
+  PASS  rejected: pas_edge_drop_every_n=1
+  PASS  rejected: pas_edge_jitter_ticks=0
+  PASS  rejected: pas edge combined with pas_invalid_seq
+  PASS  rejected: sample_ticks=0
+  PASS  rejected: sample_ticks not a number
+  PASS  rejected: pas_edge_drop_from_s not finite
+CLI: default behaviour unchanged when no new key is given
+  PASS  sample_ms=5 and the equivalent sample_ticks=20 agree
+
+=== D. Timebase mechanics (mandatory) ===
+CLI: foreground stall 1/4/20 ticks - mandatory assertions at 4 kHz row rate
+  PASS  fg_delay 1: exactly 1 foreground tick(s) skipped
+  PASS  fg_delay 1: the skipped ticks are visible as rows in the CSV
+  PASS  fg_delay 1: the foreground resumed exactly once
+  PASS  fg_delay 1: resume happened at tick 2001
+  PASS  fg_delay 1: the module was handed elapsed=2 on resume
+  PASS  fg_delay 1: a resume row was actually located in the CSV
+  PASS  fg_delay 1: the 16 kHz Iq owner never stopped
+  PASS  fg_delay 1: 16 kHz ticks total = 4 x control ticks over the whole run
+  PASS  fg_delay 4: exactly 4 foreground tick(s) skipped
+  PASS  fg_delay 4: the skipped ticks are visible as rows in the CSV
+  PASS  fg_delay 4: the foreground resumed exactly once
+  PASS  fg_delay 4: resume happened at tick 2004
+  PASS  fg_delay 4: the module was handed elapsed=5 on resume
+  PASS  fg_delay 4: a resume row was actually located in the CSV
+  PASS  fg_delay 4: the 16 kHz Iq owner never stopped
+  PASS  fg_delay 4: 16 kHz ticks total = 4 x control ticks over the whole run
+  PASS  fg_delay 20: exactly 20 foreground tick(s) skipped
+  PASS  fg_delay 20: the skipped ticks are visible as rows in the CSV
+  PASS  fg_delay 20: the foreground resumed exactly once
+  PASS  fg_delay 20: resume happened at tick 2020
+  PASS  fg_delay 20: the module was handed elapsed=21 on resume
+  PASS  fg_delay 20: a resume row was actually located in the CSV
+  PASS  fg_delay 20: the 16 kHz Iq owner never stopped
+  PASS  fg_delay 20: 16 kHz ticks total = 4 x control ticks over the whole run
+CLI: miss_tick is bounded - control / injection / recovery
+  PASS  exit code 0
+  PASS  no foreground tick is skipped during the control phase
+  PASS  the injection skips every 4-th tick inside the window
+  PASS  nothing further is skipped after the window closes (recovery)
+  PASS  elapsed on every resume equals the number of consecutive skipped ticks + 1
+  PASS  the resume count equals the skip count for single-tick gaps
+  PASS  the 16 kHz Iq owner ran through the whole window
+
+=== E. PAS edge and sensor-validity mechanics ===
+CLI: PAS missed edge - control / injection / recovery
+  PASS  exit code 0
+  PASS  no edge is dropped during the control phase
+  PASS  pas_edge_drop_active is 0 before the window
+  PASS  pas_edge_drop_active is 1 inside the window
+  PASS  edges are actually dropped inside the window
+  PASS  pas_edge_drop_active is 0 again after the window
+  PASS  the dropped-edge counter stops growing after the window
+  PASS  a missed edge is visible to the production sampler as an illegal step
+  PASS  the sampler keeps counting forward again after recovery
+  PASS  the foreground was NOT skipped - this class is electrical, not a scheduling defect
+CLI: PAS late edge (jitter) - control / injection / recovery
+  PASS  exit code 0
+  PASS  no edge is deferred during the control phase
+  PASS  edges are deferred inside the window
+  PASS  deferral stops when the window closes
+  PASS  no edge is LOST by jitter - only delayed
+  PASS  late edges disturb the sampler's step legality
+  PASS  the foreground was NOT skipped by the edge disturbance
+CLI: torque / PAS validity flags are separate and self-consistent
+  PASS  torque invalid: torque_sensor_valid inside the window is 0
+  PASS  torque invalid: pas_sensor_valid inside the window is 1
+  PASS  torque invalid: what the generator commanded is what rider_input received (torque)
+  PASS  torque invalid: what the generator commanded is what rider_input received (PAS)
+  PASS  torque invalid: both flags are valid again before the window
+  PASS  torque invalid: both flags are valid again after recovery
+  PASS  pas invalid: torque_sensor_valid inside the window is 1
+  PASS  pas invalid: pas_sensor_valid inside the window is 0
+  PASS  pas invalid: what the generator commanded is what rider_input received (torque)
+  PASS  pas invalid: what the generator commanded is what rider_input received (PAS)
+  PASS  pas invalid: both flags are valid again before the window
+  PASS  pas invalid: both flags are valid again after recovery
+
+=== F. Runner failure handling (isolated directories) ===
+runner: required-trial guards reject incomplete evidence
+  PASS  a complete synthetic manifest passes the guards
+  PASS  a missing required trial is rejected
+  PASS  a duplicate case name is rejected
+  PASS  a case recorded as ERROR is rejected
+  PASS  a single recorded repeat is rejected (repeats_per_case=2)
+  PASS  repeats whose hashes disagree are rejected
+  PASS  a non-deterministic case is rejected
+  PASS  a case whose CSV failed the column contract is rejected
+  PASS  an empty regression list cannot claim regression_all_identical
+  PASS  a regression entry not linked to its own run is rejected
+  PASS  a regression whose pre-existing columns changed is rejected
+  PASS  a duplicate regression entry is rejected
+runner: a failing case closes the manifest as ABORTED
+  PASS  the runner exits non-zero on a failed required case
+  PASS  the manifest file exists after the failure
+  PASS  attempt_state is ABORTED
+  PASS  run_complete is false
+  PASS  the abort reason names the failing case
+  PASS  the failed case is recorded with status ERROR
+  PASS  the accepted results directory was not written to
+runner: the manifest is claimed IN_PROGRESS before any case runs
+  PASS  attempt_state starts as IN_PROGRESS
+  PASS  run_complete starts false
+  PASS  repeats_per_case is recorded in the manifest itself
+
+=== G. Scenario metadata and module resolution ===
+scenarios: declared event times match the commanded input
+  PASS  control_8s_cad30_speed0: a control case declares no events and sets no disturbance key
+  PASS  control_8s_cad30_speed18: a control case declares no events and sets no disturbance key
+  PASS  control_8s_cad72_speed0: a control case declares no events and sets no disturbance key
+  PASS  control_8s_cad72_speed18: a control case declares no events and sets no disturbance key
+  PASS  control_6s_cad30_speed0: a control case declares no events and sets no disturbance key
+  PASS  control_6s_cad30_speed18: a control case declares no events and sets no disturbance key
+  PASS  control_6s_cad72_speed0: a control case declares no events and sets no disturbance key
+  PASS  control_6s_cad72_speed18: a control case declares no events and sets no disturbance key
+  PASS  miss_tick2_cad30_speed0: miss_tick_start equals the commanded window start
+  PASS  miss_tick2_cad30_speed0: the window has a declared end
+  PASS  miss_tick4_cad30_speed0: miss_tick_start equals the commanded window start
+  PASS  miss_tick4_cad30_speed0: the window has a declared end
+  PASS  miss_tick20_cad30_speed0: miss_tick_start equals the commanded window start
+  PASS  miss_tick20_cad30_speed0: the window has a declared end
+  PASS  miss_tick2_cad30_speed18: miss_tick_start equals the commanded window start
+  PASS  miss_tick2_cad30_speed18: the window has a declared end
+  PASS  miss_tick4_cad30_speed18: miss_tick_start equals the commanded window start
+  PASS  miss_tick4_cad30_speed18: the window has a declared end
+  PASS  miss_tick20_cad30_speed18: miss_tick_start equals the commanded window start
+  PASS  miss_tick20_cad30_speed18: the window has a declared end
+  PASS  miss_tick2_cad72_speed0: miss_tick_start equals the commanded window start
+  PASS  miss_tick2_cad72_speed0: the window has a declared end
+  PASS  miss_tick4_cad72_speed0: miss_tick_start equals the commanded window start
+  PASS  miss_tick4_cad72_speed0: the window has a declared end
+  PASS  miss_tick20_cad72_speed0: miss_tick_start equals the commanded window start
+  PASS  miss_tick20_cad72_speed0: the window has a declared end
+  PASS  miss_tick2_cad72_speed18: miss_tick_start equals the commanded window start
+  PASS  miss_tick2_cad72_speed18: the window has a declared end
+  PASS  miss_tick4_cad72_speed18: miss_tick_start equals the commanded window start
+  PASS  miss_tick4_cad72_speed18: the window has a declared end
+  PASS  miss_tick20_cad72_speed18: miss_tick_start equals the commanded window start
+  PASS  miss_tick20_cad72_speed18: the window has a declared end
+  PASS  scenario group 'control_8s' exists
+  PASS  scenario group 'control_6s' exists
+  PASS  scenario group 'reverse_clean' exists
+  PASS  scenario group 'reverse_bounce' exists
+  PASS  scenario group 'torque_invalid' exists
+  PASS  scenario group 'pas_invalid' exists
+  PASS  scenario group 'pas_invalid_seq' exists
+  PASS  scenario group 'pas_edge_drop' exists
+  PASS  scenario group 'pas_edge_jitter' exists
+  PASS  scenario group 'miss_tick' exists
+  PASS  scenario group 'fg_delay' exists
+  PASS  scenario group 'fg_delay_hires' exists
+  PASS  reverse_clean covers 30 and 72 rpm
+  PASS  reverse_clean covers 0 and 18 km/h
+  PASS  torque_invalid covers 30 and 72 rpm
+  PASS  torque_invalid covers 0 and 18 km/h
+  PASS  pas_edge_drop covers 30 and 72 rpm
+  PASS  pas_edge_drop covers 0 and 18 km/h
+  PASS  miss_tick covers 30 and 72 rpm
+  PASS  miss_tick covers 0 and 18 km/h
+  PASS  fg_delay covers 30 and 72 rpm
+  PASS  fg_delay covers 0 and 18 km/h
+module resolution is explicit, not ambient
+  PASS  event primitives come from the accepted transients-001/event_metrics.py
+  PASS  metric primitives come from the accepted AP-01/metrics.py
+  PASS  `scenarios` is the disturbances-001 package, not another task's
+  PASS  the scenario set is this task's, and non-trivial
+  PASS  importing the adapters did not add an accepted directory to sys.path
+  PASS  no module was loaded straight from a stale __pycache__ file
+
+=== SUMMARY: 184 passed, 0 failed ===

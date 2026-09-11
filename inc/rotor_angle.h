@@ -53,6 +53,17 @@
  * including when already untrusted. Production supplies real Hall sequence numbers; timer
  * rollover is not movement. The fallback timer comparison remains for legacy host callers.
  *
+ * FW-131.2 - THE EDGE RACE. Making the sequence number the sole definition of an edge introduced a
+ * regression: the timer restart and the sequence number come from DIFFERENT contexts. The timer is
+ * restarted by the hardware on the edge itself; the sequence number and hall_angle are published
+ * by the Hall ISR. A FOC tick that lands between them sees "timer restarted, sequence unchanged"
+ * and the old code read that as lost timing - so it cleared trust, and every such flip latched a
+ * fresh transfer_offset for a sector that was about to arrive anyway. Recomputing during that
+ * window is just as wrong: hall_angle still names the PREVIOUS sector while the timer has already
+ * restarted, so the interpolation collapses to zero and the angle steps a whole sector backwards.
+ * The window is now recognised for what it is and the previous output is HELD across it, bounded
+ * by ROTOR_ANGLE_EDGE_PENDING_TICKS so a genuine rollover still loses trust.
+ *
  * A/B: CANONICAL_ANGLE_ENABLE in inc/config.h. 0 keeps main.c's legacy branches untouched.
  */
 
@@ -68,6 +79,18 @@
 /* Hall edges needed since the anchor before the timing may be believed (Fake Taxi: >= 2). */
 #define ROTOR_ANGLE_TRUST_EDGES 2U
 
+/*
+ * FW-131.2: how many FOC ticks a restarted Hall timer may wait for the Hall ISR to publish the
+ * sector that goes with it. The hardware restarts the timer ON the edge; the sequence number and
+ * hall_angle are written by the ISR, so a FOC tick landing between the two sees a restarted timer
+ * against the previous sector's angle. That is one ISR ordering, not a lost signal.
+ *
+ * 4 ticks is 250us at 16 kHz. One sector is shorter than that only above ~667 ERPS, far beyond
+ * this drive, so the bound can never swallow a whole sector. Past the bound the restart is treated
+ * as lost timing exactly as before, which is what still catches a real 16-bit timer rollover.
+ */
+#define ROTOR_ANGLE_EDGE_PENDING_TICKS 4U
+
 /* Limit only the change of angle formula, not normal rotor rotation.
  * A 30-degree fallback takes 160 FOC ticks (10 ms at 16 kHz). */
 #define ROTOR_ANGLE_TRANSFER_STEP (ROTOR_ANGLE_DEG_30 / 160)
@@ -78,6 +101,7 @@ typedef struct {
 	int8_t last_direction;   /* latched: a standstill keeps the sign it last measured */
 	uint16_t prev_tim2;      /* previous tick's time-since-edge, for edge detection */
 	uint8_t have_prev_tim2;
+	uint8_t pending_ticks;   /* FOC ticks a restarted timer has waited for its sector, 0 = none */
 	uint8_t have_output;
 	int32_t last_output, transfer_offset;
 	uint32_t prev_hall_sequence;

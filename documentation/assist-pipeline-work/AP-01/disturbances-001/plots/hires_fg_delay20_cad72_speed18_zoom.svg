@@ -1,0 +1,504 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="2321" viewBox="0 0 1320 2321">
+<style>text{font-family:ui-monospace,Consolas,monospace}.hd{font-size:15px;font-weight:600;fill:#111}.sub{font-size:11px;fill:#444}.ttl{font-size:12px;font-weight:600;fill:#222}.ax{font-size:10px;fill:#555}.lg{font-size:10px;fill:#222}.evt{font-size:9px;fill:#b00}.frame{fill:#fff;stroke:#bbb;stroke-width:1}.grid{stroke:#eee;stroke-width:1}.ev{stroke:#d62728;stroke-width:1;stroke-dasharray:4 3}.leg{font-size:9.5px;fill:#333}</style>
+<rect width="1320" height="2321" fill="#fff"/>
+<text x="78" y="20" class="hd">hires_fg_delay20_cad72_speed18</text>
+<text x="78" y="36" class="sub">fg_delay=20 ticks, FULL 4 kHz row rate | zoom [1.199, 1.207] s | csv sha256 ef95a9b3e5eb0dfb | cadence=72 rpm speed=18 km/h torque=28 Nm ripple=45% asym=8%</text>
+<text x="78" y="61" class="ttl">Generator input (synthetic rider)</text>
+<rect x="78" y="70" width="942" height="140" class="frame"/>
+<line x1="78" y1="188.3" x2="1020" y2="188.3" class="grid"/>
+<text x="72" y="191.8" class="ax" text-anchor="end">20</text>
+<line x1="78" y1="146.5" x2="1020" y2="146.5" class="grid"/>
+<text x="72" y="150.0" class="ax" text-anchor="end">40</text>
+<line x1="78" y1="104.7" x2="1020" y2="104.7" class="grid"/>
+<text x="72" y="108.2" class="ax" text-anchor="end">60</text>
+<line x1="78.0" y1="70" x2="78.0" y2="210" class="grid"/>
+<text x="78.0" y="225" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="70" x2="195.7" y2="210" class="grid"/>
+<text x="195.7" y="225" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="70" x2="313.5" y2="210" class="grid"/>
+<text x="313.5" y="225" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="70" x2="431.2" y2="210" class="grid"/>
+<text x="431.2" y="225" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="70" x2="549.0" y2="210" class="grid"/>
+<text x="549.0" y="225" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="70" x2="666.7" y2="210" class="grid"/>
+<text x="666.7" y="225" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="70" x2="784.5" y2="210" class="grid"/>
+<text x="784.5" y="225" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="70" x2="902.2" y2="210" class="grid"/>
+<text x="902.2" y="225" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="70" x2="1020.0" y2="210" class="grid"/>
+<text x="1020.0" y="225" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="70" x2="195.7" y2="210" class="ev"/>
+<text x="198.7" y="81" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="70" x2="784.5" y2="210" class="ev"/>
+<text x="787.5" y="92" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,199.3 107.4,199.3 136.9,199.4 166.3,199.4 195.7,199.4 225.2,199.5 254.6,199.5 284.1,199.6 313.5,199.6 342.9,199.6 372.4,199.7 401.8,199.7 431.2,199.7 460.7,199.8 490.1,199.8 519.6,199.8 549.0,199.9 578.4,199.9 607.9,199.9 637.3,200.0 666.7,200.0 696.2,200.0 725.6,200.1 755.1,200.1 784.5,200.1 813.9,200.1 843.4,200.2 872.8,200.2 902.2,200.2 931.7,200.3 961.1,200.3 990.6,200.3 1020.0,200.3" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="78" x2="1048" y2="78" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="82" class="lg">torque_gen_nm [Nm]</text>
+<polyline points="78.0,171.6 107.4,171.6 136.9,171.6 166.3,171.6 195.7,171.6 225.2,171.6 254.6,171.6 284.1,171.6 313.5,171.6 342.9,171.6 372.4,171.6 401.8,171.6 431.2,171.6 460.7,171.6 490.1,171.6 519.6,171.6 549.0,171.6 578.4,171.6 607.9,171.6 637.3,171.6 666.7,171.6 696.2,171.6 725.6,171.6 755.1,171.6 784.5,171.6 813.9,171.6 843.4,171.6 872.8,171.6 902.2,171.6 931.7,171.6 961.1,171.6 990.6,171.6 1020.0,171.6" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="93" x2="1048" y2="93" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="97" class="lg">torque_cmd_mean_nm [Nm] (commanded mean)</text>
+<polyline points="78.0,79.7 107.4,79.7 136.9,79.7 166.3,79.7 195.7,79.7 225.2,79.7 254.6,79.7 284.1,79.7 313.5,79.7 342.9,79.7 372.4,79.7 401.8,79.7 431.2,79.7 460.7,79.7 490.1,79.7 519.6,79.7 549.0,79.7 578.4,79.7 607.9,79.7 637.3,79.7 666.7,79.7 696.2,79.7 725.6,79.7 755.1,79.7 784.5,79.7 813.9,79.7 843.4,79.7 872.8,79.7 902.2,79.7 931.7,79.7 961.1,79.7 990.6,79.7 1020.0,79.7" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="108" x2="1048" y2="108" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="112" class="lg">cadence_gen_rpm [rpm]</text>
+<text x="78" y="261" class="ttl">Conditioned rider input (production; torque is in native sensor counts, not Nm)</text>
+<rect x="78" y="270" width="942" height="140" class="frame"/>
+<line x1="78" y1="388.5" x2="1020" y2="388.5" class="grid"/>
+<text x="72" y="392.0" class="ax" text-anchor="end">100</text>
+<line x1="78" y1="347.7" x2="1020" y2="347.7" class="grid"/>
+<text x="72" y="351.2" class="ax" text-anchor="end">200</text>
+<line x1="78" y1="307.0" x2="1020" y2="307.0" class="grid"/>
+<text x="72" y="310.5" class="ax" text-anchor="end">300</text>
+<line x1="78.0" y1="270" x2="78.0" y2="410" class="grid"/>
+<text x="78.0" y="425" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="270" x2="195.7" y2="410" class="grid"/>
+<text x="195.7" y="425" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="270" x2="313.5" y2="410" class="grid"/>
+<text x="313.5" y="425" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="270" x2="431.2" y2="410" class="grid"/>
+<text x="431.2" y="425" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="270" x2="549.0" y2="410" class="grid"/>
+<text x="549.0" y="425" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="270" x2="666.7" y2="410" class="grid"/>
+<text x="666.7" y="425" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="270" x2="784.5" y2="410" class="grid"/>
+<text x="784.5" y="425" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="270" x2="902.2" y2="410" class="grid"/>
+<text x="902.2" y="425" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="270" x2="1020.0" y2="410" class="grid"/>
+<text x="1020.0" y="425" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="270" x2="195.7" y2="410" class="ev"/>
+<text x="198.7" y="281" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="270" x2="784.5" y2="410" class="ev"/>
+<text x="787.5" y="292" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,279.7 107.4,279.7 136.9,279.7 166.3,279.7 195.7,279.7 225.2,279.7 254.6,279.7 284.1,279.7 313.5,279.7 342.9,279.7 372.4,279.7 401.8,279.7 431.2,279.7 460.7,279.7 490.1,279.7 519.6,279.7 549.0,279.7 578.4,279.7 607.9,279.7 637.3,279.7 666.7,279.7 696.2,279.7 725.6,279.7 755.1,279.7 784.5,280.9 813.9,280.9 843.4,280.9 872.8,281.3 902.2,281.3 931.7,281.3 961.1,281.3 990.6,281.3 1020.0,281.3" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="278" x2="1048" y2="278" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="282" class="lg">torque_run_native [native counts, ~27/kg]</text>
+<polyline points="78.0,400.3 107.4,400.3 136.9,400.3 166.3,400.3 195.7,400.3 225.2,400.3 254.6,400.3 284.1,400.3 313.5,400.3 342.9,400.3 372.4,400.3 401.8,400.3 431.2,400.3 460.7,400.3 490.1,400.3 519.6,400.3 549.0,400.3 578.4,400.3 607.9,400.3 637.3,400.3 666.7,400.3 696.2,400.3 725.6,400.3 755.1,400.3 784.5,400.3 813.9,400.3 843.4,400.3 872.8,400.3 902.2,400.3 931.7,400.3 961.1,400.3 990.6,400.3 1020.0,400.3" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="293" x2="1048" y2="293" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="297" class="lg">cadence_control_rpm [rpm]</text>
+<text x="78" y="461" class="ttl">Iq chain (production, Iq request units - not Nm, not amps)</text>
+<rect x="78" y="470" width="942" height="140" class="frame"/>
+<line x1="78" y1="600.3" x2="1020" y2="600.3" class="grid"/>
+<text x="72" y="603.8" class="ax" text-anchor="end">156</text>
+<line x1="78" y1="570.2" x2="1020" y2="570.2" class="grid"/>
+<text x="72" y="573.7" class="ax" text-anchor="end">156.5</text>
+<line x1="78" y1="540.0" x2="1020" y2="540.0" class="grid"/>
+<text x="72" y="543.5" class="ax" text-anchor="end">157</text>
+<line x1="78" y1="509.8" x2="1020" y2="509.8" class="grid"/>
+<text x="72" y="513.3" class="ax" text-anchor="end">157.5</text>
+<line x1="78" y1="479.7" x2="1020" y2="479.7" class="grid"/>
+<text x="72" y="483.2" class="ax" text-anchor="end">158</text>
+<line x1="78.0" y1="470" x2="78.0" y2="610" class="grid"/>
+<text x="78.0" y="625" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="470" x2="195.7" y2="610" class="grid"/>
+<text x="195.7" y="625" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="470" x2="313.5" y2="610" class="grid"/>
+<text x="313.5" y="625" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="470" x2="431.2" y2="610" class="grid"/>
+<text x="431.2" y="625" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="470" x2="549.0" y2="610" class="grid"/>
+<text x="549.0" y="625" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="470" x2="666.7" y2="610" class="grid"/>
+<text x="666.7" y="625" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="470" x2="784.5" y2="610" class="grid"/>
+<text x="784.5" y="625" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="470" x2="902.2" y2="610" class="grid"/>
+<text x="902.2" y="625" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="470" x2="1020.0" y2="610" class="grid"/>
+<text x="1020.0" y="625" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="470" x2="195.7" y2="610" class="ev"/>
+<text x="198.7" y="481" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="470" x2="784.5" y2="610" class="ev"/>
+<text x="787.5" y="492" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,479.7 107.4,479.7 136.9,479.7 166.3,479.7 195.7,479.7 225.2,479.7 254.6,479.7 284.1,479.7 313.5,479.7 342.9,479.7 372.4,479.7 401.8,479.7 431.2,479.7 460.7,479.7 490.1,479.7 519.6,479.7 549.0,479.7 578.4,479.7 607.9,479.7 637.3,479.7 666.7,479.7 696.2,479.7 725.6,479.7 755.1,479.7 784.5,600.3 813.9,600.3 843.4,600.3 872.8,600.3 902.2,600.3 931.7,600.3 961.1,600.3 990.6,600.3 1020.0,600.3" fill="none" stroke="#9467bd" stroke-width="1.1"/>
+<line x1="1030" y1="478" x2="1048" y2="478" stroke="#9467bd" stroke-width="2"/>
+<text x="1053" y="482" class="lg">iq_before_profile_limit [Iq counts]</text>
+<polyline points="78.0,479.7 107.4,479.7 136.9,479.7 166.3,479.7 195.7,479.7 225.2,479.7 254.6,479.7 284.1,479.7 313.5,479.7 342.9,479.7 372.4,479.7 401.8,479.7 431.2,479.7 460.7,479.7 490.1,479.7 519.6,479.7 549.0,479.7 578.4,479.7 607.9,479.7 637.3,479.7 666.7,479.7 696.2,479.7 725.6,479.7 755.1,479.7 784.5,600.3 813.9,600.3 843.4,600.3 872.8,600.3 902.2,600.3 931.7,600.3 961.1,600.3 990.6,600.3 1020.0,600.3" fill="none" stroke="#8c564b" stroke-width="1.1"/>
+<line x1="1030" y1="493" x2="1048" y2="493" stroke="#8c564b" stroke-width="2"/>
+<text x="1053" y="497" class="lg">iq_mode_request [Iq counts]</text>
+<polyline points="78.0,479.7 107.4,479.7 136.9,479.7 166.3,479.7 195.7,479.7 225.2,479.7 254.6,479.7 284.1,479.7 313.5,479.7 342.9,479.7 372.4,479.7 401.8,479.7 431.2,479.7 460.7,479.7 490.1,479.7 519.6,479.7 549.0,479.7 578.4,479.7 607.9,479.7 637.3,479.7 666.7,479.7 696.2,479.7 725.6,479.7 755.1,479.7 784.5,600.3 813.9,600.3 843.4,600.3 872.8,600.3 902.2,600.3 931.7,600.3 961.1,600.3 990.6,600.3 1020.0,600.3" fill="none" stroke="#e377c2" stroke-width="1.1"/>
+<line x1="1030" y1="508" x2="1048" y2="508" stroke="#e377c2" stroke-width="2"/>
+<text x="1053" y="512" class="lg">iq_requested [Iq counts]</text>
+<polyline points="78.0,479.7 107.4,479.7 136.9,479.7 166.3,479.7 195.7,479.7 225.2,479.7 254.6,479.7 284.1,479.7 313.5,479.7 342.9,479.7 372.4,479.7 401.8,479.7 431.2,479.7 460.7,479.7 490.1,479.7 519.6,479.7 549.0,479.7 578.4,479.7 607.9,479.7 637.3,479.7 666.7,479.7 696.2,479.7 725.6,479.7 755.1,479.7 784.5,600.3 813.9,600.3 843.4,600.3 872.8,600.3 902.2,600.3 931.7,600.3 961.1,600.3 990.6,600.3 1020.0,600.3" fill="none" stroke="#ff7f0e" stroke-width="1.1"/>
+<line x1="1030" y1="523" x2="1048" y2="523" stroke="#ff7f0e" stroke-width="2"/>
+<text x="1053" y="527" class="lg">iq_allowed [Iq counts]</text>
+<polyline points="78.0,479.7 107.4,479.7 136.9,479.7 166.3,479.7 195.7,479.7 225.2,479.7 254.6,479.7 284.1,479.7 313.5,479.7 342.9,479.7 372.4,479.7 401.8,479.7 431.2,479.7 460.7,479.7 490.1,479.7 519.6,479.7 549.0,479.7 578.4,479.7 607.9,479.7 637.3,479.7 666.7,479.7 696.2,479.7 725.6,479.7 755.1,479.7 784.5,540.0 813.9,600.3 843.4,600.3 872.8,600.3 902.2,600.3 931.7,600.3 961.1,600.3 990.6,600.3 1020.0,600.3" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="538" x2="1048" y2="538" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="542" class="lg">iq_ref [Iq counts] (final, 16 kHz)</text>
+<text x="78" y="661" class="ttl">Supervisory state (small enums)</text>
+<rect x="78" y="670" width="942" height="140" class="frame"/>
+<line x1="78" y1="800.3" x2="1020" y2="800.3" class="grid"/>
+<text x="72" y="803.8" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="760.1" x2="1020" y2="760.1" class="grid"/>
+<text x="72" y="763.6" class="ax" text-anchor="end">1</text>
+<line x1="78" y1="719.9" x2="1020" y2="719.9" class="grid"/>
+<text x="72" y="723.4" class="ax" text-anchor="end">2</text>
+<line x1="78" y1="679.7" x2="1020" y2="679.7" class="grid"/>
+<text x="72" y="683.2" class="ax" text-anchor="end">3</text>
+<line x1="78.0" y1="670" x2="78.0" y2="810" class="grid"/>
+<text x="78.0" y="825" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="670" x2="195.7" y2="810" class="grid"/>
+<text x="195.7" y="825" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="670" x2="313.5" y2="810" class="grid"/>
+<text x="313.5" y="825" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="670" x2="431.2" y2="810" class="grid"/>
+<text x="431.2" y="825" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="670" x2="549.0" y2="810" class="grid"/>
+<text x="549.0" y="825" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="670" x2="666.7" y2="810" class="grid"/>
+<text x="666.7" y="825" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="670" x2="784.5" y2="810" class="grid"/>
+<text x="784.5" y="825" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="670" x2="902.2" y2="810" class="grid"/>
+<text x="902.2" y="825" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="670" x2="1020.0" y2="810" class="grid"/>
+<text x="1020.0" y="825" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="670" x2="195.7" y2="810" class="ev"/>
+<text x="198.7" y="681" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="670" x2="784.5" y2="810" class="ev"/>
+<text x="787.5" y="692" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,760.1 107.4,760.1 136.9,760.1 166.3,760.1 195.7,760.1 225.2,760.1 254.6,760.1 284.1,760.1 313.5,760.1 342.9,760.1 372.4,760.1 401.8,760.1 431.2,760.1 460.7,760.1 490.1,760.1 519.6,760.1 549.0,760.1 578.4,760.1 607.9,760.1 637.3,760.1 666.7,760.1 696.2,760.1 725.6,760.1 755.1,760.1 784.5,760.1 813.9,760.1 843.4,760.1 872.8,760.1 902.2,760.1 931.7,760.1 961.1,760.1 990.6,760.1 1020.0,760.1" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="678" x2="1048" y2="678" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="682" class="lg">session [enum 0-3]</text>
+<polyline points="78.0,679.7 107.4,679.7 136.9,679.7 166.3,679.7 195.7,679.7 225.2,679.7 254.6,679.7 284.1,679.7 313.5,679.7 342.9,679.7 372.4,679.7 401.8,679.7 431.2,679.7 460.7,679.7 490.1,679.7 519.6,679.7 549.0,679.7 578.4,679.7 607.9,679.7 637.3,679.7 666.7,679.7 696.2,679.7 725.6,679.7 755.1,679.7 784.5,679.7 813.9,679.7 843.4,679.7 872.8,679.7 902.2,679.7 931.7,679.7 961.1,679.7 990.6,679.7 1020.0,679.7" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="693" x2="1048" y2="693" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="697" class="lg">gate_steps [counts]</text>
+<polyline points="78.0,760.1 107.4,760.1 136.9,760.1 166.3,760.1 195.7,760.1 225.2,760.1 254.6,760.1 284.1,760.1 313.5,760.1 342.9,760.1 372.4,760.1 401.8,760.1 431.2,760.1 460.7,760.1 490.1,760.1 519.6,760.1 549.0,760.1 578.4,760.1 607.9,760.1 637.3,760.1 666.7,760.1 696.2,760.1 725.6,760.1 755.1,760.1 784.5,760.1 813.9,760.1 843.4,760.1 872.8,760.1 902.2,760.1 931.7,760.1 961.1,760.1 990.6,760.1 1020.0,760.1" fill="none" stroke="#7f7f7f" stroke-width="1.1"/>
+<line x1="1030" y1="708" x2="1048" y2="708" stroke="#7f7f7f" stroke-width="2"/>
+<text x="1053" y="712" class="lg">ride_interval [0/1/2] (generator)</text>
+<polyline points="78.0,760.1 107.4,760.1 136.9,760.1 166.3,760.1 195.7,760.1 225.2,760.1 254.6,760.1 284.1,760.1 313.5,760.1 342.9,760.1 372.4,760.1 401.8,760.1 431.2,760.1 460.7,760.1 490.1,760.1 519.6,760.1 549.0,760.1 578.4,760.1 607.9,760.1 637.3,760.1 666.7,760.1 696.2,760.1 725.6,760.1 755.1,760.1 784.5,760.1 813.9,760.1 843.4,760.1 872.8,760.1 902.2,760.1 931.7,760.1 961.1,760.1 990.6,760.1 1020.0,760.1" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="723" x2="1048" y2="723" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="727" class="lg">crank_direction [-1/0/1] (generator)</text>
+<polyline points="78.0,800.3 107.4,800.3 136.9,800.3 166.3,800.3 195.7,800.3 225.2,800.3 254.6,800.3 284.1,800.3 313.5,800.3 342.9,800.3 372.4,800.3 401.8,800.3 431.2,800.3 460.7,800.3 490.1,800.3 519.6,800.3 549.0,800.3 578.4,800.3 607.9,800.3 637.3,800.3 666.7,800.3 696.2,800.3 725.6,800.3 755.1,800.3 784.5,800.3 813.9,800.3 843.4,800.3 872.8,800.3 902.2,800.3 931.7,800.3 961.1,800.3 990.6,800.3 1020.0,800.3" fill="none" stroke="#8c564b" stroke-width="1.1"/>
+<line x1="1030" y1="738" x2="1048" y2="738" stroke="#8c564b" stroke-width="2"/>
+<text x="1053" y="742" class="lg">pas_direction_state [0=SAFE,1=INHIBIT,2=CONFIRM]</text>
+<polyline points="78.0,800.3 107.4,800.3 136.9,800.3 166.3,800.3 195.7,800.3 225.2,800.3 254.6,800.3 284.1,800.3 313.5,800.3 342.9,800.3 372.4,800.3 401.8,800.3 431.2,800.3 460.7,800.3 490.1,800.3 519.6,800.3 549.0,800.3 578.4,800.3 607.9,800.3 637.3,800.3 666.7,800.3 696.2,800.3 725.6,800.3 755.1,800.3 784.5,800.3 813.9,800.3 843.4,800.3 872.8,800.3 902.2,800.3 931.7,800.3 961.1,800.3 990.6,800.3 1020.0,800.3" fill="none" stroke="#e377c2" stroke-width="1.1"/>
+<line x1="1030" y1="753" x2="1048" y2="753" stroke="#e377c2" stroke-width="2"/>
+<text x="1053" y="757" class="lg">pas_inhibit_reason [0=none,1=rev,2=inv]</text>
+<text x="78" y="861" class="ttl">debug_flags (bitmask - own axis, see legend below)</text>
+<rect x="78" y="870" width="942" height="140" class="frame"/>
+<line x1="78" y1="1000.3" x2="1020" y2="1000.3" class="grid"/>
+<text x="72" y="1003.8" class="ax" text-anchor="end">-1</text>
+<line x1="78" y1="970.2" x2="1020" y2="970.2" class="grid"/>
+<text x="72" y="973.7" class="ax" text-anchor="end">-0.5</text>
+<line x1="78" y1="940.0" x2="1020" y2="940.0" class="grid"/>
+<text x="72" y="943.5" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="909.8" x2="1020" y2="909.8" class="grid"/>
+<text x="72" y="913.3" class="ax" text-anchor="end">0.5</text>
+<line x1="78" y1="879.7" x2="1020" y2="879.7" class="grid"/>
+<text x="72" y="883.2" class="ax" text-anchor="end">1</text>
+<line x1="78.0" y1="870" x2="78.0" y2="1010" class="grid"/>
+<text x="78.0" y="1025" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="870" x2="195.7" y2="1010" class="grid"/>
+<text x="195.7" y="1025" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="870" x2="313.5" y2="1010" class="grid"/>
+<text x="313.5" y="1025" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="870" x2="431.2" y2="1010" class="grid"/>
+<text x="431.2" y="1025" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="870" x2="549.0" y2="1010" class="grid"/>
+<text x="549.0" y="1025" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="870" x2="666.7" y2="1010" class="grid"/>
+<text x="666.7" y="1025" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="870" x2="784.5" y2="1010" class="grid"/>
+<text x="784.5" y="1025" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="870" x2="902.2" y2="1010" class="grid"/>
+<text x="902.2" y="1025" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="870" x2="1020.0" y2="1010" class="grid"/>
+<text x="1020.0" y="1025" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="870" x2="195.7" y2="1010" class="ev"/>
+<text x="198.7" y="881" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="870" x2="784.5" y2="1010" class="ev"/>
+<text x="787.5" y="892" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,940.0 107.4,940.0 136.9,940.0 166.3,940.0 195.7,940.0 225.2,940.0 254.6,940.0 284.1,940.0 313.5,940.0 342.9,940.0 372.4,940.0 401.8,940.0 431.2,940.0 460.7,940.0 490.1,940.0 519.6,940.0 549.0,940.0 578.4,940.0 607.9,940.0 637.3,940.0 666.7,940.0 696.2,940.0 725.6,940.0 755.1,940.0 784.5,940.0 813.9,940.0 843.4,940.0 872.8,940.0 902.2,940.0 931.7,940.0 961.1,940.0 990.6,940.0 1020.0,940.0" fill="none" stroke="#ff7f0e" stroke-width="1.1"/>
+<line x1="1030" y1="878" x2="1048" y2="878" stroke="#ff7f0e" stroke-width="2"/>
+<text x="1053" y="882" class="lg">debug_flags [bitmask]</text>
+<text x="78" y="1061" class="ttl">PAS position and run lengths</text>
+<rect x="78" y="1070" width="942" height="140" class="frame"/>
+<line x1="78" y1="1200.3" x2="1020" y2="1200.3" class="grid"/>
+<text x="72" y="1203.8" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="1170.5" x2="1020" y2="1170.5" class="grid"/>
+<text x="72" y="1174.0" class="ax" text-anchor="end">20</text>
+<line x1="78" y1="1140.7" x2="1020" y2="1140.7" class="grid"/>
+<text x="72" y="1144.2" class="ax" text-anchor="end">40</text>
+<line x1="78" y1="1110.9" x2="1020" y2="1110.9" class="grid"/>
+<text x="72" y="1114.4" class="ax" text-anchor="end">60</text>
+<line x1="78" y1="1081.1" x2="1020" y2="1081.1" class="grid"/>
+<text x="72" y="1084.6" class="ax" text-anchor="end">80</text>
+<line x1="78.0" y1="1070" x2="78.0" y2="1210" class="grid"/>
+<text x="78.0" y="1225" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="1070" x2="195.7" y2="1210" class="grid"/>
+<text x="195.7" y="1225" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="1070" x2="313.5" y2="1210" class="grid"/>
+<text x="313.5" y="1225" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="1070" x2="431.2" y2="1210" class="grid"/>
+<text x="431.2" y="1225" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="1070" x2="549.0" y2="1210" class="grid"/>
+<text x="549.0" y="1225" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="1070" x2="666.7" y2="1210" class="grid"/>
+<text x="666.7" y="1225" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="1070" x2="784.5" y2="1210" class="grid"/>
+<text x="784.5" y="1225" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="1070" x2="902.2" y2="1210" class="grid"/>
+<text x="902.2" y="1225" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="1070" x2="1020.0" y2="1210" class="grid"/>
+<text x="1020.0" y="1225" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="1070" x2="195.7" y2="1210" class="ev"/>
+<text x="198.7" y="1081" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="1070" x2="784.5" y2="1210" class="ev"/>
+<text x="787.5" y="1092" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,1081.1 107.4,1081.1 136.9,1081.1 166.3,1081.1 195.7,1081.1 225.2,1081.1 254.6,1081.1 284.1,1081.1 313.5,1081.1 342.9,1081.1 372.4,1081.1 401.8,1081.1 431.2,1081.1 460.7,1081.1 490.1,1081.1 519.6,1081.1 549.0,1079.7 578.4,1079.7 607.9,1079.7 637.3,1079.7 666.7,1079.7 696.2,1079.7 725.6,1079.7 755.1,1079.7 784.5,1079.7 813.9,1079.7 843.4,1079.7 872.8,1079.7 902.2,1079.7 931.7,1079.7 961.1,1079.7 990.6,1079.7 1020.0,1079.7" fill="none" stroke="#9467bd" stroke-width="1.1"/>
+<line x1="1030" y1="1078" x2="1048" y2="1078" stroke="#9467bd" stroke-width="2"/>
+<text x="1053" y="1082" class="lg">pas_transition_index [signed quadrature index]</text>
+<polyline points="78.0,1081.1 107.4,1081.1 136.9,1081.1 166.3,1081.1 195.7,1081.1 225.2,1081.1 254.6,1081.1 284.1,1081.1 313.5,1081.1 342.9,1081.1 372.4,1081.1 401.8,1081.1 431.2,1081.1 460.7,1081.1 490.1,1081.1 519.6,1081.1 549.0,1081.1 578.4,1081.1 607.9,1081.1 637.3,1081.1 666.7,1081.1 696.2,1081.1 725.6,1081.1 755.1,1081.1 784.5,1079.7 813.9,1079.7 843.4,1079.7 872.8,1079.7 902.2,1079.7 931.7,1079.7 961.1,1079.7 990.6,1079.7 1020.0,1079.7" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="1093" x2="1048" y2="1093" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="1097" class="lg">pas_fwd_run [consecutive forward steps]</text>
+<polyline points="78.0,1200.3 107.4,1200.3 136.9,1200.3 166.3,1200.3 195.7,1200.3 225.2,1200.3 254.6,1200.3 284.1,1200.3 313.5,1200.3 342.9,1200.3 372.4,1200.3 401.8,1200.3 431.2,1200.3 460.7,1200.3 490.1,1200.3 519.6,1200.3 549.0,1200.3 578.4,1200.3 607.9,1200.3 637.3,1200.3 666.7,1200.3 696.2,1200.3 725.6,1200.3 755.1,1200.3 784.5,1200.3 813.9,1200.3 843.4,1200.3 872.8,1200.3 902.2,1200.3 931.7,1200.3 961.1,1200.3 990.6,1200.3 1020.0,1200.3" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="1108" x2="1048" y2="1108" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="1112" class="lg">pas_rev_run [consecutive reverse steps]</text>
+<text x="78" y="1261" class="ttl">Sensor validity (commanded vs stored) and injection flags [all 0/1]</text>
+<rect x="78" y="1270" width="942" height="140" class="frame"/>
+<line x1="78" y1="1400.3" x2="1020" y2="1400.3" class="grid"/>
+<text x="72" y="1403.8" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="1370.2" x2="1020" y2="1370.2" class="grid"/>
+<text x="72" y="1373.7" class="ax" text-anchor="end">0.25</text>
+<line x1="78" y1="1340.0" x2="1020" y2="1340.0" class="grid"/>
+<text x="72" y="1343.5" class="ax" text-anchor="end">0.5</text>
+<line x1="78" y1="1309.8" x2="1020" y2="1309.8" class="grid"/>
+<text x="72" y="1313.3" class="ax" text-anchor="end">0.75</text>
+<line x1="78" y1="1279.7" x2="1020" y2="1279.7" class="grid"/>
+<text x="72" y="1283.2" class="ax" text-anchor="end">1</text>
+<line x1="78.0" y1="1270" x2="78.0" y2="1410" class="grid"/>
+<text x="78.0" y="1425" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="1270" x2="195.7" y2="1410" class="grid"/>
+<text x="195.7" y="1425" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="1270" x2="313.5" y2="1410" class="grid"/>
+<text x="313.5" y="1425" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="1270" x2="431.2" y2="1410" class="grid"/>
+<text x="431.2" y="1425" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="1270" x2="549.0" y2="1410" class="grid"/>
+<text x="549.0" y="1425" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="1270" x2="666.7" y2="1410" class="grid"/>
+<text x="666.7" y="1425" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="1270" x2="784.5" y2="1410" class="grid"/>
+<text x="784.5" y="1425" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="1270" x2="902.2" y2="1410" class="grid"/>
+<text x="902.2" y="1425" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="1270" x2="1020.0" y2="1410" class="grid"/>
+<text x="1020.0" y="1425" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="1270" x2="195.7" y2="1410" class="ev"/>
+<text x="198.7" y="1281" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="1270" x2="784.5" y2="1410" class="ev"/>
+<text x="787.5" y="1292" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,1279.7 107.4,1279.7 136.9,1279.7 166.3,1279.7 195.7,1279.7 225.2,1279.7 254.6,1279.7 284.1,1279.7 313.5,1279.7 342.9,1279.7 372.4,1279.7 401.8,1279.7 431.2,1279.7 460.7,1279.7 490.1,1279.7 519.6,1279.7 549.0,1279.7 578.4,1279.7 607.9,1279.7 637.3,1279.7 666.7,1279.7 696.2,1279.7 725.6,1279.7 755.1,1279.7 784.5,1279.7 813.9,1279.7 843.4,1279.7 872.8,1279.7 902.2,1279.7 931.7,1279.7 961.1,1279.7 990.6,1279.7 1020.0,1279.7" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="1278" x2="1048" y2="1278" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="1282" class="lg">torque_sensor_valid [commanded]</text>
+<polyline points="78.0,1279.7 107.4,1279.7 136.9,1279.7 166.3,1279.7 195.7,1279.7 225.2,1279.7 254.6,1279.7 284.1,1279.7 313.5,1279.7 342.9,1279.7 372.4,1279.7 401.8,1279.7 431.2,1279.7 460.7,1279.7 490.1,1279.7 519.6,1279.7 549.0,1279.7 578.4,1279.7 607.9,1279.7 637.3,1279.7 666.7,1279.7 696.2,1279.7 725.6,1279.7 755.1,1279.7 784.5,1279.7 813.9,1279.7 843.4,1279.7 872.8,1279.7 902.2,1279.7 931.7,1279.7 961.1,1279.7 990.6,1279.7 1020.0,1279.7" fill="none" stroke="#ff7f0e" stroke-width="1.1"/>
+<line x1="1030" y1="1293" x2="1048" y2="1293" stroke="#ff7f0e" stroke-width="2"/>
+<text x="1053" y="1297" class="lg">pas_sensor_valid [commanded]</text>
+<polyline points="78.0,1279.7 107.4,1279.7 136.9,1279.7 166.3,1279.7 195.7,1279.7 225.2,1279.7 254.6,1279.7 284.1,1279.7 313.5,1279.7 342.9,1279.7 372.4,1279.7 401.8,1279.7 431.2,1279.7 460.7,1279.7 490.1,1279.7 519.6,1279.7 549.0,1279.7 578.4,1279.7 607.9,1279.7 637.3,1279.7 666.7,1279.7 696.2,1279.7 725.6,1279.7 755.1,1279.7 784.5,1279.7 813.9,1279.7 843.4,1279.7 872.8,1279.7 902.2,1279.7 931.7,1279.7 961.1,1279.7 990.6,1279.7 1020.0,1279.7" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="1308" x2="1048" y2="1308" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="1312" class="lg">rider_torque_sensor_valid [stored in rider_input]</text>
+<polyline points="78.0,1279.7 107.4,1279.7 136.9,1279.7 166.3,1279.7 195.7,1279.7 225.2,1279.7 254.6,1279.7 284.1,1279.7 313.5,1279.7 342.9,1279.7 372.4,1279.7 401.8,1279.7 431.2,1279.7 460.7,1279.7 490.1,1279.7 519.6,1279.7 549.0,1279.7 578.4,1279.7 607.9,1279.7 637.3,1279.7 666.7,1279.7 696.2,1279.7 725.6,1279.7 755.1,1279.7 784.5,1279.7 813.9,1279.7 843.4,1279.7 872.8,1279.7 902.2,1279.7 931.7,1279.7 961.1,1279.7 990.6,1279.7 1020.0,1279.7" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="1323" x2="1048" y2="1323" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="1327" class="lg">rider_pas_sensor_valid [stored in rider_input]</text>
+<polyline points="78.0,1400.3 107.4,1400.3 136.9,1400.3 166.3,1400.3 195.7,1400.3 225.2,1400.3 254.6,1400.3 284.1,1400.3 313.5,1400.3 342.9,1400.3 372.4,1400.3 401.8,1400.3 431.2,1400.3 460.7,1400.3 490.1,1400.3 519.6,1400.3 549.0,1400.3 578.4,1400.3 607.9,1400.3 637.3,1400.3 666.7,1400.3 696.2,1400.3 725.6,1400.3 755.1,1400.3 784.5,1400.3 813.9,1400.3 843.4,1400.3 872.8,1400.3 902.2,1400.3 931.7,1400.3 961.1,1400.3 990.6,1400.3 1020.0,1400.3" fill="none" stroke="#9467bd" stroke-width="1.1"/>
+<line x1="1030" y1="1338" x2="1048" y2="1338" stroke="#9467bd" stroke-width="2"/>
+<text x="1053" y="1342" class="lg">pas_backpedal_confirmed [production]</text>
+<polyline points="78.0,1400.3 107.4,1400.3 136.9,1400.3 166.3,1400.3 195.7,1279.7 225.2,1279.7 254.6,1279.7 284.1,1279.7 313.5,1279.7 342.9,1279.7 372.4,1279.7 401.8,1279.7 431.2,1279.7 460.7,1279.7 490.1,1279.7 519.6,1279.7 549.0,1279.7 578.4,1279.7 607.9,1279.7 637.3,1279.7 666.7,1279.7 696.2,1279.7 725.6,1279.7 755.1,1400.3 784.5,1400.3 813.9,1400.3 843.4,1400.3 872.8,1400.3 902.2,1400.3 931.7,1400.3 961.1,1400.3 990.6,1400.3 1020.0,1400.3" fill="none" stroke="#8c564b" stroke-width="1.1"/>
+<line x1="1030" y1="1353" x2="1048" y2="1353" stroke="#8c564b" stroke-width="2"/>
+<text x="1053" y="1357" class="lg">fg_delay_active [generator]</text>
+<polyline points="78.0,1400.3 107.4,1400.3 136.9,1400.3 166.3,1400.3 195.7,1400.3 225.2,1400.3 254.6,1400.3 284.1,1400.3 313.5,1400.3 342.9,1400.3 372.4,1400.3 401.8,1400.3 431.2,1400.3 460.7,1400.3 490.1,1400.3 519.6,1400.3 549.0,1400.3 578.4,1400.3 607.9,1400.3 637.3,1400.3 666.7,1400.3 696.2,1400.3 725.6,1400.3 755.1,1400.3 784.5,1400.3 813.9,1400.3 843.4,1400.3 872.8,1400.3 902.2,1400.3 931.7,1400.3 961.1,1400.3 990.6,1400.3 1020.0,1400.3" fill="none" stroke="#e377c2" stroke-width="1.1"/>
+<line x1="1030" y1="1368" x2="1048" y2="1368" stroke="#e377c2" stroke-width="2"/>
+<text x="1053" y="1372" class="lg">reverse_bounce_active [generator]</text>
+<polyline points="78.0,1400.3 107.4,1400.3 136.9,1400.3 166.3,1400.3 195.7,1400.3 225.2,1400.3 254.6,1400.3 284.1,1400.3 313.5,1400.3 342.9,1400.3 372.4,1400.3 401.8,1400.3 431.2,1400.3 460.7,1400.3 490.1,1400.3 519.6,1400.3 549.0,1400.3 578.4,1400.3 607.9,1400.3 637.3,1400.3 666.7,1400.3 696.2,1400.3 725.6,1400.3 755.1,1400.3 784.5,1400.3 813.9,1400.3 843.4,1400.3 872.8,1400.3 902.2,1400.3 931.7,1400.3 961.1,1400.3 990.6,1400.3 1020.0,1400.3" fill="none" stroke="#7f7f7f" stroke-width="1.1"/>
+<line x1="1030" y1="1383" x2="1048" y2="1383" stroke="#7f7f7f" stroke-width="2"/>
+<text x="1053" y="1387" class="lg">pas_invalid_seq_active [generator]</text>
+<polyline points="78.0,1400.3 107.4,1400.3 136.9,1400.3 166.3,1400.3 195.7,1400.3 225.2,1400.3 254.6,1400.3 284.1,1400.3 313.5,1400.3 342.9,1400.3 372.4,1400.3 401.8,1400.3 431.2,1400.3 460.7,1400.3 490.1,1400.3 519.6,1400.3 549.0,1400.3 578.4,1400.3 607.9,1400.3 637.3,1400.3 666.7,1400.3 696.2,1400.3 725.6,1400.3 755.1,1400.3 784.5,1400.3 813.9,1400.3 843.4,1400.3 872.8,1400.3 902.2,1400.3 931.7,1400.3 961.1,1400.3 990.6,1400.3 1020.0,1400.3" fill="none" stroke="#17becf" stroke-width="1.1"/>
+<line x1="1030" y1="1398" x2="1048" y2="1398" stroke="#17becf" stroke-width="2"/>
+<text x="1053" y="1402" class="lg">pas_edge_drop_active [generator]</text>
+<polyline points="78.0,1400.3 107.4,1400.3 136.9,1400.3 166.3,1400.3 195.7,1400.3 225.2,1400.3 254.6,1400.3 284.1,1400.3 313.5,1400.3 342.9,1400.3 372.4,1400.3 401.8,1400.3 431.2,1400.3 460.7,1400.3 490.1,1400.3 519.6,1400.3 549.0,1400.3 578.4,1400.3 607.9,1400.3 637.3,1400.3 666.7,1400.3 696.2,1400.3 725.6,1400.3 755.1,1400.3 784.5,1400.3 813.9,1400.3 843.4,1400.3 872.8,1400.3 902.2,1400.3 931.7,1400.3 961.1,1400.3 990.6,1400.3 1020.0,1400.3" fill="none" stroke="#bcbd22" stroke-width="1.1"/>
+<line x1="1030" y1="1413" x2="1048" y2="1413" stroke="#bcbd22" stroke-width="2"/>
+<text x="1053" y="1417" class="lg">pas_edge_jitter_active [generator]</text>
+<text x="78" y="1461" class="ttl">Timebase, per-call scale [4 kHz ticks]</text>
+<rect x="78" y="1470" width="942" height="140" class="frame"/>
+<line x1="78" y1="1600.3" x2="1020" y2="1600.3" class="grid"/>
+<text x="72" y="1603.8" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="1571.6" x2="1020" y2="1571.6" class="grid"/>
+<text x="72" y="1575.1" class="ax" text-anchor="end">5</text>
+<line x1="78" y1="1542.9" x2="1020" y2="1542.9" class="grid"/>
+<text x="72" y="1546.4" class="ax" text-anchor="end">10</text>
+<line x1="78" y1="1514.1" x2="1020" y2="1514.1" class="grid"/>
+<text x="72" y="1517.6" class="ax" text-anchor="end">15</text>
+<line x1="78" y1="1485.4" x2="1020" y2="1485.4" class="grid"/>
+<text x="72" y="1488.9" class="ax" text-anchor="end">20</text>
+<line x1="78.0" y1="1470" x2="78.0" y2="1610" class="grid"/>
+<text x="78.0" y="1625" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="1470" x2="195.7" y2="1610" class="grid"/>
+<text x="195.7" y="1625" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="1470" x2="313.5" y2="1610" class="grid"/>
+<text x="313.5" y="1625" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="1470" x2="431.2" y2="1610" class="grid"/>
+<text x="431.2" y="1625" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="1470" x2="549.0" y2="1610" class="grid"/>
+<text x="549.0" y="1625" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="1470" x2="666.7" y2="1610" class="grid"/>
+<text x="666.7" y="1625" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="1470" x2="784.5" y2="1610" class="grid"/>
+<text x="784.5" y="1625" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="1470" x2="902.2" y2="1610" class="grid"/>
+<text x="902.2" y="1625" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="1470" x2="1020.0" y2="1610" class="grid"/>
+<text x="1020.0" y="1625" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="1470" x2="195.7" y2="1610" class="ev"/>
+<text x="198.7" y="1481" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="1470" x2="784.5" y2="1610" class="ev"/>
+<text x="787.5" y="1492" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,1594.6 107.4,1594.6 136.9,1594.6 166.3,1594.6 195.7,1600.3 225.2,1600.3 254.6,1600.3 284.1,1600.3 313.5,1600.3 342.9,1600.3 372.4,1600.3 401.8,1600.3 431.2,1600.3 460.7,1600.3 490.1,1600.3 519.6,1600.3 549.0,1600.3 578.4,1600.3 607.9,1600.3 637.3,1600.3 666.7,1600.3 696.2,1600.3 725.6,1600.3 755.1,1600.3 784.5,1479.7 813.9,1594.6 843.4,1594.6 872.8,1594.6 902.2,1594.6 931.7,1594.6 961.1,1594.6 990.6,1594.6 1020.0,1594.6" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="1478" x2="1048" y2="1478" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="1482" class="lg">elapsed_ticks [ticks passed to torque_input/ride_control]</text>
+<polyline points="78.0,1600.3 107.4,1600.3 136.9,1600.3 166.3,1600.3 195.7,1600.3 225.2,1600.3 254.6,1600.3 284.1,1600.3 313.5,1600.3 342.9,1600.3 372.4,1600.3 401.8,1600.3 431.2,1600.3 460.7,1600.3 490.1,1600.3 519.6,1600.3 549.0,1600.3 578.4,1600.3 607.9,1600.3 637.3,1600.3 666.7,1600.3 696.2,1600.3 725.6,1600.3 755.1,1600.3 784.5,1479.7 813.9,1479.7 843.4,1479.7 872.8,1479.7 902.2,1479.7 931.7,1479.7 961.1,1479.7 990.6,1479.7 1020.0,1479.7" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="1493" x2="1048" y2="1493" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="1497" class="lg">fg_last_resume_elapsed [latched, survives decimation]</text>
+<polyline points="78.0,1594.6 107.4,1594.6 136.9,1594.6 166.3,1594.6 195.7,1600.3 225.2,1600.3 254.6,1600.3 284.1,1600.3 313.5,1600.3 342.9,1600.3 372.4,1600.3 401.8,1600.3 431.2,1600.3 460.7,1600.3 490.1,1600.3 519.6,1600.3 549.0,1600.3 578.4,1600.3 607.9,1600.3 637.3,1600.3 666.7,1600.3 696.2,1600.3 725.6,1600.3 755.1,1600.3 784.5,1594.6 813.9,1594.6 843.4,1594.6 872.8,1594.6 902.2,1594.6 931.7,1594.6 961.1,1594.6 990.6,1594.6 1020.0,1594.6" fill="none" stroke="#ff7f0e" stroke-width="1.1"/>
+<line x1="1030" y1="1508" x2="1048" y2="1508" stroke="#ff7f0e" stroke-width="2"/>
+<text x="1053" y="1512" class="lg">fg_processed [0=skipped, 1=processed]</text>
+<text x="78" y="1661" class="ttl">Timebase, cumulative counters</text>
+<rect x="78" y="1670" width="942" height="140" class="frame"/>
+<line x1="78" y1="1800.3" x2="1020" y2="1800.3" class="grid"/>
+<text x="72" y="1803.8" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="1769.1" x2="1020" y2="1769.1" class="grid"/>
+<text x="72" y="1772.6" class="ax" text-anchor="end">5000</text>
+<line x1="78" y1="1737.9" x2="1020" y2="1737.9" class="grid"/>
+<text x="72" y="1741.4" class="ax" text-anchor="end">10000</text>
+<line x1="78" y1="1706.6" x2="1020" y2="1706.6" class="grid"/>
+<text x="72" y="1710.1" class="ax" text-anchor="end">15000</text>
+<line x1="78" y1="1675.4" x2="1020" y2="1675.4" class="grid"/>
+<text x="72" y="1678.9" class="ax" text-anchor="end">20000</text>
+<line x1="78.0" y1="1670" x2="78.0" y2="1810" class="grid"/>
+<text x="78.0" y="1825" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="1670" x2="195.7" y2="1810" class="grid"/>
+<text x="195.7" y="1825" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="1670" x2="313.5" y2="1810" class="grid"/>
+<text x="313.5" y="1825" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="1670" x2="431.2" y2="1810" class="grid"/>
+<text x="431.2" y="1825" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="1670" x2="549.0" y2="1810" class="grid"/>
+<text x="549.0" y="1825" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="1670" x2="666.7" y2="1810" class="grid"/>
+<text x="666.7" y="1825" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="1670" x2="784.5" y2="1810" class="grid"/>
+<text x="784.5" y="1825" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="1670" x2="902.2" y2="1810" class="grid"/>
+<text x="902.2" y="1825" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="1670" x2="1020.0" y2="1810" class="grid"/>
+<text x="1020.0" y="1825" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="1670" x2="195.7" y2="1810" class="ev"/>
+<text x="198.7" y="1681" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="1670" x2="784.5" y2="1810" class="ev"/>
+<text x="787.5" y="1692" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,1680.5 107.4,1680.4 136.9,1680.4 166.3,1680.4 195.7,1680.4 225.2,1680.3 254.6,1680.3 284.1,1680.3 313.5,1680.3 342.9,1680.2 372.4,1680.2 401.8,1680.2 431.2,1680.2 460.7,1680.1 490.1,1680.1 519.6,1680.1 549.0,1680.1 578.4,1680.0 607.9,1680.0 637.3,1680.0 666.7,1680.0 696.2,1679.9 725.6,1679.9 755.1,1679.9 784.5,1679.9 813.9,1679.8 843.4,1679.8 872.8,1679.8 902.2,1679.8 931.7,1679.7 961.1,1679.7 990.6,1679.7 1020.0,1679.7" fill="none" stroke="#e377c2" stroke-width="1.1"/>
+<line x1="1030" y1="1678" x2="1048" y2="1678" stroke="#e377c2" stroke-width="2"/>
+<text x="1053" y="1682" class="lg">fast_iq_slew_ticks [cumulative 16 kHz inner steps]</text>
+<polyline points="78.0,1800.3 107.4,1800.3 136.9,1800.3 166.3,1800.3 195.7,1800.3 225.2,1800.3 254.6,1800.3 284.1,1800.3 313.5,1800.3 342.9,1800.3 372.4,1800.3 401.8,1800.3 431.2,1800.3 460.7,1800.3 490.1,1800.3 519.6,1800.3 549.0,1800.3 578.4,1800.3 607.9,1800.3 637.3,1800.2 666.7,1800.2 696.2,1800.2 725.6,1800.2 755.1,1800.2 784.5,1800.2 813.9,1800.2 843.4,1800.2 872.8,1800.2 902.2,1800.2 931.7,1800.2 961.1,1800.2 990.6,1800.2 1020.0,1800.2" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="1693" x2="1048" y2="1693" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="1697" class="lg">fg_skips_total [cumulative skipped 4 kHz ticks]</text>
+<polyline points="78.0,1800.3 107.4,1800.3 136.9,1800.3 166.3,1800.3 195.7,1800.3 225.2,1800.3 254.6,1800.3 284.1,1800.3 313.5,1800.3 342.9,1800.3 372.4,1800.3 401.8,1800.3 431.2,1800.3 460.7,1800.3 490.1,1800.3 519.6,1800.3 549.0,1800.3 578.4,1800.3 607.9,1800.3 637.3,1800.3 666.7,1800.3 696.2,1800.3 725.6,1800.3 755.1,1800.3 784.5,1800.3 813.9,1800.3 843.4,1800.3 872.8,1800.3 902.2,1800.3 931.7,1800.3 961.1,1800.3 990.6,1800.3 1020.0,1800.3" fill="none" stroke="#8c564b" stroke-width="1.1"/>
+<line x1="1030" y1="1708" x2="1048" y2="1708" stroke="#8c564b" stroke-width="2"/>
+<text x="1053" y="1712" class="lg">fg_resume_count [cumulative foreground resumes]</text>
+<text x="78" y="1861" class="ttl">PAS edge injection counters (what the generator did to the line)</text>
+<rect x="78" y="1870" width="942" height="140" class="frame"/>
+<line x1="78" y1="2000.3" x2="1020" y2="2000.3" class="grid"/>
+<text x="72" y="2003.8" class="ax" text-anchor="end">-1</text>
+<line x1="78" y1="1970.2" x2="1020" y2="1970.2" class="grid"/>
+<text x="72" y="1973.7" class="ax" text-anchor="end">-0.5</text>
+<line x1="78" y1="1940.0" x2="1020" y2="1940.0" class="grid"/>
+<text x="72" y="1943.5" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="1909.8" x2="1020" y2="1909.8" class="grid"/>
+<text x="72" y="1913.3" class="ax" text-anchor="end">0.5</text>
+<line x1="78" y1="1879.7" x2="1020" y2="1879.7" class="grid"/>
+<text x="72" y="1883.2" class="ax" text-anchor="end">1</text>
+<line x1="78.0" y1="1870" x2="78.0" y2="2010" class="grid"/>
+<text x="78.0" y="2025" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="1870" x2="195.7" y2="2010" class="grid"/>
+<text x="195.7" y="2025" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="1870" x2="313.5" y2="2010" class="grid"/>
+<text x="313.5" y="2025" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="1870" x2="431.2" y2="2010" class="grid"/>
+<text x="431.2" y="2025" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="1870" x2="549.0" y2="2010" class="grid"/>
+<text x="549.0" y="2025" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="1870" x2="666.7" y2="2010" class="grid"/>
+<text x="666.7" y="2025" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="1870" x2="784.5" y2="2010" class="grid"/>
+<text x="784.5" y="2025" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="1870" x2="902.2" y2="2010" class="grid"/>
+<text x="902.2" y="2025" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="1870" x2="1020.0" y2="2010" class="grid"/>
+<text x="1020.0" y="2025" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="1870" x2="195.7" y2="2010" class="ev"/>
+<text x="198.7" y="1881" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="1870" x2="784.5" y2="2010" class="ev"/>
+<text x="787.5" y="1892" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,1940.0 107.4,1940.0 136.9,1940.0 166.3,1940.0 195.7,1940.0 225.2,1940.0 254.6,1940.0 284.1,1940.0 313.5,1940.0 342.9,1940.0 372.4,1940.0 401.8,1940.0 431.2,1940.0 460.7,1940.0 490.1,1940.0 519.6,1940.0 549.0,1940.0 578.4,1940.0 607.9,1940.0 637.3,1940.0 666.7,1940.0 696.2,1940.0 725.6,1940.0 755.1,1940.0 784.5,1940.0 813.9,1940.0 843.4,1940.0 872.8,1940.0 902.2,1940.0 931.7,1940.0 961.1,1940.0 990.6,1940.0 1020.0,1940.0" fill="none" stroke="#1f77b4" stroke-width="1.1"/>
+<line x1="1030" y1="1878" x2="1048" y2="1878" stroke="#1f77b4" stroke-width="2"/>
+<text x="1053" y="1882" class="lg">pas_edges_dropped [cumulative missed edges]</text>
+<polyline points="78.0,1940.0 107.4,1940.0 136.9,1940.0 166.3,1940.0 195.7,1940.0 225.2,1940.0 254.6,1940.0 284.1,1940.0 313.5,1940.0 342.9,1940.0 372.4,1940.0 401.8,1940.0 431.2,1940.0 460.7,1940.0 490.1,1940.0 519.6,1940.0 549.0,1940.0 578.4,1940.0 607.9,1940.0 637.3,1940.0 666.7,1940.0 696.2,1940.0 725.6,1940.0 755.1,1940.0 784.5,1940.0 813.9,1940.0 843.4,1940.0 872.8,1940.0 902.2,1940.0 931.7,1940.0 961.1,1940.0 990.6,1940.0 1020.0,1940.0" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="1893" x2="1048" y2="1893" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="1897" class="lg">pas_edges_deferred [cumulative late edges]</text>
+<text x="78" y="2061" class="ttl">PAS sampler counters (what production made of it)</text>
+<rect x="78" y="2070" width="942" height="140" class="frame"/>
+<line x1="78" y1="2200.3" x2="1020" y2="2200.3" class="grid"/>
+<text x="72" y="2203.8" class="ax" text-anchor="end">0</text>
+<line x1="78" y1="2170.5" x2="1020" y2="2170.5" class="grid"/>
+<text x="72" y="2174.0" class="ax" text-anchor="end">20</text>
+<line x1="78" y1="2140.7" x2="1020" y2="2140.7" class="grid"/>
+<text x="72" y="2144.2" class="ax" text-anchor="end">40</text>
+<line x1="78" y1="2110.9" x2="1020" y2="2110.9" class="grid"/>
+<text x="72" y="2114.4" class="ax" text-anchor="end">60</text>
+<line x1="78" y1="2081.1" x2="1020" y2="2081.1" class="grid"/>
+<text x="72" y="2084.6" class="ax" text-anchor="end">80</text>
+<line x1="78.0" y1="2070" x2="78.0" y2="2210" class="grid"/>
+<text x="78.0" y="2225" class="ax" text-anchor="middle">1.199</text>
+<line x1="195.7" y1="2070" x2="195.7" y2="2210" class="grid"/>
+<text x="195.7" y="2225" class="ax" text-anchor="middle">1.2</text>
+<line x1="313.5" y1="2070" x2="313.5" y2="2210" class="grid"/>
+<text x="313.5" y="2225" class="ax" text-anchor="middle">1.201</text>
+<line x1="431.2" y1="2070" x2="431.2" y2="2210" class="grid"/>
+<text x="431.2" y="2225" class="ax" text-anchor="middle">1.202</text>
+<line x1="549.0" y1="2070" x2="549.0" y2="2210" class="grid"/>
+<text x="549.0" y="2225" class="ax" text-anchor="middle">1.203</text>
+<line x1="666.7" y1="2070" x2="666.7" y2="2210" class="grid"/>
+<text x="666.7" y="2225" class="ax" text-anchor="middle">1.204</text>
+<line x1="784.5" y1="2070" x2="784.5" y2="2210" class="grid"/>
+<text x="784.5" y="2225" class="ax" text-anchor="middle">1.205</text>
+<line x1="902.2" y1="2070" x2="902.2" y2="2210" class="grid"/>
+<text x="902.2" y="2225" class="ax" text-anchor="middle">1.206</text>
+<line x1="1020.0" y1="2070" x2="1020.0" y2="2210" class="grid"/>
+<text x="1020.0" y="2225" class="ax" text-anchor="middle">1.207</text>
+<line x1="195.7" y1="2070" x2="195.7" y2="2210" class="ev"/>
+<text x="198.7" y="2081" class="evt">fg_delay_start 1.2s</text>
+<line x1="784.5" y1="2070" x2="784.5" y2="2210" class="ev"/>
+<text x="787.5" y="2092" class="evt">fg_delay_end 1.205s</text>
+<polyline points="78.0,2081.1 107.4,2081.1 136.9,2081.1 166.3,2081.1 195.7,2081.1 225.2,2081.1 254.6,2081.1 284.1,2081.1 313.5,2081.1 342.9,2081.1 372.4,2081.1 401.8,2081.1 431.2,2081.1 460.7,2081.1 490.1,2081.1 519.6,2081.1 549.0,2079.7 578.4,2079.7 607.9,2079.7 637.3,2079.7 666.7,2079.7 696.2,2079.7 725.6,2079.7 755.1,2079.7 784.5,2079.7 813.9,2079.7 843.4,2079.7 872.8,2079.7 902.2,2079.7 931.7,2079.7 961.1,2079.7 990.6,2079.7 1020.0,2079.7" fill="none" stroke="#2ca02c" stroke-width="1.1"/>
+<line x1="1030" y1="2078" x2="1048" y2="2078" stroke="#2ca02c" stroke-width="2"/>
+<text x="1053" y="2082" class="lg">pas_sampler_forward [production sampler]</text>
+<polyline points="78.0,2200.3 107.4,2200.3 136.9,2200.3 166.3,2200.3 195.7,2200.3 225.2,2200.3 254.6,2200.3 284.1,2200.3 313.5,2200.3 342.9,2200.3 372.4,2200.3 401.8,2200.3 431.2,2200.3 460.7,2200.3 490.1,2200.3 519.6,2200.3 549.0,2200.3 578.4,2200.3 607.9,2200.3 637.3,2200.3 666.7,2200.3 696.2,2200.3 725.6,2200.3 755.1,2200.3 784.5,2200.3 813.9,2200.3 843.4,2200.3 872.8,2200.3 902.2,2200.3 931.7,2200.3 961.1,2200.3 990.6,2200.3 1020.0,2200.3" fill="none" stroke="#d62728" stroke-width="1.1"/>
+<line x1="1030" y1="2093" x2="1048" y2="2093" stroke="#d62728" stroke-width="2"/>
+<text x="1053" y="2097" class="lg">pas_sampler_reverse [production sampler]</text>
+<polyline points="78.0,2200.3 107.4,2200.3 136.9,2200.3 166.3,2200.3 195.7,2200.3 225.2,2200.3 254.6,2200.3 284.1,2200.3 313.5,2200.3 342.9,2200.3 372.4,2200.3 401.8,2200.3 431.2,2200.3 460.7,2200.3 490.1,2200.3 519.6,2200.3 549.0,2200.3 578.4,2200.3 607.9,2200.3 637.3,2200.3 666.7,2200.3 696.2,2200.3 725.6,2200.3 755.1,2200.3 784.5,2200.3 813.9,2200.3 843.4,2200.3 872.8,2200.3 902.2,2200.3 931.7,2200.3 961.1,2200.3 990.6,2200.3 1020.0,2200.3" fill="none" stroke="#9467bd" stroke-width="1.1"/>
+<line x1="1030" y1="2108" x2="1048" y2="2108" stroke="#9467bd" stroke-width="2"/>
+<text x="1053" y="2112" class="lg">pas_sampler_glitch [production sampler]</text>
+<polyline points="78.0,2200.3 107.4,2200.3 136.9,2200.3 166.3,2200.3 195.7,2200.3 225.2,2200.3 254.6,2200.3 284.1,2200.3 313.5,2200.3 342.9,2200.3 372.4,2200.3 401.8,2200.3 431.2,2200.3 460.7,2200.3 490.1,2200.3 519.6,2200.3 549.0,2200.3 578.4,2200.3 607.9,2200.3 637.3,2200.3 666.7,2200.3 696.2,2200.3 725.6,2200.3 755.1,2200.3 784.5,2200.3 813.9,2200.3 843.4,2200.3 872.8,2200.3 902.2,2200.3 931.7,2200.3 961.1,2200.3 990.6,2200.3 1020.0,2200.3" fill="none" stroke="#ff7f0e" stroke-width="1.1"/>
+<line x1="1030" y1="2123" x2="1048" y2="2123" stroke="#ff7f0e" stroke-width="2"/>
+<text x="1053" y="2127" class="lg">pas_sampler_invalid [production sampler]</text>
+<polyline points="78.0,2200.3 107.4,2200.3 136.9,2200.3 166.3,2200.3 195.7,2200.3 225.2,2200.3 254.6,2200.3 284.1,2200.3 313.5,2200.3 342.9,2200.3 372.4,2200.3 401.8,2200.3 431.2,2200.3 460.7,2200.3 490.1,2200.3 519.6,2200.3 549.0,2200.3 578.4,2200.3 607.9,2200.3 637.3,2200.3 666.7,2200.3 696.2,2200.3 725.6,2200.3 755.1,2200.3 784.5,2200.3 813.9,2200.3 843.4,2200.3 872.8,2200.3 902.2,2200.3 931.7,2200.3 961.1,2200.3 990.6,2200.3 1020.0,2200.3" fill="none" stroke="#7f7f7f" stroke-width="1.1"/>
+<line x1="1030" y1="2138" x2="1048" y2="2138" stroke="#7f7f7f" stroke-width="2"/>
+<text x="1053" y="2142" class="lg">pas_sampler_overflow [production sampler]</text>
+<text x="78" y="2256" class="leg">session: 0=RIDE_SESSION_COLD | 1=RIDE_SESSION_ACTIVE | 2=RIDE_SESSION_SUSPENDED_BY_DIRECTION | 3=RIDE_SESSION_WAIT_REARM_LOAD</text>
+<text x="78" y="2269" class="leg">debug_flags (bitmask, decoded bitwise): 0x01=RIDE_DBG_WALK | 0x02=RIDE_DBG_CALIBRATION | 0x04=RIDE_DBG_HARD_CUT | 0x08=RIDE_DBG_LEVEL_ZERO | 0x10=RIDE_DBG_NOT_LATCHED | 0x20=RIDE_DBG_MODE_UNSUPPORTED |</text>
+<text x="78" y="2282" class="leg">0x40=RIDE_DBG_LIMITER_ZEROED | 0x80=RIDE_DBG_COAST_RELEASE</text>
+<text x="78" y="2295" class="leg">time [s] · every exported sample drawn, no smoothing · forced-input harness: u_abs=0, no actual current / bridge / mechanical evidence · Iq chain is a request composition in Iq units, not Nm/A ·</text>
+<text x="78" y="2308" class="leg">torque_run_native is a native sensor count (~27/kg), not Nm</text>
+</svg>

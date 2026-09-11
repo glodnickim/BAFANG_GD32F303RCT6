@@ -3382,6 +3382,18 @@ void reg_ADC_processing(void)
                 .iq_requested = diag_clamp16((rt_iq && rt_iq->valid) ? rt_iq->requested : 0),
                 .iq_allowed = diag_clamp16((rt_iq && rt_iq->valid) ? rt_iq->allowed : 0),
                 .iq_ref = diag_clamp16(MS.i_q_setpoint),
+                /*
+                 * TWO SIGN DOMAINS IN THIS FRAME, ON PURPOSE. iq_requested / iq_allowed / iq_ref
+                 * above are the POSITIVE demand; MS.i_q and MS.i_d are the Park domain, where this
+                 * drive's MP.reverse = -1 makes forward drive NEGATIVE (stated at
+                 * rolling_no_assist_diag.c, which is why that module compares MAGNITUDES).
+                 *
+                 * These are emitted RAW and must stay that way while RIDE_TELEMETRY_SCHEMA_VERSION
+                 * is 1: changing the meaning of a field without changing the version leaves every
+                 * decoder unable to tell an old capture from a new one. Reading ref against actual
+                 * as if they shared a sign is a decoder-side trap, and it is closed there - see
+                 * tools/decode_canable_ride_log.py.
+                 */
                 .iq_actual = diag_clamp16(MS.i_q),
                 .id_actual = diag_clamp16(MS.i_d),
                 .motor_erps = ui16_erps,

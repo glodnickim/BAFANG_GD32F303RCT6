@@ -24,7 +24,6 @@ static uint16_t run_filled;
 static uint32_t run_sum;
 static uint16_t run_value_native;
 static uint16_t run_attack_steps; /* FW-090: consecutive steps holding a sustained rise */
-static int32_t run_asym_q; /* FW-112.4: Q8 state, ordinary-RUN fast-rise/slow-fall filter */
 /* PATCH A: rolling-rearm recovery AUTOMATON - still three states (IDLE / WAIT_FRESH_LOAD /
  * TRACK_FAST) and the transition logic between them is UNCHANGED - see
  * torque_input_begin_rolling_rearm() in the header for the full lifecycle. The PATCH A change is
@@ -189,8 +188,13 @@ static uint16_t centikg_to_native_delta(uint16_t centikg)
  * target was constant across the missed interval. A pathological debugger/CPU stall is bounded
  * to eight times the slowest filter constant; beyond that the useful filter memory is already
  * negligible and spending unbounded foreground time catching up would be worse than settling. */
+/* AP-03: was 8 x TORQUE_RUN_ASYM_FALL_MS. That filter is deleted, so the bound is stated on
+ * its own terms and keeps the SAME numeric value (2000 ms @ 4 kHz) - this is a stall guard,
+ * not a filter constant, and shrinking it alongside an unrelated deletion would be a silent
+ * behaviour change. */
+#define TORQUE_FILTER_CATCHUP_MAX_MS   2000U
 #define TORQUE_FILTER_CATCHUP_MAX_TICKS \
-	((uint32_t)TORQUE_RUN_ASYM_FALL_MS * TORQUE_INPUT_TICKS_PER_MS * 8U)
+	((uint32_t)TORQUE_FILTER_CATCHUP_MAX_MS * TORQUE_INPUT_TICKS_PER_MS)
 
 static uint32_t filter_elapsed_ticks(uint32_t elapsed_ticks)
 {
@@ -217,42 +221,29 @@ static uint16_t update_assist_filter_one(uint16_t target_native)
 }
 
 /*
- * FW-112.4: ordinary-RUN fast-rise / slow-fall filter — same Q8 rate-limiter technique as
- * update_assist_filter() above, but the time constant depends on the DIRECTION of travel: a
- * rise towards target uses TORQUE_RUN_ASYM_RISE_MS, a fall away from it uses the slower
- * TORQUE_RUN_ASYM_FALL_MS. See the header for why (ordinary RUN is the only path that pays the
- * old 48-step window's full lag on a slow rise; rearm and cold start already bypass it).
- * Only ever called from the recovery_state == TORQUE_RECOVERY_IDLE branch in
- * torque_input_update() — WAIT_FRESH_LOAD and TRACK_FAST publish their own values and never
- * reach this function.
+ * AP-03: the FW-112.4 asymmetric time-domain filter USED TO LIVE HERE. It is deleted.
+ *
+ * WHY. It overwrote the FW-085 crank-angle window average on every 4 kHz tick, in all three
+ * recovery states, so the ring buffer advanced per crank step was discarded before it was ever
+ * published. That made assist_torque_run_window_deg an on/off switch rather than a window, and
+ * it let the pedal-stroke ripple straight through: a time constant is a fixed fraction of a
+ * stroke only at one cadence, and the stroke period runs from 612 ms at 49 rpm to 250 ms at
+ * 120 rpm. A crank-angle window is the same fraction of a stroke at every cadence - which is
+ * exactly the argument FW-085 made, and it was right.
+ *
+ * MEASURED on the recorded W1 ride, at matched assist level (integration/evidence/ap03-ab-w1/):
+ *   autocorrelation at the stroke period, 90 rpm:  +0.458 with this filter, -0.126 without it
+ *   10-90 % on a real load rise:                   11147 ms with, 11253 ms without (1 %)
+ * The stroke rhythm disappears and nothing is paid for it in response time.
+ *
+ * CONSEQUENCE FOR ASSIST LEVEL. The window reports the TRUE mean effort; this filter reported a
+ * peak-biased value (fast rise, slow fall). Same pedalling therefore now yields roughly 20-25 %
+ * less assist, and a stored profile means slightly less than it did. That is a deliberate,
+ * visible behaviour change, not a regression - it is compensated by the rider's assist level,
+ * never by a hidden gain here.
+ *
+ * Ordinary RUN is now the crank-angle window, full stop. One estimator, one owner.
  */
-static uint16_t update_run_asym_filter_one(uint16_t target_native)
-{
-	int32_t target_q = (int32_t)target_native << TORQUE_ASSIST_FILTER_Q_SHIFT;
-	int32_t error_q = target_q - run_asym_q;
-	if (error_q != 0) {
-		int32_t filter_ms = (error_q > 0) ?
-			(int32_t)TORQUE_RUN_ASYM_RISE_MS :
-			(int32_t)TORQUE_RUN_ASYM_FALL_MS;
-		if (filter_ms == 0) {
-			run_asym_q = target_q;
-			return target_native;
-		}
-		int32_t filter_ticks = filter_ms * TORQUE_INPUT_TICKS_PER_MS;
-		int32_t step_q = error_q / filter_ticks;
-		if (step_q == 0) {
-			if (target_native == 0U) {
-				run_asym_q = 0;
-				return 0U;
-			}
-			step_q = (error_q > 0) ? 1 : -1;
-		}
-		run_asym_q += step_q;
-	}
-	return (uint16_t)((run_asym_q +
-		(1L << (TORQUE_ASSIST_FILTER_Q_SHIFT - 1U))) >>
-		TORQUE_ASSIST_FILTER_Q_SHIFT);
-}
 
 /*
  * FW-033/085: the RUN effort estimator — a plain moving average of the fast signal
@@ -304,10 +295,8 @@ void torque_input_set_run_window_deg(uint16_t window_deg)
 void torque_input_seed_run(uint16_t value_native)
 {
 	run_value_native = value_native;
-	/* FW-112.4: keep the asymmetric filter's own state in lockstep with every seed point
-	 * (cold arm, TRACK_FAST -> IDLE hand-back, WAIT_FRESH_LOAD per-step reseed) so ordinary
-	 * tracking always resumes from the seeded level with zero discontinuity. */
-	run_asym_q = (int32_t)value_native << TORQUE_ASSIST_FILTER_Q_SHIFT;
+	/* AP-03: only the window carries state now, and the loop below fills it. The FW-112.4
+	 * filter that also had to be seeded here is gone. */
 	if (run_window_steps == 0U) {
 		run_window_reset();
 		return;
@@ -678,7 +667,6 @@ void torque_input_init(void)
 	snapshot = (torque_snapshot_t){0};
 	assist_filter_q = 0;
 	run_value_native = 0U;
-	run_asym_q = 0; /* FW-112.4 */
 	run_window_reset(); /* FW-085 */
 	snapshot.zero_effective_native = TORQUE_ZERO_TARGET_NATIVE;
 	snapshot.span_native = span_native;
@@ -726,11 +714,8 @@ void torque_input_update_elapsed(uint16_t raw_native, int16_t torque_corrected_n
 	{
 		uint32_t n = filter_elapsed_ticks(elapsed_ticks);
 		uint16_t fast = snapshot.assist_delta_filtered_native;
-		bool ordinary_run = (recovery_state == TORQUE_RECOVERY_IDLE) &&
-			(run_window_steps != 0U);
 		while (n-- > 0U) {
 			fast = update_assist_filter_one(sensor_valid ? assist_delta : 0U);
-			if (ordinary_run) run_value_native = update_run_asym_filter_one(fast);
 		}
 		snapshot.assist_delta_filtered_native = fast;
 	}
@@ -817,8 +802,9 @@ void torque_input_update_elapsed(uint16_t raw_native, int16_t torque_corrected_n
 	} else if (run_window_steps == 0U) {
 		run_value_native = snapshot.assist_delta_filtered_native;
 	} else if (recovery_state == TORQUE_RECOVERY_IDLE) {
-		/* FW-141: ordinary RUN was already advanced interleaved with FAST above for every
-		 * elapsed hardware tick, preserving the real cascade under missed foreground calls. */
+		/* AP-03: ordinary RUN is the crank-angle window average, exactly as FW-085
+		 * designed it - torque_input_run_filter_step() has already written it to
+		 * run_value_native and nothing overwrites it here any more. */
 	}
 	snapshot.assist_delta_run_native = run_value_native;
 	snapshot.load_centikg = native_delta_to_centikg((uint16_t)delta);

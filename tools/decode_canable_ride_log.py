@@ -12,6 +12,22 @@ The decoder writes:
   <prefix>.metadata.json  loss/coverage/schema information
 
 This tool never guesses missing CAN frames and never compresses time around them.
+
+SIGN DOMAINS - READ BEFORE COMPARING iq_ref WITH iq_actual.
+Schema 1 carries two conventions, and they are NOT interchangeable:
+
+  iq_requested, iq_allowed, iq_ref   demand domain, POSITIVE when assisting
+  iq_actual, id_actual               Park domain (MS.i_q / MS.i_d), where a drive configured
+                                     MP.reverse = -1 makes forward drive NEGATIVE
+
+Comparing them by sign therefore shows a near-total "inversion" that is only the convention -
+it has already cost one wrong diagnosis. Compare MAGNITUDES, exactly as the firmware's own
+src/rolling_no_assist_diag.c does. The controller's loop is consistent internally: it applies
+the same MP.reverse factor to the PI setpoint (src/main.c, PI_iq.setpoint).
+
+MP.reverse is not transmitted, so this tool cannot normalise the sign for you. It is left raw
+on purpose: changing the meaning of a field without changing RIDE_TELEMETRY_SCHEMA_VERSION
+would make old and new captures indistinguishable.
 """
 from __future__ import annotations
 

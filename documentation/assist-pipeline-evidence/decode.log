@@ -1,0 +1,23 @@
+DECODE PASS can=15 telem=14 snapshots=2 complete=1 replayable=2 coverage=CORE+INTERNAL+LIMITS+MOTOR+ROTOR_PAS_STATE
+decoded=C:\Users\mariuszg\AppData\Local\Temp\tmpg9rdsve5\ride.decoded.csv
+canonical=C:\Users\mariuszg\AppData\Local\Temp\tmpg9rdsve5\ride.canonical.csv
+metadata=C:\Users\mariuszg\AppData\Local\Temp\tmpg9rdsve5\ride.metadata.json
+python.exe : src/torque_input.c: In function 'torque_input_run_filter_step':
+At line:4 char:1
++ & 'C:\Users\mariuszg\AppData\Local\Programs\Python\Python312\python.e ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (src/torque_inpu...n_filter_step'::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src/torque_input.c:449:38: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  449 |                 if (run_attack_steps < TORQUE_RUN_ATTACK_STEPS) {
+      |                                      ^
+src/torque_input.c:455:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  455 |         if (run_attack_steps >= TORQUE_RUN_ATTACK_STEPS) {
+      |                              ^~
+src/assist_modes.c: In function 'valid_wa_max_wheel_x10':
+src/assist_modes.c:348:23: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  348 |                 value <= BANK_WA_MAX_WHEEL_X10_MAX) ?
+      |                       ^~
+REPLAY PASS rows=2 compared=2 maxReqDelta=501.0 maxRefDelta=333.0 meanAbsRefDelta=333.000 defaults=0 output=C:\Users\mariuszg\AppData\Local\Temp\tmpg9rdsve5\replayed.csv
+PASS CANable FW145 raw-log decode -> canonical -> native replay

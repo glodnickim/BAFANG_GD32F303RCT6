@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVistDrive Controller Lab</title>
+<style>
+:root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#e8edf3;background:#101419;color-scheme:dark}
+*{box-sizing:border-box} body{margin:0;background:#101419} header{padding:14px 18px;border-bottom:1px solid #29313a;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}.brand{font-weight:700;font-size:18px}.source{font:12px ui-monospace,Consolas,monospace;color:#aeb8c4}.ok{color:#65d58a}.warn{color:#ffca62}.err{color:#ff7474}.layout{display:grid;grid-template-columns:minmax(270px,340px) 1fr;gap:14px;padding:14px}.panel{background:#171d23;border:1px solid #29313a;border-radius:10px;padding:13px}.controls{display:grid;gap:10px}.control label{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#b6c0ca}.control input[type=range]{width:100%}.value{font:12px ui-monospace,Consolas,monospace;color:#f0f4f8}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}button,select,input[type=number]{background:#202831;border:1px solid #37434f;color:#eef3f7;border-radius:7px;padding:8px 10px;font-size:14px}button{cursor:pointer;font-weight:650}.primary{background:#2c6bed;border-color:#3a78ef;color:#fff}button.playing{background:#a23a3a;border-color:#c24c4c}button:disabled{opacity:.5;cursor:wait}.toggle{display:flex;gap:7px;align-items:center;font-size:12px;color:#b6c0ca}.charts{display:grid;gap:12px}.chartbox{background:#171d23;border:1px solid #29313a;border-radius:10px;padding:10px}.charttitle{display:flex;justify-content:space-between;gap:12px;font-size:13px;margin-bottom:4px}.charttitle small{color:#99a5b1}.chart{width:100%;height:190px;display:block;cursor:crosshair}.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#aeb8c4;margin-top:5px}.sw{display:inline-block;width:10px;height:3px;margin-right:4px;vertical-align:middle}.metrics{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:8px;margin-bottom:12px}.metric{background:#171d23;border:1px solid #29313a;border-radius:9px;padding:9px}.metric .k{font-size:10px;color:#93a0ad;text-transform:uppercase}.metric .v{font:17px ui-monospace,Consolas,monospace;margin-top:3px}.note{font-size:12px;color:#9eabb7;line-height:1.45;margin-top:9px}.statusline{font-size:12px;margin-top:7px;color:#aeb8c4}
+.canable{border:1px solid #29313a;border-radius:9px;padding:10px;background:#131820;font-size:12px;color:#b6c0ca;display:grid;gap:6px}
+.canable .head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.canable .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.dot.on{background:#65d58a}.dot.off{background:#5b6572}.dot.bad{background:#ff7474}
+.canable .meta{font:11px ui-monospace,Consolas,monospace;color:#8f9aa6;line-height:1.5}
+.startstop{border-top:1px dashed #2c3540;padding-top:9px;margin-top:2px}
+.readout{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;font:12px ui-monospace,Consolas,monospace;color:#dbe3ea;background:#131820;border:1px solid #29313a;border-radius:9px;padding:10px;margin-bottom:12px}
+.readout .kv{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #20272f;padding-bottom:2px}
+.readout .kv b{color:#93a0ad;font-weight:500}
+.readout .empty{color:#7c8793;grid-column:1/-1}
+.playbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.playbar input[type=range]{flex:1}
+.release{font:12px ui-monospace,Consolas,monospace;color:#b6c0ca;background:#131820;border:1px solid #29313a;border-radius:9px;padding:9px;margin-bottom:12px;display:none}
+.release.show{display:block}
+.release b{color:#ffca62}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header><div><div class="brand">EVistDrive Controller Lab</div><div class="source" id="sourceLine">sprawdzanie źródła…</div></div><div class="source" id="gitLine"></div></header>
+<div class="layout">
+<section class="panel controls">
+  <div class="canable" id="canableBox">
+    <div class="head"><span><span class="dot off" id="canableDot"></span><b>Ustawienia z canable</b></span><button id="canableRefresh" title="Sprawdź ponownie plik presetu">↻</button></div>
+    <div id="canableStatus">sprawdzanie…</div>
+    <div class="meta" id="canableMeta"></div>
+    <label class="toggle"><input id="useCanable" type="checkbox" checked> stosuj ustawienia z canable (rampy, limity, dead-band…) zamiast wartości domyślnych firmware</label>
+  </div>
+  <div class="row"><div><label>Tryb</label><select id="mode"><option value="power">Power Linear</option><option value="progressive">Power Progressive</option><option value="emtb">eMTB</option><option value="torque">Torque</option><option value="curve">Power Curve</option><option value="keep">wg banku canable</option></select></div><div><label>Assist</label><select id="assist"><option>0</option><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div></div>
+  <div class="control"><label><span>Nacisk / moment średni</span><span class="value" id="torqueV"></span></label><input id="torque" type="range" min="0" max="120" step="1" value="28"></div>
+  <div class="control"><label><span>Pulsacja nacisku</span><span class="value" id="torque_rippleV"></span></label><input id="torque_ripple" type="range" min="0" max="120" step="1" value="45"></div>
+  <div class="control"><label><span>Asymetria L/P</span><span class="value" id="asymmetryV"></span></label><input id="asymmetry" type="range" min="-50" max="50" step="1" value="8"></div>
+  <div class="control"><label><span>Kadencja</span><span class="value" id="cadenceV"></span></label><input id="cadence" type="range" min="0" max="140" step="1" value="72"></div>
+  <div class="control"><label><span>Wahanie kadencji</span><span class="value" id="cadence_rippleV"></span></label><input id="cadence_ripple" type="range" min="0" max="30" step="1" value="0"></div>
+  <div class="control"><label><span>Prędkość jazdy</span><span class="value" id="speedV"></span></label><input id="speed" type="range" min="0" max="40" step="0.5" value="18"></div>
+  <div class="control"><label><span>Napięcie baterii</span><span class="value" id="voltageV"></span></label><input id="voltage" type="range" min="30" max="46" step="0.1" value="39"></div>
+  <div class="control"><label><span>SOC baterii</span><span class="value" id="socV"></span></label><input id="soc" type="range" min="0" max="100" step="1" value="55"></div>
+  <div class="control"><label><span>Czas przebiegu</span><span class="value" id="durationV"></span></label><input id="duration" type="range" min="1" max="15" step="1" value="6"></div>
+  <div class="startstop">
+    <label class="toggle"><input id="stopEnabled" type="checkbox"> kierowca przestaje pedałować w trakcie przebiegu</label>
+    <div class="control"><label><span>Start pedałowania</span><span class="value" id="ride_start_sV"></span></label><input id="ride_start_s" type="range" min="0" max="10" step="0.1" value="0"></div>
+    <div class="control"><label><span>Koniec pedałowania (nogi stają)</span><span class="value" id="ride_stop_sV"></span></label><input id="ride_stop_s" type="range" min="0.5" max="15" step="0.1" value="3" disabled></div>
+  </div>
+  <div class="actions"><button class="primary" id="run">Uruchom / odśwież</button><button id="presetClimb">Podjazd 45 rpm</button><button id="presetSmooth">Równy nacisk</button><button id="presetStop">Start → stop</button></div>
+  <label class="toggle"><input id="auto" type="checkbox" checked> automatycznie przeliczaj po zmianie suwaka</label>
+  <label class="toggle"><input id="watch" type="checkbox" checked> automatycznie przelicz po zmianie kodu źródłowego / canable</label>
+  <div class="statusline" id="status">gotowy</div>
+  <div class="note">Ten tryb wymusza prędkość, napięcie i SOC. Nie wymyśla pomiaru prądu baterii ani rzeczywistego Iq z silnika. Do tego służy Level 4 / replay. Tutaj analizujemy dokładnie tor kodu od czujników pedałowania do referencji Iq.</div>
+</section>
+<main>
+<div class="metrics">
+ <div class="metric"><div class="k">Iq mode</div><div class="v" id="mMode">—</div></div>
+ <div class="metric"><div class="k">Iq requested</div><div class="v" id="mReq">—</div></div>
+ <div class="metric"><div class="k">Iq allowed</div><div class="v" id="mAllowed">—</div></div>
+ <div class="metric"><div class="k">Iq ref</div><div class="v" id="mRef">—</div></div>
+ <div class="metric"><div class="k">Support</div><div class="v" id="mSupport">—</div></div>
+</div>
+<div class="release" id="releaseBox"></div>
+<div class="playbar">
+ <button id="play">▶ Odtwórz przebieg</button>
+ <input id="scrub" type="range" min="0" max="1000" value="0" step="1">
+ <span class="value" id="scrubT">—</span>
+</div>
+<div class="readout" id="readout"><span class="empty">kliknij wykres albo naciśnij „Odtwórz”, żeby zobaczyć wartości wszystkich etapów w jednym punkcie czasu</span></div>
+<div class="charts">
+ <div class="chartbox"><div class="charttitle"><span>Generator korby → tor torque</span><small>Nm / kg / native</small></div><canvas class="chart" id="torqueChart"></canvas><div class="legend"><span><i class="sw" style="background:#5ab0ff"></i>generator Nm</span><span><i class="sw" style="background:#65d58a"></i>FAST native</span><span><i class="sw" style="background:#ffca62"></i>RUN native</span></div></div>
+ <div class="chartbox"><div class="charttitle"><span>Kadencja: generator → pomiar PAS → control</span><small>rpm</small></div><canvas class="chart" id="cadChart"></canvas><div class="legend"><span><i class="sw" style="background:#5ab0ff"></i>generator</span><span><i class="sw" style="background:#c78cff"></i>raw PAS</span><span><i class="sw" style="background:#65d58a"></i>control cadence</span></div></div>
+ <div class="chartbox"><div class="charttitle"><span>Assist / zapotrzebowanie</span><small>W / %</small></div><canvas class="chart" id="assistChart"></canvas><div class="legend"><span><i class="sw" style="background:#5ab0ff"></i>human power W</span><span><i class="sw" style="background:#c78cff"></i>assist basis W</span><span><i class="sw" style="background:#65d58a"></i>motor power W</span><span><i class="sw" style="background:#ffca62"></i>support %</span></div></div>
+ <div class="chartbox"><div class="charttitle"><span>Łańcuch Iq z produkcyjnego kodu</span><small>counts</small></div><canvas class="chart" id="iqChart"></canvas><div class="legend"><span><i class="sw" style="background:#c78cff"></i>mode request</span><span><i class="sw" style="background:#5ab0ff"></i>requested</span><span><i class="sw" style="background:#ffca62"></i>allowed/pre-ramp</span><span><i class="sw" style="background:#65d58a"></i>Iq ref (16 kHz slew)</span></div></div>
+</div>
+</main>
+</div>
+<script>
+const $=id=>document.getElementById(id); let timer=null,lastHash=null,running=false,lastCanableHash=null;
+const fmt={torque:v=>`${v} Nm`,torque_ripple:v=>`${v}%`,asymmetry:v=>`${v}%`,cadence:v=>`${v} rpm`,cadence_ripple:v=>`${v}%`,speed:v=>`${v} km/h`,voltage:v=>`${Number(v).toFixed(1)} V`,soc:v=>`${v}%`,duration:v=>`${v} s`,ride_start_s:v=>`${Number(v).toFixed(1)} s`,ride_stop_s:v=>`${Number(v).toFixed(1)} s`};
+for(const id of Object.keys(fmt)){const el=$(id),out=$(id+'V'); const upd=()=>out.textContent=fmt[id](el.value); el.addEventListener('input',()=>{upd();schedule()}); upd()}
+$('mode').addEventListener('change',schedule); $('assist').addEventListener('change',schedule);
+$('useCanable').addEventListener('change',schedule);
+$('stopEnabled').addEventListener('change',()=>{$('ride_stop_s').disabled=!$('stopEnabled').checked;schedule()});
+
+// --- charts / cursor state -------------------------------------------------------------
+const CHART_IDS=['torqueChart','cadChart','assistChart','iqChart'];
+const PAD={l:42,r:10,t:10,b:22};
+let lastRows=[],lastX0=0,lastX1=1,cursorT=null,playTimer=null;
+
+function config(){
+  const cfg={mode:$('mode').value,assist:+$('assist').value,torque:+$('torque').value,torque_ripple:+$('torque_ripple').value,asymmetry:+$('asymmetry').value,cadence:+$('cadence').value,cadence_ripple:+$('cadence_ripple').value,cadence_ripple_hz:.6,speed:+$('speed').value,voltage:+$('voltage').value,soc:+$('soc').value,duration:+$('duration').value,sample_ms:5,use_canable:$('useCanable').checked,ride_start_s:+$('ride_start_s').value};
+  cfg.ride_stop_s=$('stopEnabled').checked?+$('ride_stop_s').value:0;
+  return cfg;
+}
+function schedule(){if(!$('auto').checked)return; clearTimeout(timer);timer=setTimeout(run,220)}
+function setStatus(s,cls=''){const e=$('status');e.textContent=s;e.className='statusline '+cls}
+
+function nearestRow(t){
+  if(!lastRows.length)return null;
+  let lo=0,hi=lastRows.length-1;
+  while(lo<hi){const mid=(lo+hi)>>1; if(+lastRows[mid].time_s<t)lo=mid+1; else hi=mid}
+  if(lo>0 && Math.abs(+lastRows[lo-1].time_s-t)<Math.abs(+lastRows[lo].time_s-t)) lo--;
+  return lastRows[lo];
+}
+const READOUT_FIELDS=[
+  ['time_s','t','s'],['pedalling','pedałuje',''],['torque_gen_nm','torque gen','Nm'],
+  ['torque_fast_native','FAST native',''],['torque_run_native','RUN native',''],
+  ['cadence_gen_rpm','cadence gen','rpm'],['cadence_raw_rpm','cadence PAS','rpm'],['cadence_control_rpm','cadence control','rpm'],
+  ['human_power_w','human power','W'],['assist_basis_power_w','assist basis','W'],['motor_power_w','motor power','W'],['support_pct','support','%'],
+  ['iq_mode_request','iq mode req',''],['iq_before_profile_limit','iq pre-limit',''],['iq_requested','iq requested',''],
+  ['iq_allowed','iq allowed',''],['iq_pre_ramp','iq pre-ramp',''],['iq_ref','iq ref (final)',''],
+  ['session','session',''],['battery_limit','battery limit',''],['gate_steps','gate steps',''],
+];
+function renderReadout(row){
+  const box=$('readout');
+  if(!row){box.innerHTML='<span class="empty">kliknij wykres albo naciśnij „Odtwórz”, żeby zobaczyć wartości wszystkich etapów w jednym punkcie czasu</span>';return}
+  box.innerHTML=READOUT_FIELDS.map(([k,label,unit])=>{
+    let v=row[k]; if(typeof v==='number')v=Number.isInteger(v)?v:v.toFixed(2);
+    return `<div class="kv"><b>${label}</b><span>${v}${unit}</span></div>`;
+  }).join('');
+}
+function setCursor(t){
+  cursorT=t;
+  const row=nearestRow(t);
+  renderReadout(row);
+  if(row){$('scrub').value=Math.round((+row.time_s-lastX0)/Math.max(.001,lastX1-lastX0)*1000);$('scrubT').textContent=(+row.time_s).toFixed(3)+' s'}
+  redrawAll();
+}
+function redrawAll(){for(const id of CHART_IDS){if($(id).dataset.ready)draw($(id),lastRows,JSON.parse($(id).dataset.series))}}
+
+function draw(canvas,rows,series){
+  canvas.dataset.ready='1'; canvas.dataset.series=JSON.stringify(series);
+  const dpr=devicePixelRatio||1,rect=canvas.getBoundingClientRect(),w=Math.max(300,rect.width),h=190;
+  canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
+  const vals=[];series.forEach(s=>rows.forEach(r=>{const v=+r[s.key];if(Number.isFinite(v))vals.push(v)}));
+  let ymin=Math.min(0,...vals),ymax=Math.max(1,...vals);if(ymax===ymin)ymax=ymin+1;
+  const x0=rows.length?+rows[0].time_s:0,x1=rows.length?+rows[rows.length-1].time_s:1;
+  lastX0=x0;lastX1=x1;
+  const xOf=xv=>PAD.l+(xv-x0)/Math.max(.001,x1-x0)*(w-PAD.l-PAD.r);
+  const yOf=yv=>PAD.t+(ymax-yv)/(ymax-ymin)*(h-PAD.t-PAD.b);
+  // pedalling=0 shading (legs off the pedals) - drawn only if the column exists
+  if(rows.length && 'pedalling' in rows[0]){
+    c.fillStyle='rgba(255,116,116,.07)';
+    let segStart=null;
+    for(let i=0;i<rows.length;i++){
+      const off=+rows[i].pedalling===0;
+      if(off && segStart===null) segStart=+rows[i].time_s;
+      if((!off||i===rows.length-1) && segStart!==null){
+        const segEnd=+rows[i].time_s;
+        c.fillRect(xOf(segStart),PAD.t,Math.max(1,xOf(segEnd)-xOf(segStart)),h-PAD.t-PAD.b);
+        segStart=null;
+      }
+    }
+  }
+  c.strokeStyle='#2c3540';c.lineWidth=1;c.beginPath();
+  for(let i=0;i<=4;i++){const y=PAD.t+(h-PAD.t-PAD.b)*i/4;c.moveTo(PAD.l,y);c.lineTo(w-PAD.r,y)}
+  c.stroke();
+  c.fillStyle='#7f8b97';c.font='10px ui-monospace,monospace';
+  c.fillText(ymax.toFixed(0),4,PAD.t+4);c.fillText(ymin.toFixed(0),4,h-PAD.b);
+  c.fillText(`${x0.toFixed(1)}s`,PAD.l,h-5);c.fillText(`${x1.toFixed(1)}s`,w-PAD.r-30,h-5);
+  const colors=['#5ab0ff','#65d58a','#ffca62','#c78cff','#ff7f73'];
+  series.forEach((s,si)=>{
+    c.strokeStyle=s.color||colors[si%colors.length];c.lineWidth=s.width||1.5;c.beginPath();let started=false;
+    rows.forEach(r=>{const xv=+r.time_s,yv=+r[s.key];if(!Number.isFinite(xv)||!Number.isFinite(yv))return;
+      const x=xOf(xv),y=yOf(yv); if(!started){c.moveTo(x,y);started=true}else c.lineTo(x,y)});
+    c.stroke();
+  });
+  if(cursorT!==null && cursorT>=x0 && cursorT<=x1){
+    const cx=xOf(cursorT);
+    c.strokeStyle='#eef3f7';c.lineWidth=1;c.setLineDash([3,3]);
+    c.beginPath();c.moveTo(cx,PAD.t);c.lineTo(cx,h-PAD.b);c.stroke();c.setLineDash([]);
+  }
+}
+function attachChartInteraction(canvas){
+  const pick=(evt)=>{
+    const rect=canvas.getBoundingClientRect();
+    const w=Math.max(300,rect.width);
+    const x=evt.clientX-rect.left;
+    const frac=(x-PAD.l)/Math.max(1,(w-PAD.l-PAD.r));
+    const t=lastX0+frac*(lastX1-lastX0);
+    setCursor(Math.min(lastX1,Math.max(lastX0,t)));
+  };
+  canvas.addEventListener('click',pick);
+}
+CHART_IDS.forEach(id=>attachChartInteraction($(id)));
+
+function renderRelease(rel){
+  const box=$('releaseBox');
+  if(!rel||!rel.available){box.className='release';box.innerHTML='';return}
+  box.className='release show';
+  box.innerHTML=`Nogi stają w <b>${rel.legs_stop_s.toFixed(3)} s</b> (Iq w tej chwili: <b>${rel.iq_at_stop}</b>). `+
+    `Zmiana stanu sesji po <b>${rel.session_change_ms} ms</b>. `+
+    `Kadencja sterująca = 0 po <b>${rel.cadence_zero_ms} ms</b>. `+
+    `<b>Iq_ref = 0 (silnik cichnie) po ${rel.iq_zero_ms} ms.</b>`;
+}
+
+function renderCanable(s){
+  const dot=$('canableDot'),status=$('canableStatus'),meta=$('canableMeta');
+  const set=(cls,txt,metaTxt)=>{dot.className='dot '+cls;status.textContent=txt;meta.textContent=metaTxt||''};
+  if(!s){set('off','sprawdzanie…','');return}
+  if(s.available){
+    const m=s.meta||{};
+    set('on',`preset „${m.preset_name||'(bez nazwy)'}” • ${s.hash}`,
+      `tuning ${m.tuning_bytes||0} B • bank ${m.bank_bytes||0} B`+
+      (m.controller_sw_version?` • sw ${m.controller_sw_version}`:'')+
+      (m.preset_created?` • ${m.preset_created}`:''));
+    if(lastCanableHash && s.hash!==lastCanableHash && $('watch').checked && !running) run();
+    lastCanableHash=s.hash;
+  } else {
+    set(s.reason&&s.reason.startsWith('no Canable preset')?'off':'bad', s.reason||'niedostępne', s.path?`oczekiwana ścieżka: ${s.path}`:'');
+  }
+}
+
+function render(data){
+  const r=data.rows||[]; if(!r.length)return; lastRows=r;
+  const last=r[r.length-1];
+  $('mMode').textContent=Math.round(last.iq_mode_request);$('mReq').textContent=Math.round(last.iq_requested);
+  $('mAllowed').textContent=Math.round(last.iq_allowed);$('mRef').textContent=Math.round(last.iq_ref);
+  $('mSupport').textContent=Math.round(last.support_pct)+'%';
+  draw($('torqueChart'),r,[{key:'torque_gen_nm',color:'#5ab0ff'},{key:'torque_fast_native',color:'#65d58a'},{key:'torque_run_native',color:'#ffca62'}]);
+  draw($('cadChart'),r,[{key:'cadence_gen_rpm',color:'#5ab0ff'},{key:'cadence_raw_rpm',color:'#c78cff'},{key:'cadence_control_rpm',color:'#65d58a'}]);
+  draw($('assistChart'),r,[{key:'human_power_w',color:'#5ab0ff'},{key:'assist_basis_power_w',color:'#c78cff'},{key:'motor_power_w',color:'#65d58a'},{key:'support_pct',color:'#ffca62'}]);
+  draw($('iqChart'),r,[{key:'iq_mode_request',color:'#c78cff'},{key:'iq_requested',color:'#5ab0ff'},{key:'iq_allowed',color:'#ffca62'},{key:'iq_ref',color:'#65d58a',width:2}]);
+  const s=data.source;lastHash=s.source_hash;
+  $('sourceLine').textContent=`source ${s.source_short} • build ${s.built_short} • ${s.production_modules} prod. modułów`;
+  $('sourceLine').className='source ok';
+  $('gitLine').textContent=`git ${s.git.head}${s.git.dirty?' + zmiany robocze':''}`;
+  setStatus(`${s.rebuilt?'przebudowano źródło • ':''}${r.length} próbek • ${data.settings_applied?'ustawienia canable zastosowane • ':''}${data.stderr||'OK'}`,'ok');
+  renderCanable(data.settings);
+  renderRelease(data.release);
+  cursorT=null; renderReadout(null); $('scrub').value=0; $('scrubT').textContent='—';
+}
+
+async function run(){
+  if(running)return; running=true; $('run').disabled=true; stopPlayback();
+  setStatus('kompilacja / symulacja…');
+  try{
+    const res=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config())});
+    const d=await res.json(); if(!res.ok||d.error)throw new Error(d.error||res.statusText);
+    render(d);
+  }catch(e){setStatus(e.message,'err')}
+  finally{running=false;$('run').disabled=false}
+}
+async function checkSource(){
+  try{
+    const r=await fetch('/api/status',{cache:'no-store'}),s=await r.json();
+    if(!s.error){
+      $('sourceLine').textContent=`source ${s.source_short} • ${s.stale?'BUILD NIEAKTUALNY':'build zgodny'} • ${s.production_modules} prod. modułów`;
+      $('sourceLine').className='source '+(s.stale?'warn':'ok');
+      $('gitLine').textContent=`git ${s.git.head}${s.git.dirty?' + zmiany robocze':''}`;
+      renderCanable(s.settings);
+      if(lastHash && s.source_hash!==lastHash && $('watch').checked && !running) run();
+    }
+  }catch(_){}
+  setTimeout(checkSource,1500);
+}
+
+// --- playback: replays the ALREADY COMPUTED run, no new computation happens here -------
+function stopPlayback(){ if(playTimer){clearInterval(playTimer);playTimer=null} $('play').textContent='▶ Odtwórz przebieg'; $('play').classList.remove('playing') }
+function startPlayback(){
+  if(!lastRows.length)return;
+  if(playTimer){stopPlayback();return}
+  $('play').textContent='⏸ Zatrzymaj';$('play').classList.add('playing');
+  const speed=1.0; // 1x = same pace as the modelled ride time
+  const stepMs=40;
+  let t=lastX0;
+  setCursor(t);
+  playTimer=setInterval(()=>{
+    t+=stepMs/1000*speed;
+    if(t>=lastX1){setCursor(lastX1);stopPlayback();return}
+    setCursor(t);
+  },stepMs);
+}
+$('play').addEventListener('click',startPlayback);
+$('scrub').addEventListener('input',()=>{
+  if(!lastRows.length)return; stopPlayback();
+  const frac=+$('scrub').value/1000; setCursor(lastX0+frac*(lastX1-lastX0));
+});
+
+$('run').addEventListener('click',run);
+$('canableRefresh').addEventListener('click',async()=>{$('canableStatus').textContent='sprawdzanie…';try{const r=await fetch('/api/status',{cache:'no-store'});const s=await r.json();renderCanable(s.settings)}catch(e){}});
+$('presetClimb').addEventListener('click',()=>{$('cadence').value=45;$('torque').value=55;$('torque_ripple').value=65;$('speed').value=10;$('stopEnabled').checked=false;$('ride_stop_s').disabled=true;for(const id of Object.keys(fmt))$(id+'V').textContent=fmt[id]($(id).value);run()});
+$('presetSmooth').addEventListener('click',()=>{$('torque_ripple').value=8;$('asymmetry').value=0;$('stopEnabled').checked=false;$('ride_stop_s').disabled=true;for(const id of Object.keys(fmt))$(id+'V').textContent=fmt[id]($(id).value);run()});
+$('presetStop').addEventListener('click',()=>{$('duration').value=6;$('ride_start_s').value=0.5;$('ride_stop_s').value=3;$('stopEnabled').checked=true;$('ride_stop_s').disabled=false;for(const id of Object.keys(fmt))$(id+'V').textContent=fmt[id]($(id).value);run()});
+window.addEventListener('resize',()=>redrawAll());
+run();checkSource();
+</script>
+</body>
+</html>

@@ -314,8 +314,15 @@ int main(int argc, char **argv)
 		metrics_t r = analyze(2);
 		CHECK(r.rise50_new >= 0.0 && r.rise50_old >= 0.0,
 			"sanity: S2 sharp rise settles on both NEW and OLD at 20 rpm");
-		CHECK(r.rise50_new < r.rise50_old,
-			"sanity: NEW reaches 50% of the sharp-rise target strictly faster than OLD at 20 rpm");
+		/*
+		 * AP-03: the "NEW strictly faster than OLD" comparison is REMOVED, not relaxed.
+		 * FW-112.4 is deleted, so NEW and OLD are now the same crank-angle window and the
+		 * comparison has no second operand left. Every PROPERTY assertion in this file is
+		 * untouched and still guards the window (ripple bound, recovery completion, no
+		 * multi-second lag). The S1-S8 table this suite prints is now a characterisation of
+		 * the WINDOW and is the record of what it costs on a slow rise at low cadence -
+		 * see rise50 at 20 rpm, which is the open risk of removing FW-112.4.
+		 */
 	}
 
 	for (int s = 0; s < 8; s++) {
@@ -344,13 +351,11 @@ int main(int argc, char **argv)
 		metrics_t r = analyze(3);
 		CHECK(r.rise50_new >= 0.0, "S4 @20rpm: NEW reaches 50% of the ramp target at all");
 		CHECK(r.rise50_old >= 0.0, "S4 @20rpm: OLD reaches 50% of the ramp target at all");
-		/* The old 48-step window at 20 rpm spans up to 1.5 s of stale history; a slow ramp
-		 * measurably drags behind it. NEW must not inherit that: since NEW's rise time is
-		 * bounded by two cascaded EMAs (35 ms afilt + 30 ms asym-rise) plus the ramp's own
-		 * pace, it must reach the ramp's actual level materially sooner than OLD once the
-		 * ramp itself has finished climbing (t=4s, well past both filters' settle time). */
-		CHECK(r.rise50_new < r.rise50_old,
-			"S4 @20rpm: NEW reaches 50% of the slow-ramp target sooner than OLD");
+		/*
+		 * AP-03: the NEW-vs-OLD comparison is REMOVED (FW-112.4 deleted, both operands are
+		 * now the same window). The absolute bound below is KEPT and is the one that
+		 * matters: the estimate must not be stuck near a multi-second lag at 20 rpm.
+		 */
 		CHECK(fabs(r.rise50_new - 4.0) < 4.0,
 			"S4 @20rpm: NEW does not scale linearly with the 48-step window (not stuck near a multi-second lag)");
 	}

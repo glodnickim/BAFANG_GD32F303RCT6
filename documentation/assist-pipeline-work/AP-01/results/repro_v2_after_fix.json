@@ -1,0 +1,196 @@
+{
+  "expect_fixed": true,
+  "findings": [
+    {
+      "finding": "AP01-V2-01a",
+      "title": "single trailing zero accepted as CONFIRMED (no observation after zero)",
+      "defect_present": false,
+      "observed": {
+        "value_at_stop": 10,
+        "last_sample_before_stop_s": 0,
+        "candidate_zero_time_s": 2,
+        "confirmed_zero_time_s": null,
+        "time_to_confirmed_zero_s": null,
+        "observed_hold_s": 0,
+        "min_confirm_s": 0.1,
+        "transition_bracket_s": [
+          1,
+          2
+        ],
+        "transition_bracket_width_s": 1,
+        "last_observed_time_s": 2,
+        "median_sample_dt_s": 1,
+        "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+        "excursions_before_confirmation": 0,
+        "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+        "status": "INSUFFICIENT_OBSERVATION"
+      },
+      "review_expectation": "a distinct status for insufficient observation, not CONFIRMED"
+    },
+    {
+      "finding": "AP01-V2-01b",
+      "title": "irregular sampling: median dt presented as resolution, real transition bracket (1.2, 5] not reported",
+      "defect_present": false,
+      "observed": {
+        "value_at_stop": 10,
+        "last_sample_before_stop_s": 0,
+        "candidate_zero_time_s": 5,
+        "confirmed_zero_time_s": 5,
+        "time_to_confirmed_zero_s": 4,
+        "observed_hold_s": 0.20000000000000018,
+        "min_confirm_s": 0.1,
+        "transition_bracket_s": [
+          1.2,
+          5
+        ],
+        "transition_bracket_width_s": 3.8,
+        "last_observed_time_s": 5.2,
+        "median_sample_dt_s": 0.10000000000000009,
+        "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+        "excursions_before_confirmation": 0,
+        "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+        "status": "CONFIRMED"
+      },
+      "review_expectation": "report the adjacent timestamps bracketing the transition, i.e. (1.2, 5.0]"
+    },
+    {
+      "finding": "AP01-V2-01c",
+      "title": "rise_time_10_90 returns a latency although the 10% crossing is not in the record",
+      "defect_present": false,
+      "observed": null,
+      "review_expectation": "None / an explicit insufficient-record status"
+    },
+    {
+      "finding": "check_large_ripple_improvement_penalised",
+      "error": "KeyError('metrics')"
+    },
+    {
+      "finding": "check_arithmetic_error_in_justification",
+      "error": "KeyError('metrics')"
+    },
+    {
+      "finding": "AP01-V2-02c",
+      "title": "shape alone decides exclusion instead of demonstrated limit evidence",
+      "defect_present": false,
+      "observed": {
+        "smooth_excluded_from_comparison": false,
+        "plateau_excluded_without_evidence": false,
+        "evidenced_clipping_missed": false
+      },
+      "review_expectation": "flatness/plateau informational only; exclusion requires a demonstrated change at an observed stage"
+    },
+    {
+      "finding": "AP01-V2-02d",
+      "title": "limit helper unused by extractor and no computed bias in results",
+      "defect_present": false,
+      "observed": {
+        "extractor_uses_limit_helper": true,
+        "extractor_reads_limit_channel_pair": true,
+        "result_channel_keys": [
+          "bias_reference_case",
+          "bias_reference_value",
+          "bias_vs_reference",
+          "comparable",
+          "limit_evidence",
+          "limit_status",
+          "limiting",
+          "mean",
+          "pp",
+          "relative_bias_vs_reference",
+          "relative_ripple",
+          "ripple_rms",
+          "rms",
+          "upstream_stages_changing_this_channel"
+        ],
+        "has_computed_bias": true
+      },
+      "review_expectation": "real limit evidence consumed by the extractor and a computed bias against an explicit reference"
+    },
+    {
+      "finding": "AP01-V2-02e",
+      "title": "floor-above-profile case labelled cap-limited although the floor exceeds the profile cap",
+      "defect_present": false,
+      "observed": {
+        "floor_above_profile_mean": 175.0,
+        "profile_cap_only_mean": 14.0,
+        "floor_exceeds_cap": true,
+        "label": "REPRODUCED audit finding: window30/180/360 rows identical for the tested tuning "
+      },
+      "review_expectation": "state that the floor (assist_min_iq_pct) overrides the profile cap (max_iq_pct)"
+    },
+    {
+      "finding": "AP01-V2-03a",
+      "title": "negative runner test relocates the runner, so it fails on import instead of the native/RequiredCaseFailed path",
+      "defect_present": false,
+      "observed": {
+        "test_uses_copytree": false,
+        "relocated_import_error": false,
+        "stderr_tail": ""
+      },
+      "review_expectation": "isolate only the OUTPUT; reach RequiredCaseFailed / the real native exit code; a missing import must FAIL the test"
+    },
+    {
+      "finding": "AP01-V2-03b",
+      "title": "only RequiredCaseFailed is caught, and no incomplete marker is written before the first case",
+      "defect_present": false,
+      "observed": {
+        "catches_only_required_case_failed": false,
+        "writes_run_id_or_marker_upfront": true
+      },
+      "review_expectation": "any preparation/build/serializer failure must also leave incomplete state; a previous complete manifest must not survive as the apparent new result"
+    },
+    {
+      "finding": "AP01-V2-03c",
+      "title": "required comparisons are recorded but never checked before run_complete=true",
+      "defect_present": false,
+      "observed": {
+        "enforcement_between_comparison_and_completion": true
+      },
+      "review_expectation": "a false required comparison must fail the run"
+    },
+    {
+      "finding": "AP01-V2-03d",
+      "title": "extractor accepts a manifest that is complete yet contains a required ERROR case",
+      "defect_present": false,
+      "observed": {
+        "metrics_written": false
+      },
+      "review_expectation": "reject the contradictory manifest with a nonzero exit"
+    },
+    {
+      "finding": "AP01-V2-04a",
+      "title": "inventory promotes reading test files to a completed safety proof",
+      "defect_present": false,
+      "observed": {
+        "live_overclaims_outside_withdrawals": [],
+        "coverage_entries": 15,
+        "entries_missing_evidence_level": [],
+        "entries_claiming_execution": []
+      },
+      "review_expectation": "claims limited to the module read; distinguish exists / read / executed"
+    },
+    {
+      "finding": "AP01-V2-04b",
+      "title": "sensor_invalid claims no test forces torque_sensor_valid; fw100_extended_boost_host.c:200-201 already does",
+      "defect_present": false,
+      "observed": {
+        "claims_no_test_exists": false,
+        "cites_boost_host": true
+      },
+      "review_expectation": "separate PAS-quadrature invalid / pas_sensor_valid / torque_sensor_valid and cite the partial boost coverage"
+    },
+    {
+      "finding": "AP01-V2-04c",
+      "title": "claims Controller Lab is the only CSV source, and uses Walk to justify low-cadence tolerance",
+      "defect_present": false,
+      "observed": {
+        "names_l4_csv_emitter": true,
+        "names_replay_csv_emitter": true,
+        "live_exclusivity_claim": false,
+        "low_cadence_explicitly_disclaims_walk": true,
+        "other_walk_mentions_in_criteria": []
+      },
+      "review_expectation": "check sim/l4 and sim/replay CSV emitters; drop the Walk-based justification"
+    }
+  ]
+}

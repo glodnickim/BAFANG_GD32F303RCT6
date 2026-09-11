@@ -1,0 +1,7 @@
+Analysis written to C:\Projekty\eVistDrive\motor-controller-firmware\documentation\assist-pipeline-work\AP-01\disturbances-001\results\disturbances-metrics.json
+  cases analysed : 82
+  groups         : control_6s, control_8s, control_hires, fg_delay, fg_delay_hires, miss_tick, pas_edge_drop, pas_edge_jitter, pas_invalid, pas_invalid_seq, regression_ac_t2, reverse_bounce, reverse_bounce_hires, reverse_clean, torque_invalid
+  unhandled      : none
+  P-1: PASS=12 FAIL=0 NOT_EVALUATED=51
+  P-2: PASS=0 FAIL=8 NOT_EVALUATED=55  failing: ['hires_bounce_cad30_speed0', 'hires_bounce_cad30_speed18', 'hires_bounce_cad72_speed0', 'hires_bounce_cad72_speed18']
+  P-6: PASS=56 FAIL=0 NOT_EVALUATED=7

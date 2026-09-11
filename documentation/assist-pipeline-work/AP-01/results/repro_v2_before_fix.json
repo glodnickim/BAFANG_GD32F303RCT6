@@ -1,0 +1,172 @@
+{
+  "expect_fixed": false,
+  "findings": [
+    {
+      "finding": "AP01-V2-01a",
+      "title": "single trailing zero accepted as CONFIRMED (no observation after zero)",
+      "defect_present": true,
+      "observed": {
+        "status": "CONFIRMED",
+        "value_at_stop": 10,
+        "confirmed_zero_time_s": 2,
+        "time_to_confirmed_zero_s": 1,
+        "last_observed_time_s": 2,
+        "sample_dt_s": 1
+      },
+      "review_expectation": "a distinct status for insufficient observation, not CONFIRMED"
+    },
+    {
+      "finding": "AP01-V2-01b",
+      "title": "irregular sampling: median dt presented as resolution, real transition bracket (1.2, 5] not reported",
+      "defect_present": true,
+      "observed": {
+        "status": "CONFIRMED",
+        "value_at_stop": 10,
+        "confirmed_zero_time_s": 5,
+        "time_to_confirmed_zero_s": 4,
+        "last_observed_time_s": 5.2,
+        "sample_dt_s": 0.10000000000000009
+      },
+      "review_expectation": "report the adjacent timestamps bracketing the transition, i.e. (1.2, 5.0]"
+    },
+    {
+      "finding": "AP01-V2-01c",
+      "title": "rise_time_10_90 returns a latency although the 10% crossing is not in the record",
+      "defect_present": true,
+      "observed": 1,
+      "review_expectation": "None / an explicit insufficient-record status"
+    },
+    {
+      "finding": "AP01-V2-02a",
+      "title": "symmetric ripple threshold rejects a large improvement",
+      "defect_present": true,
+      "observed": {
+        "baseline": 0.1,
+        "candidate": 0.01,
+        "abs_delta": 0.09000000000000001,
+        "criterion": "|delta| <= 0.05 (5 percentage points of relative ripple) at cadence >= 40 rpm; OPEN/wider "
+      },
+      "review_expectation": "directional criterion: lower relative ripple is better, never penalised for being better"
+    },
+    {
+      "finding": "AP01-V2-02b",
+      "title": "justification states 20-30% where the real figure is ~52%",
+      "defect_present": true,
+      "observed": {
+        "claimed": "20-30%",
+        "actual_percent": 51.5
+      },
+      "review_expectation": "corrected arithmetic or a different criterion altogether"
+    },
+    {
+      "finding": "AP01-V2-02c",
+      "title": "pp<0.5 flags a perfect signal as saturated and misses real clipping",
+      "defect_present": true,
+      "observed": {
+        "smooth_flagged_saturated": true,
+        "clipped_flagged_saturated": false
+      },
+      "review_expectation": "limiting decided by real cap/floor/limit evidence; flatness informational only, never an exclusion"
+    },
+    {
+      "finding": "AP01-V2-02d",
+      "title": "saturation_flags unused by extractor and no computed bias in results",
+      "defect_present": true,
+      "observed": {
+        "extractor_uses_saturation_flags": false,
+        "result_channel_keys": [
+          "mean",
+          "possibly_saturated",
+          "pp",
+          "relative_ripple",
+          "ripple_rms",
+          "rms"
+        ],
+        "has_bias": false
+      },
+      "review_expectation": "real limit evidence consumed by the extractor and a computed bias against an explicit reference"
+    },
+    {
+      "finding": "AP01-V2-02e",
+      "title": "floor-above-profile case labelled cap-limited although the floor exceeds the profile cap",
+      "defect_present": true,
+      "observed": {
+        "floor_above_profile_mean": 175.0,
+        "profile_cap_only_mean": 14.0,
+        "floor_exceeds_cap": true,
+        "label": "REPRODUCED audit finding: window30/180/360 rows identical for the tested tuning "
+      },
+      "review_expectation": "state that the floor (assist_min_iq_pct) overrides the profile cap (max_iq_pct)"
+    },
+    {
+      "finding": "AP01-V2-03a",
+      "title": "negative runner test relocates the runner, so it fails on import instead of the native/RequiredCaseFailed path",
+      "defect_present": true,
+      "observed": {
+        "test_uses_copytree": true,
+        "relocated_import_error": true,
+        "stderr_tail": "ModuleNotFoundError: No module named 'sim'"
+      },
+      "review_expectation": "isolate only the OUTPUT; reach RequiredCaseFailed / the real native exit code; a missing import must FAIL the test"
+    },
+    {
+      "finding": "AP01-V2-03b",
+      "title": "only RequiredCaseFailed is caught, and no incomplete marker is written before the first case",
+      "defect_present": true,
+      "observed": {
+        "catches_only_required_case_failed": true,
+        "writes_run_id_or_marker_upfront": false
+      },
+      "review_expectation": "any preparation/build/serializer failure must also leave incomplete state; a previous complete manifest must not survive as the apparent new result"
+    },
+    {
+      "finding": "AP01-V2-03c",
+      "title": "required comparisons are recorded but never checked before run_complete=true",
+      "defect_present": true,
+      "observed": {
+        "enforcement_between_comparison_and_completion": false
+      },
+      "review_expectation": "a false required comparison must fail the run"
+    },
+    {
+      "finding": "AP01-V2-03d",
+      "title": "extractor accepts a manifest that is complete yet contains a required ERROR case",
+      "defect_present": true,
+      "observed": {
+        "metrics_written": true
+      },
+      "review_expectation": "reject the contradictory manifest with a nonzero exit"
+    },
+    {
+      "finding": "AP01-V2-04a",
+      "title": "inventory promotes reading test files to a completed safety proof",
+      "defect_present": true,
+      "observed": [
+        "already proven exhaustively",
+        "does not need new evidence",
+        "exhaustively proven"
+      ],
+      "review_expectation": "claims limited to the module read; distinguish exists / read / executed"
+    },
+    {
+      "finding": "AP01-V2-04b",
+      "title": "sensor_invalid claims no test forces torque_sensor_valid; fw100_extended_boost_host.c:200-201 already does",
+      "defect_present": true,
+      "observed": {
+        "claims_no_test_exists": true,
+        "cites_boost_host": false
+      },
+      "review_expectation": "separate PAS-quadrature invalid / pas_sensor_valid / torque_sensor_valid and cite the partial boost coverage"
+    },
+    {
+      "finding": "AP01-V2-04c",
+      "title": "claims Controller Lab is the only CSV source, and uses Walk to justify low-cadence tolerance",
+      "defect_present": true,
+      "observed": {
+        "claims_controller_lab_only_csv": true,
+        "walk_justification_in_criteria": true
+      },
+      "review_expectation": "check sim/l4 and sim/replay CSV emitters; drop the Walk-based justification"
+    }
+  ]
+}

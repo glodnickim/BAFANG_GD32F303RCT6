@@ -1,0 +1,19 @@
+{
+  "format": "evistdrive-preset",
+  "version": 1,
+  "name": "controller-lab-smoke",
+  "created": "2026-09-08T11:55:00.000Z",
+  "source": { "controller_sw_version": null, "bank_schema_version": null },
+  "banks": [],
+  "tuning": {
+    "tuning_schema_version": 8,
+    "startup_boost_cadence_step": 10,
+    "assist_run_deadband_mv": 8,
+    "assist_hold_ms": 600,
+    "assist_min_iq_pct": 1,
+    "assist_torque_run_window_deg": 180,
+    "assist_start_steps": 12,
+    "assist_torque_full_scale_centikg": 6000,
+    "crank_length_mm": 165
+  }
+}

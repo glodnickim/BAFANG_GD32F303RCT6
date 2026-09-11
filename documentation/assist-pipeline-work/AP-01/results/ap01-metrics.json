@@ -1,0 +1,4677 @@
+{
+  "source_manifest": "C:\\Projekty\\eVistDrive\\motor-controller-firmware\\documentation\\assist-pipeline-work\\AP-01\\results\\ap01-results.json",
+  "source_manifest_run_id": null,
+  "source_manifest_generated_at": "2026-09-09T08:03:25.333993+02:00",
+  "tool_revision": "extract_metrics.py REV3",
+  "bias_reference_case": "linear72_baseline",
+  "bias_reference_note": "bias is computed against the named reference case. For cases whose inputs differ from the reference (e.g. the cadence sweep) it measures the effect of the input change, not a defect.",
+  "cases": {
+    "sweep_mode1_cad20": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            104.0,
+            240.0
+          ],
+          "downstream_range": [
+            104.0,
+            240.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            104.0,
+            240.0
+          ],
+          "downstream_range": [
+            104.0,
+            240.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            104.0,
+            240.0
+          ],
+          "downstream_range": [
+            104.0,
+            240.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 247.0,
+          "mean": 347.594,
+          "rms": 356.9257457791466,
+          "ripple_rms": 81.08266870299718,
+          "relative_ripple": 0.23326832080817617,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -13.718000000000018,
+          "relative_bias_vs_reference": -0.03796718625453906,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 0.0,
+          "mean": 20.0,
+          "rms": 20.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -51.111999999999995,
+          "relative_bias_vs_reference": -0.7187535155810553,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 136.0,
+          "mean": 170.74,
+          "rms": 176.44911447780066,
+          "ripple_rms": 44.521257843866,
+          "relative_ripple": 0.26075470214282537,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 15.748000000000019,
+          "relative_bias_vs_reference": 0.10160524414163324,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 136.0,
+          "mean": 170.74,
+          "rms": 176.44911447780066,
+          "ripple_rms": 44.521257843866,
+          "relative_ripple": 0.26075470214282537,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 15.748000000000019,
+          "relative_bias_vs_reference": 0.10160524414163324,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 136.0,
+          "mean": 170.74,
+          "rms": 176.44911447780066,
+          "ripple_rms": 44.521257843866,
+          "relative_ripple": 0.26075470214282537,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 15.748000000000019,
+          "relative_bias_vs_reference": 0.10160524414163324,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 136.0,
+          "mean": 170.74,
+          "rms": 176.44911447780066,
+          "ripple_rms": 44.521257843866,
+          "relative_ripple": 0.26075470214282537,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 15.748000000000019,
+          "relative_bias_vs_reference": 0.10160524414163324,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 136.0,
+          "mean": 170.74,
+          "rms": 176.44911447780066,
+          "ripple_rms": 44.521257843866,
+          "relative_ripple": 0.26075470214282537,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 15.748000000000019,
+          "relative_bias_vs_reference": 0.10160524414163324,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 132.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 132.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad30": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            105.0,
+            209.0
+          ],
+          "downstream_range": [
+            105.0,
+            209.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            105.0,
+            209.0
+          ],
+          "downstream_range": [
+            105.0,
+            209.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            105.0,
+            209.0
+          ],
+          "downstream_range": [
+            105.0,
+            209.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 208.0,
+          "mean": 359.392,
+          "rms": 364.76658564073546,
+          "ripple_rms": 62.386315294301525,
+          "relative_ripple": 0.17358849193722042,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.920000000000016,
+          "relative_bias_vs_reference": -0.0053139668762731814,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 29.671,
+          "rms": 29.6747198807335,
+          "ripple_rms": 0.4698499760561875,
+          "relative_ripple": 0.015835326617107192,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -41.440999999999995,
+          "relative_bias_vs_reference": -0.5827567780402745,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 104.0,
+          "mean": 159.167,
+          "rms": 162.1168436653021,
+          "ripple_rms": 30.78533922177893,
+          "relative_ripple": 0.1934153387434514,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 4.175000000000011,
+          "relative_bias_vs_reference": 0.026936874161247105,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 104.0,
+          "mean": 159.167,
+          "rms": 162.1168436653021,
+          "ripple_rms": 30.78533922177893,
+          "relative_ripple": 0.1934153387434514,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 4.175000000000011,
+          "relative_bias_vs_reference": 0.026936874161247105,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 104.0,
+          "mean": 159.167,
+          "rms": 162.1168436653021,
+          "ripple_rms": 30.78533922177893,
+          "relative_ripple": 0.1934153387434514,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 4.175000000000011,
+          "relative_bias_vs_reference": 0.026936874161247105,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 104.0,
+          "mean": 159.167,
+          "rms": 162.1168436653021,
+          "ripple_rms": 30.78533922177893,
+          "relative_ripple": 0.1934153387434514,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 4.175000000000011,
+          "relative_bias_vs_reference": 0.026936874161247105,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 104.0,
+          "mean": 159.167,
+          "rms": 162.1168436653021,
+          "ripple_rms": 30.78533922177893,
+          "relative_ripple": 0.1934153387434514,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 4.175000000000011,
+          "relative_bias_vs_reference": 0.026936874161247105,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 185.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 185.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad40": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            112.0,
+            194.0
+          ],
+          "downstream_range": [
+            112.0,
+            194.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            112.0,
+            194.0
+          ],
+          "downstream_range": [
+            112.0,
+            194.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            112.0,
+            194.0
+          ],
+          "downstream_range": [
+            112.0,
+            194.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 173.0,
+          "mean": 359.304,
+          "rms": 363.2445760090576,
+          "ripple_rms": 53.35969999915667,
+          "relative_ripple": 0.14850850533018467,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -2.008000000000038,
+          "relative_bias_vs_reference": -0.005557523691435762,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 0.0,
+          "mean": 40.0,
+          "rms": 40.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -31.111999999999995,
+          "relative_bias_vs_reference": -0.4375070311621104,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 82.0,
+          "mean": 154.051,
+          "rms": 156.1454418162759,
+          "ripple_rms": 25.4889858370238,
+          "relative_ripple": 0.16545810047986578,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.9410000000000025,
+          "relative_bias_vs_reference": -0.006071281098379288,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 82.0,
+          "mean": 154.051,
+          "rms": 156.1454418162759,
+          "ripple_rms": 25.4889858370238,
+          "relative_ripple": 0.16545810047986578,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.9410000000000025,
+          "relative_bias_vs_reference": -0.006071281098379288,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 82.0,
+          "mean": 154.051,
+          "rms": 156.1454418162759,
+          "ripple_rms": 25.4889858370238,
+          "relative_ripple": 0.16545810047986578,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.9410000000000025,
+          "relative_bias_vs_reference": -0.006071281098379288,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 82.0,
+          "mean": 154.051,
+          "rms": 156.1454418162759,
+          "ripple_rms": 25.4889858370238,
+          "relative_ripple": 0.16545810047986578,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.9410000000000025,
+          "relative_bias_vs_reference": -0.006071281098379288,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 82.0,
+          "mean": 154.051,
+          "rms": 156.1454418162759,
+          "ripple_rms": 25.4889858370238,
+          "relative_ripple": 0.16545810047986578,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.9410000000000025,
+          "relative_bias_vs_reference": -0.006071281098379288,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 112.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 112.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad60": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            124.0,
+            184.0
+          ],
+          "downstream_range": [
+            124.0,
+            184.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            124.0,
+            184.0
+          ],
+          "downstream_range": [
+            124.0,
+            184.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            124.0,
+            184.0
+          ],
+          "downstream_range": [
+            124.0,
+            184.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 126.0,
+          "mean": 361.56,
+          "rms": 363.5279631610201,
+          "ripple_rms": 37.77494407672895,
+          "relative_ripple": 0.10447766367056353,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.24799999999999045,
+          "relative_bias_vs_reference": 0.0006863873881852539,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 59.348,
+          "rms": 59.34991154163585,
+          "ripple_rms": 0.47633601585435464,
+          "relative_ripple": 0.00802615110626061,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -11.763999999999996,
+          "relative_bias_vs_reference": -0.16542918213522326,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 60.0,
+          "mean": 155.13,
+          "rms": 156.1729490020599,
+          "ripple_rms": 18.018687521570488,
+          "relative_ripple": 0.11615217895681357,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.13800000000000523,
+          "relative_bias_vs_reference": 0.0008903685351502351,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 60.0,
+          "mean": 155.13,
+          "rms": 156.1729490020599,
+          "ripple_rms": 18.018687521570488,
+          "relative_ripple": 0.11615217895681357,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.13800000000000523,
+          "relative_bias_vs_reference": 0.0008903685351502351,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 60.0,
+          "mean": 155.13,
+          "rms": 156.1729490020599,
+          "ripple_rms": 18.018687521570488,
+          "relative_ripple": 0.11615217895681357,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.13800000000000523,
+          "relative_bias_vs_reference": 0.0008903685351502351,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 60.0,
+          "mean": 155.13,
+          "rms": 156.1729490020599,
+          "ripple_rms": 18.018687521570488,
+          "relative_ripple": 0.11615217895681357,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.13800000000000523,
+          "relative_bias_vs_reference": 0.0008903685351502351,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 60.0,
+          "mean": 155.13,
+          "rms": 156.1729490020599,
+          "ripple_rms": 18.018687521570488,
+          "relative_ripple": 0.11615217895681357,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.13800000000000523,
+          "relative_bias_vs_reference": 0.0008903685351502351,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 139.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 139.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad72": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad90": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            134.0,
+            173.0
+          ],
+          "downstream_range": [
+            134.0,
+            173.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            134.0,
+            173.0
+          ],
+          "downstream_range": [
+            134.0,
+            173.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            134.0,
+            173.0
+          ],
+          "downstream_range": [
+            134.0,
+            173.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 82.0,
+          "mean": 359.877,
+          "rms": 360.72519318727933,
+          "ripple_rms": 24.72265906006067,
+          "relative_ripple": 0.06869752459885091,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.4350000000000023,
+          "relative_bias_vs_reference": -0.003971636701797898,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 89.9,
+          "rms": 89.90050055478001,
+          "ripple_rms": 0.3,
+          "relative_ripple": 0.003337041156840934,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 18.78800000000001,
+          "relative_bias_vs_reference": 0.26420294746315687,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 39.0,
+          "mean": 154.297,
+          "rms": 154.74906461752846,
+          "ripple_rms": 11.819847334039471,
+          "relative_ripple": 0.07660451813087403,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.6949999999999932,
+          "relative_bias_vs_reference": -0.0044841024052853905,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 39.0,
+          "mean": 154.297,
+          "rms": 154.74906461752846,
+          "ripple_rms": 11.819847334039471,
+          "relative_ripple": 0.07660451813087403,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.6949999999999932,
+          "relative_bias_vs_reference": -0.0044841024052853905,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 39.0,
+          "mean": 154.297,
+          "rms": 154.74906461752846,
+          "ripple_rms": 11.819847334039471,
+          "relative_ripple": 0.07660451813087403,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.6949999999999932,
+          "relative_bias_vs_reference": -0.0044841024052853905,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 39.0,
+          "mean": 154.297,
+          "rms": 154.74906461752846,
+          "ripple_rms": 11.819847334039471,
+          "relative_ripple": 0.07660451813087403,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.6949999999999932,
+          "relative_bias_vs_reference": -0.0044841024052853905,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 39.0,
+          "mean": 154.297,
+          "rms": 154.74906461752846,
+          "ripple_rms": 11.819847334039471,
+          "relative_ripple": 0.07660451813087403,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.6949999999999932,
+          "relative_bias_vs_reference": -0.0044841024052853905,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 172.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 172.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad110": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            137.0,
+            168.0
+          ],
+          "downstream_range": [
+            137.0,
+            168.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            137.0,
+            168.0
+          ],
+          "downstream_range": [
+            137.0,
+            168.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            137.0,
+            168.0
+          ],
+          "downstream_range": [
+            137.0,
+            168.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 65.0,
+          "mean": 359.09,
+          "rms": 359.59768909157356,
+          "ripple_rms": 19.101567998465466,
+          "relative_ripple": 0.05319437466502957,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -2.222000000000037,
+          "relative_bias_vs_reference": -0.006149809582853702,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 109.189,
+          "rms": 109.18970189537106,
+          "ripple_rms": 0.391508620594745,
+          "relative_ripple": 0.003585604965653546,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 38.077,
+          "relative_bias_vs_reference": 0.535451119361008,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 31.0,
+          "mean": 153.915,
+          "rms": 154.18296598522159,
+          "ripple_rms": 9.086240971931131,
+          "relative_ripple": 0.05903414853608246,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.0769999999999982,
+          "relative_bias_vs_reference": -0.00694874574171569,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 31.0,
+          "mean": 153.915,
+          "rms": 154.18296598522159,
+          "ripple_rms": 9.086240971931131,
+          "relative_ripple": 0.05903414853608246,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.0769999999999982,
+          "relative_bias_vs_reference": -0.00694874574171569,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 31.0,
+          "mean": 153.915,
+          "rms": 154.18296598522159,
+          "ripple_rms": 9.086240971931131,
+          "relative_ripple": 0.05903414853608246,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.0769999999999982,
+          "relative_bias_vs_reference": -0.00694874574171569,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 31.0,
+          "mean": 153.915,
+          "rms": 154.18296598522159,
+          "ripple_rms": 9.086240971931131,
+          "relative_ripple": 0.05903414853608246,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.0769999999999982,
+          "relative_bias_vs_reference": -0.00694874574171569,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 31.0,
+          "mean": 153.915,
+          "rms": 154.18296598522159,
+          "ripple_rms": 9.086240971931131,
+          "relative_ripple": 0.05903414853608246,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.0769999999999982,
+          "relative_bias_vs_reference": -0.00694874574171569,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 163.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.195,
+          "confirmed_zero_time_s": 8.195,
+          "time_to_confirmed_zero_s": 0.19500000000000028,
+          "observed_hold_s": 1.8049999999999997,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.19,
+            8.195
+          ],
+          "transition_bracket_width_s": 0.005000000000000782,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 163.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.195,
+          "confirmed_zero_time_s": 8.195,
+          "time_to_confirmed_zero_s": 0.19500000000000028,
+          "observed_hold_s": 1.8049999999999997,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.19,
+            8.195
+          ],
+          "transition_bracket_width_s": 0.005000000000000782,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "sweep_mode1_cad120": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            139.0,
+            166.0
+          ],
+          "downstream_range": [
+            139.0,
+            166.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            139.0,
+            166.0
+          ],
+          "downstream_range": [
+            139.0,
+            166.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            139.0,
+            166.0
+          ],
+          "downstream_range": [
+            139.0,
+            166.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 58.0,
+          "mean": 358.29,
+          "rms": 358.70025090596187,
+          "ripple_rms": 17.150682202174934,
+          "relative_ripple": 0.04786815764373813,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -3.0219999999999914,
+          "relative_bias_vs_reference": -0.008363962447967383,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 119.68,
+          "rms": 119.68090908745639,
+          "ripple_rms": 0.466476151587624,
+          "relative_ripple": 0.0038976951168752006,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 48.56800000000001,
+          "relative_bias_vs_reference": 0.6829789627629657,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 27.0,
+          "mean": 153.56,
+          "rms": 153.77717645996756,
+          "ripple_rms": 8.169846999791368,
+          "relative_ripple": 0.053202963009842195,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.431999999999988,
+          "relative_bias_vs_reference": -0.009239186538659983,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 27.0,
+          "mean": 153.56,
+          "rms": 153.77717645996756,
+          "ripple_rms": 8.169846999791368,
+          "relative_ripple": 0.053202963009842195,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.431999999999988,
+          "relative_bias_vs_reference": -0.009239186538659983,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 27.0,
+          "mean": 153.56,
+          "rms": 153.77717645996756,
+          "ripple_rms": 8.169846999791368,
+          "relative_ripple": 0.053202963009842195,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.431999999999988,
+          "relative_bias_vs_reference": -0.009239186538659983,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 27.0,
+          "mean": 153.56,
+          "rms": 153.77717645996756,
+          "ripple_rms": 8.169846999791368,
+          "relative_ripple": 0.053202963009842195,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.431999999999988,
+          "relative_bias_vs_reference": -0.009239186538659983,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 27.0,
+          "mean": 153.56,
+          "rms": 153.77717645996756,
+          "ripple_rms": 8.169846999791368,
+          "relative_ripple": 0.053202963009842195,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -1.431999999999988,
+          "relative_bias_vs_reference": -0.009239186538659983,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 141.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 141.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "linear72_baseline": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "window30_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "window180_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "window360_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "floor_above_profile_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "REDUCED",
+          "samples": 1000,
+          "fraction_reduced": 1.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 0.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            7.0,
+            7.0
+          ],
+          "attributed_cause": "profile Iq limit (max_iq_pct) per assist_modes.c"
+        },
+        "post_mode_request": {
+          "status": "RAISED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 1.0,
+          "fraction_unchanged": 0.0,
+          "upstream_range": [
+            7.0,
+            7.0
+          ],
+          "downstream_range": [
+            175.0,
+            175.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            175.0,
+            175.0
+          ],
+          "downstream_range": [
+            175.0,
+            175.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 0.0,
+          "mean": 7.0,
+          "rms": 7.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED"
+          },
+          "bias_vs_reference": -147.992,
+          "relative_bias_vs_reference": -0.9548363786518014,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 0.0,
+          "mean": 175.0,
+          "rms": 175.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED', 'post_mode_request': 'RAISED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED",
+            "post_mode_request": "RAISED"
+          },
+          "bias_vs_reference": 20.00800000000001,
+          "relative_bias_vs_reference": 0.12909053370496548,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 0.0,
+          "mean": 175.0,
+          "rms": 175.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED', 'post_mode_request': 'RAISED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED",
+            "post_mode_request": "RAISED"
+          },
+          "bias_vs_reference": 20.00800000000001,
+          "relative_bias_vs_reference": 0.12909053370496548,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 0.0,
+          "mean": 175.0,
+          "rms": 175.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED', 'post_mode_request': 'RAISED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED",
+            "post_mode_request": "RAISED"
+          },
+          "bias_vs_reference": 20.00800000000001,
+          "relative_bias_vs_reference": 0.12909053370496548,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 175.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 175.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "floor_default_profile1_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "REDUCED",
+          "samples": 1000,
+          "fraction_reduced": 1.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 0.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            7.0,
+            7.0
+          ],
+          "attributed_cause": "profile Iq limit (max_iq_pct) per assist_modes.c"
+        },
+        "post_mode_request": {
+          "status": "RAISED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 1.0,
+          "fraction_unchanged": 0.0,
+          "upstream_range": [
+            7.0,
+            7.0
+          ],
+          "downstream_range": [
+            14.0,
+            14.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            14.0,
+            14.0
+          ],
+          "downstream_range": [
+            14.0,
+            14.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 0.0,
+          "mean": 7.0,
+          "rms": 7.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED"
+          },
+          "bias_vs_reference": -147.992,
+          "relative_bias_vs_reference": -0.9548363786518014,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 0.0,
+          "mean": 14.0,
+          "rms": 14.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED', 'post_mode_request': 'RAISED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED",
+            "post_mode_request": "RAISED"
+          },
+          "bias_vs_reference": -140.992,
+          "relative_bias_vs_reference": -0.9096727573036028,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 0.0,
+          "mean": 14.0,
+          "rms": 14.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED', 'post_mode_request': 'RAISED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED",
+            "post_mode_request": "RAISED"
+          },
+          "bias_vs_reference": -140.992,
+          "relative_bias_vs_reference": -0.9096727573036028,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 0.0,
+          "mean": 14.0,
+          "rms": 14.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'profile_limit': 'REDUCED', 'post_mode_request': 'RAISED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "profile_limit": "REDUCED",
+            "post_mode_request": "RAISED"
+          },
+          "bias_vs_reference": -140.992,
+          "relative_bias_vs_reference": -0.9096727573036028,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 14.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 14.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "without_rotation_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            285.0,
+            285.0
+          ],
+          "downstream_range": [
+            285.0,
+            285.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "REDUCED",
+          "samples": 1000,
+          "fraction_reduced": 1.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 0.0,
+          "upstream_range": [
+            285.0,
+            285.0
+          ],
+          "downstream_range": [
+            0.0,
+            0.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            0.0,
+            0.0
+          ],
+          "downstream_range": [
+            0.0,
+            0.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 0.0,
+          "mean": 335.0,
+          "rms": 335.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -26.312000000000012,
+          "relative_bias_vs_reference": -0.07282348773359315,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -71.112,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 0.0,
+          "mean": 285.0,
+          "rms": 285.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "FLAT_NO_LIMIT_EVIDENCE",
+          "comparable": true,
+          "limit_evidence": "constant non-zero value and no observed upstream change; flatness alone is not evidence of a limit",
+          "limiting": "UNKNOWN",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 130.008,
+          "relative_bias_vs_reference": 0.8388045834623724,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 0.0,
+          "mean": 285.0,
+          "rms": 285.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "FLAT_NO_LIMIT_EVIDENCE",
+          "comparable": true,
+          "limit_evidence": "constant non-zero value and no observed upstream change; flatness alone is not evidence of a limit",
+          "limiting": "UNKNOWN",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 130.008,
+          "relative_bias_vs_reference": 0.8388045834623724,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'post_mode_request': 'REDUCED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "post_mode_request": "REDUCED"
+          },
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'post_mode_request': 'REDUCED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "post_mode_request": "REDUCED"
+          },
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "LIMITED_UPSTREAM",
+          "comparable": false,
+          "limit_evidence": "observed upstream stage(s) changed this value: {'post_mode_request': 'REDUCED'}",
+          "limiting": "OBSERVED",
+          "upstream_stages_changing_this_channel": {
+            "post_mode_request": "REDUCED"
+          },
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 0.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.0,
+          "confirmed_zero_time_s": 8.0,
+          "time_to_confirmed_zero_s": 0.0,
+          "observed_hold_s": 2.0,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            null,
+            8.0
+          ],
+          "transition_bracket_width_s": null,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 0.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.0,
+          "confirmed_zero_time_s": 8.0,
+          "time_to_confirmed_zero_s": 0.0,
+          "observed_hold_s": 2.0,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            null,
+            8.0
+          ],
+          "transition_bracket_width_s": null,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "without_rotation_off_repro": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            0.0,
+            0.0
+          ],
+          "downstream_range": [
+            0.0,
+            0.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            0.0,
+            0.0
+          ],
+          "downstream_range": [
+            0.0,
+            0.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            0.0,
+            0.0
+          ],
+          "downstream_range": [
+            0.0,
+            0.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 0.0,
+          "mean": 335.0,
+          "rms": 335.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": 0.0,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -26.312000000000012,
+          "relative_bias_vs_reference": -0.07282348773359315,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -71.112,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "ZERO_NO_ASSIST",
+          "comparable": false,
+          "limit_evidence": "constant zero window - no assist present to compare",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "ZERO_NO_ASSIST",
+          "comparable": false,
+          "limit_evidence": "constant zero window - no assist present to compare",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "ZERO_NO_ASSIST",
+          "comparable": false,
+          "limit_evidence": "constant zero window - no assist present to compare",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "ZERO_NO_ASSIST",
+          "comparable": false,
+          "limit_evidence": "constant zero window - no assist present to compare",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "ripple_rms": 0.0,
+          "relative_ripple": null,
+          "limit_status": "ZERO_NO_ASSIST",
+          "comparable": false,
+          "limit_evidence": "constant zero window - no assist present to compare",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -154.992,
+          "relative_bias_vs_reference": -1.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 0.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.0,
+          "confirmed_zero_time_s": 8.0,
+          "time_to_confirmed_zero_s": 0.0,
+          "observed_hold_s": 2.0,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            null,
+            8.0
+          ],
+          "transition_bracket_width_s": null,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 0.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.0,
+          "confirmed_zero_time_s": 8.0,
+          "time_to_confirmed_zero_s": 0.0,
+          "observed_hold_s": 2.0,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            null,
+            8.0
+          ],
+          "transition_bracket_width_s": null,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "uneven_legs_asym0": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            135.0,
+            174.0
+          ],
+          "downstream_range": [
+            135.0,
+            174.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            135.0,
+            174.0
+          ],
+          "downstream_range": [
+            135.0,
+            174.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            135.0,
+            174.0
+          ],
+          "downstream_range": [
+            135.0,
+            174.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 83.0,
+          "mean": 361.06,
+          "rms": 362.2668132744152,
+          "ripple_rms": 29.545226348769102,
+          "relative_ripple": 0.08182913185833131,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.25200000000000955,
+          "relative_bias_vs_reference": -0.0006974581525108758,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 39.0,
+          "mean": 154.836,
+          "rms": 155.47482111261616,
+          "ripple_rms": 14.07952783299213,
+          "relative_ripple": 0.09093187522922401,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.1559999999999775,
+          "relative_bias_vs_reference": -0.0010065035614739955,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 39.0,
+          "mean": 154.836,
+          "rms": 155.47482111261616,
+          "ripple_rms": 14.07952783299213,
+          "relative_ripple": 0.09093187522922401,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.1559999999999775,
+          "relative_bias_vs_reference": -0.0010065035614739955,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 39.0,
+          "mean": 154.836,
+          "rms": 155.47482111261616,
+          "ripple_rms": 14.07952783299213,
+          "relative_ripple": 0.09093187522922401,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.1559999999999775,
+          "relative_bias_vs_reference": -0.0010065035614739955,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 39.0,
+          "mean": 154.836,
+          "rms": 155.47482111261616,
+          "ripple_rms": 14.07952783299213,
+          "relative_ripple": 0.09093187522922401,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.1559999999999775,
+          "relative_bias_vs_reference": -0.0010065035614739955,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 39.0,
+          "mean": 154.836,
+          "rms": 155.47482111261616,
+          "ripple_rms": 14.07952783299213,
+          "relative_ripple": 0.09093187522922401,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.1559999999999775,
+          "relative_bias_vs_reference": -0.0010065035614739955,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 136.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 136.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "uneven_legs_asym8": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 361.312,
+          "rms": 362.6815297199459,
+          "ripple_rms": 31.48857977108526,
+          "relative_ripple": 0.08715066139814139,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 154.992,
+          "rms": 155.72239402218295,
+          "ripple_rms": 15.06465850923943,
+          "relative_ripple": 0.09719636180731542,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 130.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "uneven_legs_asym30": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            112.0,
+            194.0
+          ],
+          "downstream_range": [
+            112.0,
+            194.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            112.0,
+            194.0
+          ],
+          "downstream_range": [
+            112.0,
+            194.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            112.0,
+            194.0
+          ],
+          "downstream_range": [
+            112.0,
+            194.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 171.0,
+          "mean": 363.9,
+          "rms": 367.3472526098432,
+          "ripple_rms": 50.20750939849536,
+          "relative_ripple": 0.13797062214480726,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 2.5879999999999654,
+          "relative_bias_vs_reference": 0.007162784518643071,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 82.0,
+          "mean": 156.226,
+          "rms": 158.06098190255557,
+          "ripple_rms": 24.014806349417018,
+          "relative_ripple": 0.15371837177817405,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 1.2340000000000089,
+          "relative_bias_vs_reference": 0.007961701249096785,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 82.0,
+          "mean": 156.226,
+          "rms": 158.06098190255557,
+          "ripple_rms": 24.014806349417018,
+          "relative_ripple": 0.15371837177817405,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 1.2340000000000089,
+          "relative_bias_vs_reference": 0.007961701249096785,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 82.0,
+          "mean": 156.226,
+          "rms": 158.06098190255557,
+          "ripple_rms": 24.014806349417018,
+          "relative_ripple": 0.15371837177817405,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 1.2340000000000089,
+          "relative_bias_vs_reference": 0.007961701249096785,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 82.0,
+          "mean": 156.226,
+          "rms": 158.06098190255557,
+          "ripple_rms": 24.014806349417018,
+          "relative_ripple": 0.15371837177817405,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 1.2340000000000089,
+          "relative_bias_vs_reference": 0.007961701249096785,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 82.0,
+          "mean": 156.226,
+          "rms": 158.06098190255557,
+          "ripple_rms": 24.014806349417018,
+          "relative_ripple": 0.15371837177817405,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 1.2340000000000089,
+          "relative_bias_vs_reference": 0.007961701249096785,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 112.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 112.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "uneven_legs_asym60": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        8.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            90.0,
+            217.0
+          ],
+          "downstream_range": [
+            90.0,
+            217.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            90.0,
+            217.0
+          ],
+          "downstream_range": [
+            90.0,
+            217.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 1000,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            90.0,
+            217.0
+          ],
+          "downstream_range": [
+            90.0,
+            217.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 266.0,
+          "mean": 374.212,
+          "rms": 383.75576608045907,
+          "ripple_rms": 85.05214315935842,
+          "relative_ripple": 0.22728331309353636,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 12.899999999999977,
+          "relative_bias_vs_reference": 0.03570321494996008,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.112,
+          "rms": 71.11269928782059,
+          "ripple_rms": 0.31536645351083237,
+          "relative_ripple": 0.004434785317679609,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.0,
+          "relative_bias_vs_reference": 0.0,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 127.0,
+          "mean": 161.124,
+          "rms": 166.1582980172823,
+          "ripple_rms": 40.59109045098444,
+          "relative_ripple": 0.2519245453873069,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 6.132000000000005,
+          "relative_bias_vs_reference": 0.039563332301022026,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 127.0,
+          "mean": 161.124,
+          "rms": 166.1582980172823,
+          "ripple_rms": 40.59109045098444,
+          "relative_ripple": 0.2519245453873069,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 6.132000000000005,
+          "relative_bias_vs_reference": 0.039563332301022026,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 127.0,
+          "mean": 161.124,
+          "rms": 166.1582980172823,
+          "ripple_rms": 40.59109045098444,
+          "relative_ripple": 0.2519245453873069,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 6.132000000000005,
+          "relative_bias_vs_reference": 0.039563332301022026,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 127.0,
+          "mean": 161.124,
+          "rms": 166.1582980172823,
+          "ripple_rms": 40.59109045098444,
+          "relative_ripple": 0.2519245453873069,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 6.132000000000005,
+          "relative_bias_vs_reference": 0.039563332301022026,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 127.0,
+          "mean": 161.124,
+          "rms": 166.1582980172823,
+          "ripple_rms": 40.59109045098444,
+          "relative_ripple": 0.2519245453873069,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 6.132000000000005,
+          "relative_bias_vs_reference": 0.039563332301022026,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 90.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 90.0,
+          "last_sample_before_stop_s": 7.995,
+          "candidate_zero_time_s": 8.2,
+          "confirmed_zero_time_s": 8.2,
+          "time_to_confirmed_zero_s": 0.1999999999999993,
+          "observed_hold_s": 1.8000000000000007,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            8.195,
+            8.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999005,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.005000000000000782,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    },
+    "stop_release_cad72": {
+      "rows": 2000,
+      "steady_window_s": [
+        3.0,
+        5.0
+      ],
+      "iq_stage_analysis": {
+        "profile_limit": {
+          "status": "UNCHANGED",
+          "samples": 400,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "post_mode_request": {
+          "status": "UNCHANGED",
+          "samples": 400,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        },
+        "request_to_allowed": {
+          "status": "UNCHANGED",
+          "samples": 400,
+          "fraction_reduced": 0.0,
+          "fraction_raised": 0.0,
+          "fraction_unchanged": 1.0,
+          "upstream_range": [
+            129.0,
+            179.0
+          ],
+          "downstream_range": [
+            129.0,
+            179.0
+          ],
+          "attributed_cause": null,
+          "attribution_note": "cause not attributable from these two columns alone"
+        }
+      },
+      "steady": {
+        "torque_run_native": {
+          "pp": 106.0,
+          "mean": 362.7475,
+          "rms": 364.22559973181455,
+          "ripple_rms": 32.78015777494062,
+          "relative_ripple": 0.09036632306202143,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'torque_run_native' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 1.4354999999999905,
+          "relative_bias_vs_reference": 0.0039730205473385615,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 361.312
+        },
+        "cadence_control_rpm": {
+          "pp": 1.0,
+          "mean": 71.105,
+          "rms": 71.10566081543719,
+          "ripple_rms": 0.30655342111938666,
+          "relative_ripple": 0.004311277984943206,
+          "limit_status": "NOT_APPLICABLE_NON_IQ_CHANNEL",
+          "comparable": true,
+          "limit_evidence": "'cadence_control_rpm' is not part of the Iq chain; Iq stage verdicts do not apply",
+          "limiting": "NOT_APPLICABLE",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": -0.006999999999990791,
+          "relative_bias_vs_reference": -9.843626954650119e-05,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 71.112
+        },
+        "iq_before_profile_limit": {
+          "pp": 50.0,
+          "mean": 155.6875,
+          "rms": 156.47510185329804,
+          "ripple_rms": 15.679918486714145,
+          "relative_ripple": 0.10071404889097806,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.6955000000000098,
+          "relative_bias_vs_reference": 0.00448732837823894,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_mode_request": {
+          "pp": 50.0,
+          "mean": 155.6875,
+          "rms": 156.47510185329804,
+          "ripple_rms": 15.679918486714145,
+          "relative_ripple": 0.10071404889097806,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.6955000000000098,
+          "relative_bias_vs_reference": 0.00448732837823894,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_requested": {
+          "pp": 50.0,
+          "mean": 155.6875,
+          "rms": 156.47510185329804,
+          "ripple_rms": 15.679918486714145,
+          "relative_ripple": 0.10071404889097806,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.6955000000000098,
+          "relative_bias_vs_reference": 0.00448732837823894,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_allowed": {
+          "pp": 50.0,
+          "mean": 155.6875,
+          "rms": 156.47510185329804,
+          "ripple_rms": 15.679918486714145,
+          "relative_ripple": 0.10071404889097806,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.6955000000000098,
+          "relative_bias_vs_reference": 0.00448732837823894,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        },
+        "iq_ref": {
+          "pp": 50.0,
+          "mean": 155.6875,
+          "rms": 156.47510185329804,
+          "ripple_rms": 15.679918486714145,
+          "relative_ripple": 0.10071404889097806,
+          "limit_status": "NO_LIMIT_OBSERVED",
+          "comparable": true,
+          "limit_evidence": "no observed stage changed this value; other limiters (battery/thermal/speed) are not separated by these columns",
+          "limiting": "NONE_OBSERVED",
+          "upstream_stages_changing_this_channel": null,
+          "bias_vs_reference": 0.6955000000000098,
+          "relative_bias_vs_reference": 0.00448732837823894,
+          "bias_reference_case": "linear72_baseline",
+          "bias_reference_value": 154.992
+        }
+      },
+      "stop_analysis": {
+        "iq_ref": {
+          "value_at_stop": 160.0,
+          "last_sample_before_stop_s": 4.995,
+          "candidate_zero_time_s": 5.2,
+          "confirmed_zero_time_s": 5.2,
+          "time_to_confirmed_zero_s": 0.20000000000000018,
+          "observed_hold_s": 4.8,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            5.195,
+            5.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999893,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.004999999999999893,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        },
+        "iq_allowed": {
+          "value_at_stop": 160.0,
+          "last_sample_before_stop_s": 4.995,
+          "candidate_zero_time_s": 5.2,
+          "confirmed_zero_time_s": 5.2,
+          "time_to_confirmed_zero_s": 0.20000000000000018,
+          "observed_hold_s": 4.8,
+          "min_confirm_s": 0.1,
+          "transition_bracket_s": [
+            5.195,
+            5.2
+          ],
+          "transition_bracket_width_s": 0.004999999999999893,
+          "last_observed_time_s": 10.0,
+          "median_sample_dt_s": 0.004999999999999893,
+          "median_sample_dt_note": "information only - NOT the uncertainty of the stop instant; use transition_bracket_s",
+          "excursions_before_confirmation": 0,
+          "excursions_note": "number of times the channel entered tolerance and left it again BEFORE the confirmed stretch; CONFIRMED does not imply this is 0",
+          "status": "CONFIRMED"
+        }
+      },
+      "stop_analysis_contract": {
+        "zero_tolerance": 1.0,
+        "min_confirm_s": 0.1,
+        "max_transition_gap_s": 0.05
+      }
+    }
+  }
+}

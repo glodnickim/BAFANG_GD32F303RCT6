@@ -1,0 +1,330 @@
+EVistDrive full verification gate
+PASS source manifest: 61/61 production C files listed; total entries=87
+PASS git diff --check
+
+=== cross-platform target-tree + BL820 packager self-check ===
+PASS cross-platform target-tree + BL820 packager self-check (0.1s)
+
+=== independent BL820 container regression ===
+BL820 Python packager: PASS (independent CRC + container invariants)
+PASS independent BL820 container regression (0.1s)
+
+=== real-module host suites ===
+Parsed 72 suites
+PASS 01: STOP-CLICK Hall confidence and continuous stop/restart (real modules)
+PASS 02: STOP-TRACE passive stop capture and confirmed indexed replay
+PASS 03: FW-100 Extended Boost
+PASS 04: FW-113.1 Walk Assist RUN minimum Iq (real walk_assist_motor + walk_speed_controller)
+PASS 05: FW-113.2 Walk Assist no hold timeout + reason bits (real walk_assist_motor + walk_speed_controller)
+PASS 06: FW-130 Walk Assist governor: G532 ramp, centred gear band, wheel fuse (real modules)
+PASS 07: FW-131 canonical rotor angle: continuity across the formula handover (real rotor_angle.c)
+PASS 08: FW-137 edge-age speed ceiling (estimator replica + production wiring guards)
+PASS 09: FW-136.0 click-zone measurement (wiring guards + gating replica)
+PASS 10: FW-135 update-session power hold (production wiring guards over main.c/CAN_Display.c)
+PASS 11: FW-129 unit domain: calibration invariance, mode equations, low-duty handover
+PASS 12: FW-129B state hygiene: ghost assist, re-entry latency, init state leak
+PASS 13: FW-101 episode recorder
+PASS 14: FW-102 pas_trace
+PASS 15: FW-106 recorders
+PASS 16: FW-106 session and dump
+PASS 17: FW-111 delayed-rearm recorder
+PASS 18: FW-112-DIAG whole-chain event recorder (real fw112_diag.c)
+PASS 19: FW-112-STABILITY retention: full-ring saga eviction (real fw112_diag.c)
+PASS 20: FW-112 two-mechanism direct-signal diagnostic (real torque_input.c + fw112_ab.c)
+PASS 21: FW-117.1 bridge lifecycle trace, TRIGGER_EVENT=START (real fw117_trace.c)
+PASS 22: FW-117.1 bridge lifecycle trace, TRIGGER_EVENT=STOP (real fw117_trace.c)
+PASS build-refusal 23: FW-117.1 TRIGGER_EVENT selector rejects an invalid value (must FAIL to build)
+PASS 24: FW-111 Bug 1 main.c standstill wiring (source-text guard)
+PASS 25: FW-111 v5/v5.1 full-chain integration (quadrature + direction + session + rearm + pas_trace + pas_raw)
+PASS 26: FW-106 integration (real modules together)
+PASS 27: FW-109 v2 pas_quadrature raw decoder (all 16 pairs)
+PASS 28: PAS sampler physical-glitch filter (real sampler + direction safety)
+PASS 29: FW-109 v2 pas_direction automaton (exhaustive + property proof)
+PASS 30: FW-109 v2 ride_session automaton (exhaustive)
+PASS 31: FW-109 v2 ride control / direction / session integration
+PASS 32: FW-112 RUN estimator rearm-recovery lifecycle (real estimator + rearm chain)
+PASS 33: FW-112.4 ordinary-RUN asymmetric filter (real torque_input.c, S1-S8 host comparison)
+PASS 34: FW-112 PATCH A stale-torque safety proof (S1-S5, real production chain)
+PASS 35: FW-112.5 recovery-freshness A/B: ordinary RUN vs rolling rearm, identical torque (audit-only, no fix)
+PASS 36: FW-112.1 REAL_STOP liveness separation (real liveness + rearm chain)
+PASS 37: FW-112-STABILITY recovery stability evidence (real torque_input + fw112_diag)
+PASS 38: FW-112.2 REAL_STOP vs ROLLING COAST (real liveness + wheel model + rearm chain)
+PASS 39: FW-110 can_tx_queue non-blocking TX queue
+PASS 40: FW-110 can_multiframe stop-and-wait multiframe producer
+PASS 41: FW-110 v4 can_reply_effects deferred 0x6029 peak reset
+PASS 42: FW-109 v2 main.c startup wiring guard (pas_direction_init)
+PASS 43: FW-110 CAN blocking-wait guard (main.c / CAN_Display.c)
+PASS 44: EVD-WALK 0x3202 bit0 gate guard (CAN_Display.c source-text check)
+PASS 45: STEP 2A neutral-dwell wiring guard (main.c source-text check)
+PASS 46: Persistent ARMED_ZERO lifecycle (host model + production wiring guards)
+PASS 47: FOC-AW1 D/Q voltage tracking anti-windup (real PI_control()+limiter replica + production wiring guards)
+PASS 48: FOC current-loop extraction parity (real shared module vs legacy block, randomized)
+PASS 49: STOP-CLICK-C1 PI D/Q integrator continuity (real PI_control() replica + production wiring guards)
+PASS 50: FW-139 startup has one current-trajectory owner (no Hall-gated preload)
+PASS 51: FW-140 conditioned control cadence (real filter + main wiring guard)
+PASS 52: FW-141 torque filters use elapsed hardware time (real torque_input.c + main wiring)
+PASS 53: QS-3 final Iq slew parity (real final ramp + lifecycle wiring)
+PASS 54: QZERO Quiet Zero PI integral fade at Iq_ref=0 (real quiet_zero.c + real 16 kHz slew owner + PI_control replica + wiring guards)
+PASS 55: QS-3D 16 kHz final Iq slew parity (real 16 kHz owner + real 4 kHz owner, lockstep)
+PASS 56: QS-3C battery-current limiter upstream ownership (real battery_iq_cap.c + main.c/ride_control.c ownership guard)
+PASS 57: FW-127A applied PWM geometry clamp (real pwm_geometry.c)
+PASS 58: FW-127B atomic sample context (real current_sample_ctx.c)
+PASS 59: FW-127C sampling window from applied geometry (real sample_window.c)
+PASS 60: FW-127C acquisition wiring guard (main.c source-text check)
+PASS 61: FW-127D current feedback validity (real current_feedback.c)
+PASS 62: FW-128A canonical q-current ownership (real iq_chain.c + source guard)
+PASS 63: PRE-FW128 PAS timebase (real pas_sampler.c + pas_cadence.c + pas_quadrature.c)
+PASS 64: FW-128B1 battery current timebase (real battery_current.c + main.c source guard)
+PASS 65: FW-128B0 battery current scale (model + main.c/config.h source guard)
+PASS 66: FW-128C0 physical current scale (numeric model + arm_math/FOC/main source guard)
+PASS 67: FW-126.7 production current calibration (real current_cal.c)
+PASS 68: FW-126.7 calibration wiring guard (main.c source-text check)
+PASS 69: Rolling no-assist diagnostic (real rolling_no_assist_diag.c)
+PASS 70: FW-144 SOC core exact-production parity + randomized 1 Hz transitions
+PASS 71: FW-145 continuous Level-4 ride telemetry (real module pacing, priority and wire schema)
+PASS 72: FW-112 PATCH B0 pedal-assist gate scenario proof (S1-S10 + M1-M9)
+
+Summary: PASS=72 FAIL=0 post-step-skip=1
+C:\Projekty\eVistDrive\motor-controller-firmware\.build\host-linux\REPORT.txt
+PASS real-module host suites (41.3s)
+
+=== whole-pipeline deterministic regression ===
+RUN_60: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_60_torque.csv
+RUN_60: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_60_power.csv
+RUN_60: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_60_ride.csv
+RUN_80: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_80_torque.csv
+RUN_80: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_80_power.csv
+RUN_80: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_80_ride.csv
+RUN_100: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_100_torque.csv
+RUN_100: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_100_power.csv
+RUN_100: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_100_ride.csv
+RUN_110: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_110_torque.csv
+RUN_110: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_110_power.csv
+RUN_110: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_110_ride.csv
+RUN_120: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_120_torque.csv
+RUN_120: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_120_power.csv
+RUN_120: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_120_ride.csv
+CADENCE_RAMP_50_120: 56000 ticks (14.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\CADENCE_RAMP_50_120_torque.csv
+CADENCE_RAMP_50_120: 56000 ticks (14.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\CADENCE_RAMP_50_120_power.csv
+CADENCE_RAMP_50_120: 56000 ticks (14.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\CADENCE_RAMP_50_120_ride.csv
+MISSED_TICK_BURST
+  A. ride_episode (elapsed-time, explicit now_tick) - SAME ground-truth timeline,
+     sampled densely vs sparsely (arm_seq truly flips at tick 1100, iq truly
+     recovers at tick 1500; anchor at tick 1000):
+     normal (601 calls): t_latch=25 ms  t_recover=125 ms  (matches ground truth: 25 ms / 125 ms)
+     burst    (2 calls): t_latch=150 ms  t_recover=150 ms
+     LATER, NOT WRONG: both timestamps use the real tick the module was actually
+        called with (no clock drift, no negative error) — but a state change that
+        happened BETWEEN two surviving calls can only be reported at the tick of
+        the NEXT call that observes it, never earlier. Duration measured FROM an
+        anchor stays correct; the anchor/edge timestamp itself is bounded by call
+        density. See finding F1-b in the final report.
+  B. torque_input FAST filter (35 ms, elapsed-time FW141):
+     normal (140 calls): assist_delta_filtered_native=247
+     burst   (35 calls): assist_delta_filtered_native=247
+     IDENTICAL - filter response is tied to elapsed 4 kHz time, not call count.
+  C. PAS quadrature steps across a 400-tick (100 ms) gap @ 90 rpm (illustrative):
+     true steps that physically occurred: 14
+     steps a 2-snapshot phase comparison would infer: 2
+     ALIASED - the difference is genuinely unrecoverable, not merely mistimed.
+summary -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\missed_tick_burst_summary.csv
+RUN_100: 24000 ticks (6.0 s) -> C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\RUN_100_power_repeat.csv
+Portable whole-pipeline regression
+==================================
+Scenarios: 6 x 3 layers = 18 traces
+Harnesses: torque_trace, power_pipeline, ride_control_pipeline, missed_tick_burst
+Determinism RUN_100 power rerun: PASS (byte-identical CSV)
+Build flags: -Wall -Wextra -Werror; documented type-limits exceptions only
+Result: PASS
+C:\Projekty\eVistDrive\motor-controller-firmware\.build\regression-linux\REPORT.txt
+PASS whole-pipeline deterministic regression (6.2s)
+
+=== closed-loop SIL + deterministic fuzz ===
+SCENARIO clean_start        permission=  62.50ms firstIq=  62.50ms firstHall=  96.00ms perm->Hall=  33.50ms falseR=0 inhibitTicks=0 steadyIqMean=81.0 std=0.0 pp=0
+SCENARIO loaded_start       permission=  62.50ms firstIq=  62.50ms firstHall= 100.00ms perm->Hall=  37.50ms falseR=0 inhibitTicks=0 steadyIqMean=84.0 std=0.0 pp=0
+SCENARIO pas_bounce         permission=  41.75ms firstIq=  41.75ms firstHall=  75.00ms perm->Hall=  33.25ms falseR=0 inhibitTicks=0 steadyIqMean=105.7 std=4.2 pp=13
+SCENARIO steady_ripple      permission=  41.75ms firstIq=  41.75ms firstHall=  75.00ms perm->Hall=  33.25ms falseR=0 inhibitTicks=0 steadyIqMean=107.3 std=6.9 pp=22
+SCENARIO cadence_raw        permission=  38.50ms firstIq=  38.50ms firstHall=  71.25ms perm->Hall=  32.75ms falseR=0 inhibitTicks=0 steadyIqMean=99.7 std=23.5 pp=71
+SCENARIO cadence_filtered   permission=  38.50ms firstIq=  38.50ms firstHall=  71.25ms perm->Hall=  32.75ms falseR=0 inhibitTicks=0 steadyIqMean=103.8 std=6.0 pp=19
+SCENARIO pedal20            permission= 116.50ms firstIq= 116.50ms firstHall= 150.00ms perm->Hall=  33.50ms falseR=0 inhibitTicks=0 steadyIqMean=57.2 std=8.6 pp=26
+SCENARIO pedal40            permission=  58.25ms firstIq=  58.25ms firstHall=  91.75ms perm->Hall=  33.50ms falseR=0 inhibitTicks=0 steadyIqMean=80.1 std=13.5 pp=41
+SCENARIO pedal60            permission=  39.00ms firstIq=  39.00ms firstHall=  71.75ms perm->Hall=  32.75ms falseR=0 inhibitTicks=0 steadyIqMean=104.9 std=15.2 pp=44
+SCENARIO pedal80            permission=  29.25ms firstIq=  29.25ms firstHall=  60.75ms perm->Hall=  31.50ms falseR=0 inhibitTicks=0 steadyIqMean=125.8 std=15.1 pp=45
+SCENARIO stop_restart       releaseIq=95 stop->Iq0=295.50ms maxFallStep=1 restartPermission=41.25ms permission->Iq=0.00ms firstRestartIq=1 maxRiseStep=1 PASS
+FUZZ deterministic seed=0xE7157A39 cases=1000 failures=0
+C:\Projekty\eVistDrive\motor-controller-firmware\.build\sil\REPORT.txt
+PASS closed-loop SIL + deterministic fuzz (4.5s)
+
+=== real FOC/PMSM/Hall electrical SIL ===
+src/FOC.c: In function 'FOC_calculation':
+src/FOC.c:127:23: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  127 |         if(cosinevalue==2147483648)cosinevalue=2147483647;
+      |                       ^~
+src/FOC.c:96:86: warning: unused parameter 'int16_i_q_target' [-Wunused-parameter]
+   96 | void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC, MotorParams_t* MP_FOC)
+      |                                                                              ~~~~~~~~^~~~~~~~~~~~~~~~
+EVistDrive electrical FOC SIL (real FOC.c + PI + SVPWM + PWM geometry)
+PWM polarity calibration: u_q=15 vq(-)=+0.1601V vq(+)=-0.1601V -> polarity=-1
+SVPWM requested-geometry 360deg sweep:
+  u=1170 -> requested [795,2956], clamp angles=0/360
+  u=1305 -> requested [670,3080], clamp angles=0/360
+  u=1600 -> requested [398,3352], clamp angles=0/360
+  u=1887 -> requested [133,3617], clamp angles=0/360
+  u=1920 -> requested [103,3647], clamp angles=0/360
+SVPWM geometry within configured _U_MAX: PASS
+locked target=100 angle=+0: physical dq=(+0.0,+101.2) ctrl_q=101.2 u=53 clamps=0 sat=0
+locked target=200 angle=+0: physical dq=(+0.0,+201.3) ctrl_q=201.3 u=101 clamps=0 sat=0
+locked target=100 angle=+20: physical dq=(-34.2,+94.1) ctrl_q=100.1 u=51 clamps=0 sat=0
+locked target=100 angle=-20: physical dq=(+35.3,+94.6) ctrl_q=101.0 u=53 clamps=0 sat=0
+locked target=100 angle=+30: physical dq=(-48.6,+88.1) ctrl_q=100.6 u=51 clamps=0 sat=0
+locked target=100 angle=-30: physical dq=(+50.4,+88.6) ctrl_q=101.9 u=52 clamps=0 sat=0
+6-sector standstill sweep: PASS
+moving erps= 50.0 target=100: iq=+99.3 id=+1.0 u=468 clamp=0.0% sat=0.0%
+moving erps=100.0 target=100: iq=+98.0 id=+0.6 u=888 clamp=0.0% sat=0.0%
+moving erps=150.0 target=100: iq=+95.5 id=+0.1 u=1305 clamp=0.0% sat=0.0%
+moving erps=180.0 target=100: iq=+94.1 id=+0.7 u=1555 clamp=0.0% sat=0.0%
+moving erps=200.0 target=100: iq=+93.2 id=+1.3 u=1722 clamp=0.0% sat=0.0%
+moving erps=220.0 target=100: iq=+92.4 id=+2.5 u=1887 clamp=0.0% sat=15.4%
+electrical FOC SIL: PASS
+sim/evist_sil.c: In function 'plant_inner_tick':
+sim/evist_sil.c:367:68: warning: unused parameter 'iq_cmd' [-Wunused-parameter]
+  367 | static void plant_inner_tick(plant_t *p, MotorState_t *ms, int32_t iq_cmd, uint32_t ctrl_tick)
+      |                                                            ~~~~~~~~^~~~~~
+src/torque_input.c: In function 'torque_input_run_filter_step':
+src/torque_input.c:449:38: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  449 |                 if (run_attack_steps < TORQUE_RUN_ATTACK_STEPS) {
+      |                                      ^
+src/torque_input.c:455:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  455 |         if (run_attack_steps >= TORQUE_RUN_ATTACK_STEPS) {
+      |                              ^~
+src/assist_modes.c: In function 'valid_wa_max_wheel_x10':
+src/assist_modes.c:348:23: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  348 |                 value <= BANK_WA_MAX_WHEEL_X10_MAX) ?
+      |                       ^~
+src/FOC.c: In function 'FOC_calculation':
+src/FOC.c:127:23: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  127 |         if(cosinevalue==2147483648)cosinevalue=2147483647;
+      |                       ^~
+src/FOC.c:96:86: warning: unused parameter 'int16_i_q_target' [-Wunused-parameter]
+   96 | void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC, MotorParams_t* MP_FOC)
+      |                                                                              ~~~~~~~~^~~~~~~~~~~~~~~~
+SCENARIO clean_start        permission=  62.50ms firstIq=  62.50ms firstHall= 102.25ms perm->Hall=  39.75ms falseR=0 inhibitTicks=0 steadyIqMean=58.4 std=0.5 pp=1 angleErrMax=30.00deg
+SCENARIO loaded_start       permission=  62.50ms firstIq=  62.50ms firstHall= 107.25ms perm->Hall=  44.75ms falseR=0 inhibitTicks=0 steadyIqMean=63.1 std=0.7 pp=2 angleErrMax=30.00deg
+SCENARIO pas_bounce         permission=  41.75ms firstIq=  41.75ms firstHall=  81.00ms perm->Hall=  39.25ms falseR=0 inhibitTicks=0 steadyIqMean=77.1 std=3.4 pp=12 angleErrMax=30.00deg
+SCENARIO steady_ripple      permission=  41.75ms firstIq=  41.75ms firstHall=  81.00ms perm->Hall=  39.25ms falseR=0 inhibitTicks=0 steadyIqMean=79.1 std=5.5 pp=18 angleErrMax=30.00deg
+SCENARIO cadence_raw        permission=  38.50ms firstIq=  38.50ms firstHall=  77.25ms perm->Hall=  38.75ms falseR=0 inhibitTicks=0 steadyIqMean=72.5 std=17.2 pp=52 angleErrMax=30.00deg
+SCENARIO cadence_filtered   permission=  38.50ms firstIq=  38.50ms firstHall=  77.25ms perm->Hall=  38.75ms falseR=0 inhibitTicks=0 steadyIqMean=75.1 std=4.8 pp=16 angleErrMax=30.00deg
+SCENARIO pedal20            permission= 116.50ms firstIq= 116.50ms firstHall= 156.25ms perm->Hall=  39.75ms falseR=0 inhibitTicks=0 steadyIqMean=43.8 std=7.9 pp=25 angleErrMax=30.00deg
+SCENARIO pedal40            permission=  58.25ms firstIq=  58.25ms firstHall=  98.00ms perm->Hall=  39.75ms falseR=0 inhibitTicks=0 steadyIqMean=57.5 std=9.6 pp=32 angleErrMax=30.00deg
+SCENARIO pedal60            permission=  39.00ms firstIq=  39.00ms firstHall=  77.75ms perm->Hall=  38.75ms falseR=0 inhibitTicks=0 steadyIqMean=76.6 std=11.8 pp=36 angleErrMax=30.00deg
+SCENARIO pedal80            permission=  29.25ms firstIq=  29.25ms firstHall=  66.00ms perm->Hall=  36.75ms falseR=0 inhibitTicks=0 steadyIqMean=102.1 std=13.0 pp=38 angleErrMax=30.00deg
+HALL START SWEEP 24 angles x 2 loads: failures=0 worstPerm->Hall=45.00ms worstAngleErr=30.00deg PASS
+WALK FOC MATRIX 7 targets x 3 loads x 6 Hall starts = 126: failures=0 safeStalls=2 trackingWarnings=23 worstFirstHall=206.00ms worstMeanErr=93.9% worstSteadyPP=28.80rpm PASS
+SCENARIO stop_restart       releaseIq=69 stop->Iq0=292.25ms maxFallStep=1 restartPermission=41.25ms permission->Iq=0.00ms firstRestartIq=1 maxRiseStep=1 qzeroEntries=1 qzeroAborts=1 qzeroHandbacks=0 qzEntryErps=156 qzAbortErps=127 qzPeakIq=280 PASS
+FUZZ deterministic seed=0xE7157A39 cases=63 failures=0
+FUZZ deterministic seed=0xADE87CA2 cases=63 failures=0
+FUZZ deterministic seed=0x81603DD3 cases=62 failures=0
+FUZZ deterministic seed=0xC259EEF6 cases=62 failures=0
+FUZZ SHARDS PASS total=250 jobs=4 baseSeed=0xE7157A39
+C:\Projekty\eVistDrive\motor-controller-firmware\.build\electrical-sil\REPORT.txt
+PASS real FOC/PMSM/Hall electrical SIL (12.3s)
+
+=== Level-4 virtual rider + bicycle + battery/SOC + real FOC ===
+src/torque_input.c: In function 'torque_input_run_filter_step':
+src/torque_input.c:449:38: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  449 |                 if (run_attack_steps < TORQUE_RUN_ATTACK_STEPS) {
+      |                                      ^
+src/torque_input.c:455:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  455 |         if (run_attack_steps >= TORQUE_RUN_ATTACK_STEPS) {
+      |                              ^~
+src/assist_modes.c: In function 'valid_wa_max_wheel_x10':
+src/assist_modes.c:348:23: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  348 |                 value <= BANK_WA_MAX_WHEEL_X10_MAX) ?
+      |                       ^~
+src/FOC.c: In function 'FOC_calculation':
+src/FOC.c:127:23: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  127 |         if(cosinevalue==2147483648)cosinevalue=2147483647;
+      |                       ^~
+src/FOC.c:96:86: warning: unused parameter 'int16_i_q_target' [-Wunused-parameter]
+   96 | void FOC_calculation(int16_t int16_i_as, int16_t int16_i_bs, q31_t q31_teta, int16_t int16_i_q_target, MotorState_t* MS_FOC, MotorParams_t* MP_FOC)
+      |                                                                              ~~~~~~~~^~~~~~~~~~~~~~~~
+L4 flat_soc90         SOC 90% grade= 0.0% cadenceTarget= 60.0  speedMax=16.06 km/h Vmin=42.10 IbatMax=11.13A IqMax=  591 fwSOC=76.0 trueSOC=90.0 errMax=14.0% battLimit=0 speedLimit=0 angle=30.00deg PASS
+L4 hill5_soc80        SOC 80% grade= 5.0% cadenceTarget= 70.0  speedMax=13.19 km/h Vmin=41.42 IbatMax=12.03A IqMax=  610 fwSOC=71.0 trueSOC=79.9 errMax=9.0% battLimit=0 speedLimit=0 angle=30.00deg PASS
+L4 hill10_soc50       SOC 50% grade=10.0% cadenceTarget= 75.0  speedMax= 9.83 km/h Vmin=37.61 IbatMax=14.30A IqMax=  604 fwSOC=39.0 trueSOC=49.9 errMax=11.0% battLimit=0 speedLimit=0 angle=30.00deg PASS
+L4 hill15_soc20       SOC 20% grade=15.0% cadenceTarget= 80.0  speedMax= 6.79 km/h Vmin=33.15 IbatMax=15.09A IqMax=  574 fwSOC=16.0 trueSOC=19.9 errMax=4.0% battLimit=7369 speedLimit=0 angle=30.00deg PASS
+L4 low_soc10          SOC 10% grade= 8.0% cadenceTarget= 70.0  speedMax=11.08 km/h Vmin=31.56 IbatMax=15.02A IqMax=  426 fwSOC=7.9 trueSOC=9.8 errMax=2.0% battLimit=822 speedLimit=0 angle=30.00deg PASS
+L4 low_soc5           SOC 5% grade= 5.0% cadenceTarget= 60.0  speedMax=10.24 km/h Vmin=31.69 IbatMax= 6.52A IqMax=  210 fwSOC=4.9 trueSOC=4.9 errMax=0.0% battLimit=0 speedLimit=0 angle=30.00deg PASS
+L4 sag_soc30          SOC 30% grade=10.0% cadenceTarget= 75.0  speedMax=10.13 km/h Vmin=33.49 IbatMax=15.05A IqMax=  583 fwSOC=23.0 trueSOC=29.8 errMax=7.0% battLimit=6916 speedLimit=0 angle=30.00deg PASS
+L4 cad120_soc80       SOC 80% grade= 2.0% cadenceTarget=120.0  speedMax=23.05 km/h Vmin=40.89 IbatMax=16.01A IqMax=  563 fwSOC=71.0 trueSOC=79.8 errMax=9.0% battLimit=8781 speedLimit=0 angle=30.00deg PASS
+L4 matched_lg50       SOC 50% grade= 7.0% cadenceTarget= 70.0  speedMax=11.33 km/h Vmin=39.38 IbatMax=12.17A IqMax=  602 fwSOC=50.0 trueSOC=49.9 errMax=0.1% battLimit=0 speedLimit=0 angle=30.00deg PASS
+LEVEL4 fixed scenarios: 9 cases failures=0 PASS
+SOC endurance FEB start=100.0 trueEnd= 88.0 fwEnd= 87.8 maxAbsErr=  0.4% PASS
+SOC endurance FEB start= 90.0 trueEnd= 78.0 fwEnd= 64.3 maxAbsErr= 14.0% PASS
+SOC endurance FEB start= 80.0 trueEnd= 68.0 fwEnd= 59.0 maxAbsErr=  9.0% PASS
+SOC endurance FEB start= 60.0 trueEnd= 48.0 fwEnd= 36.1 maxAbsErr= 12.0% PASS
+SOC endurance FEB start= 40.0 trueEnd= 28.0 fwEnd= 17.3 maxAbsErr= 11.0% PASS
+SOC endurance FEB start= 20.0 trueEnd=  8.0 fwEnd=  4.2 maxAbsErr=  4.0% PASS
+SOC endurance FEB start= 10.0 trueEnd=  0.0 fwEnd=  0.0 maxAbsErr=  2.0% PASS
+SOC endurance FEB start=  5.0 trueEnd=  0.0 fwEnd=  0.0 maxAbsErr=  0.1% PASS
+SOC endurance MATCHED start=80 maxAbsErr=0.19% PASS
+LEVEL4 fuzz seed=0x144B1CE5 cases=25 safePhysicalStalls=11 marginalStarts=2 failures=0 PASS
+C:\Projekty\eVistDrive\motor-controller-firmware\.build\level4\REPORT.txt
+PASS Level-4 virtual rider + bicycle + battery/SOC + real FOC (4.0s)
+
+=== recorded-ride import/replay deterministic regression ===
+IMPORT PASS rows=24000 coverage=CORE+PAS_RAW output=C:\Projekty\eVistDrive\motor-controller-firmware\.build\replay\smoke.canonical.csv
+mapped: time_s<-time_s, cadence_rpm<-cadence_input, torque_raw_native<-torque_raw, torque_ckg<-load_centikg, pas_ab<-pas_state, recorded_iq_request<-iq_request, recorded_iq_ref<-iq_final
+missing/defaulted: wheel_speed_kph, battery_voltage_v, battery_current_a, assist_level, brake, walk, motor_erps, iq_actual, pas_direction
+python.exe : src/torque_input.c: In function 'torque_input_run_filter_step':
+At line:2 char:311
++ ... -firmware'; & 'C:\Users\mariuszg\AppData\Local\Programs\Python\Python ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (src/torque_inpu...n_filter_step'::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src/torque_input.c:449:38: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  449 |                 if (run_attack_steps < TORQUE_RUN_ATTACK_STEPS) {
+      |                                      ^
+src/torque_input.c:455:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  455 |         if (run_attack_steps >= TORQUE_RUN_ATTACK_STEPS) {
+      |                              ^~
+src/assist_modes.c: In function 'valid_wa_max_wheel_x10':
+src/assist_modes.c:348:23: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  348 |                 value <= BANK_WA_MAX_WHEEL_X10_MAX) ?
+      |                       ^~
+Traceback (most recent call last):
+  File "C:\Projekty\eVistDrive\motor-controller-firmware\tools\run_replay.py", line 21, in <module>
+    if __name__=='__main__': main()
+                             ^^^^^^
+  File "C:\Projekty\eVistDrive\motor-controller-firmware\tools\run_replay.py", line 20, in main
+    subprocess.run(args,cwd=R,check=True)
+  File "C:\Users\mariuszg\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\mariuszg\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "C:\Users\mariuszg\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OSError: [WinError 193] %1 is not a valid Win32 application
+Traceback (most recent call last):
+  File "C:\Projekty\eVistDrive\motor-controller-firmware\tools\run_replay_regression.py", line 34, in <module>
+    if __name__=='__main__': main()
+                             ^^^^^^
+  File "C:\Projekty\eVistDrive\motor-controller-firmware\tools\run_replay_regression.py", line 33, in main
+    def main(): smoke(); registered()
+                ^^^^^^^
+  File "C:\Projekty\eVistDrive\motor-controller-firmware\tools\run_replay_regression.py", line 15, in smoke
+    run('tools/import_ride_log.py',src,can); run('tools/run_replay.py',can,'--output',a); 
+run('tools/run_replay.py',can,'--output',b)
+                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Projekty\eVistDrive\motor-controller-firmware\tools\run_replay_regression.py", line 8, in run
+    def run(*args): subprocess.run([sys.executable,*map(str,args)],cwd=R,check=True)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\mariuszg\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command 
+'['C:\\Users\\mariuszg\\AppData\\Local\\Programs\\Python\\Python312\\python.exe', 'tools/run_replay.py', 
+'C:\\Projekty\\eVistDrive\\motor-controller-firmware\\.build\\replay\\smoke.canonical.csv', '--output', 
+'C:\\Projekty\\eVistDrive\\motor-controller-firmware\\.build\\replay\\smoke.a.csv']' returned non-zero exit status 1.
+FAIL recorded-ride import/replay deterministic regression: exit 1

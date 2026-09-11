@@ -1,0 +1,4 @@
+Analysis written to C:\Projekty\eVistDrive\motor-controller-firmware\documentation\assist-pipeline-work\AP-01\disturbances-001\results\disturbances-metrics.json
+  cases analysed : 74
+  groups         : control_6s, control_8s, fg_delay, fg_delay_hires, miss_tick, pas_edge_drop, pas_edge_jitter, pas_invalid, pas_invalid_seq, regression_ac_t2, reverse_bounce, reverse_clean, torque_invalid
+  unhandled      : none

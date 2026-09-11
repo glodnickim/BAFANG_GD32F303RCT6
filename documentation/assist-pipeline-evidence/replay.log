@@ -1,0 +1,35 @@
+IMPORT PASS rows=24000 coverage=CORE+PAS_RAW output=C:\Projekty\eVistDrive\motor-controller-firmware\.build\replay\smoke.canonical.csv
+mapped: time_s<-time_s, cadence_rpm<-cadence_input, torque_raw_native<-torque_raw, torque_ckg<-load_centikg, pas_ab<-pas_state, recorded_iq_request<-iq_request, recorded_iq_ref<-iq_final
+missing/defaulted: wheel_speed_kph, battery_voltage_v, battery_current_a, assist_level, brake, walk, motor_erps, iq_actual, pas_direction
+python.exe : src/torque_input.c: In function 'torque_input_run_filter_step':
+At line:7 char:1
++ & 'C:\Users\mariuszg\AppData\Local\Programs\Python\Python312\python.e ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (src/torque_inpu...n_filter_step'::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src/torque_input.c:449:38: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  449 |                 if (run_attack_steps < TORQUE_RUN_ATTACK_STEPS) {
+      |                                      ^
+src/torque_input.c:455:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  455 |         if (run_attack_steps >= TORQUE_RUN_ATTACK_STEPS) {
+      |                              ^~
+src/assist_modes.c: In function 'valid_wa_max_wheel_x10':
+src/assist_modes.c:348:23: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  348 |                 value <= BANK_WA_MAX_WHEEL_X10_MAX) ?
+      |                       ^~
+REPLAY PASS rows=24000 compared=24000 maxReqDelta=31.0 maxRefDelta=124.0 meanAbsRefDelta=10.761 defaults=24000 output=C:\Projekty\eVistDrive\motor-controller-firmware\.build\replay\smoke.a.csv
+src/torque_input.c: In function 'torque_input_run_filter_step':
+src/torque_input.c:449:38: warning: comparison is always false due to limited range of data type [-Wtype-limits]
+  449 |                 if (run_attack_steps < TORQUE_RUN_ATTACK_STEPS) {
+      |                                      ^
+src/torque_input.c:455:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  455 |         if (run_attack_steps >= TORQUE_RUN_ATTACK_STEPS) {
+      |                              ^~
+src/assist_modes.c: In function 'valid_wa_max_wheel_x10':
+src/assist_modes.c:348:23: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  348 |                 value <= BANK_WA_MAX_WHEEL_X10_MAX) ?
+      |                       ^~
+REPLAY PASS rows=24000 compared=24000 maxReqDelta=31.0 maxRefDelta=124.0 meanAbsRefDelta=10.761 defaults=24000 output=C:\Projekty\eVistDrive\motor-controller-firmware\.build\replay\smoke.b.csv
+REPLAY SMOKE PASS rows=24000 deterministic sha256=73882f82671e1df621206027cb205ab310a0fe93deab035bc1c452dc64d7456a
+REPLAY registered cases: 0 PASS

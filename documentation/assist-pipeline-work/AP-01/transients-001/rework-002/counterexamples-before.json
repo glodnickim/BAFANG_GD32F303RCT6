@@ -1,0 +1,152 @@
+{
+  "phase": "before",
+  "source_review": "integration/task-reports/REVIEW-EVD-AP-01-006.md",
+  "task": "TASK-EVD-AP-01-TRANSIENTS-REWORK-002",
+  "defects_total": 13,
+  "defects_reproduced": 12,
+  "positive_controls": [
+    {
+      "finding": "T006-02-positive",
+      "still_accepted": true
+    }
+  ],
+  "findings": [
+    {
+      "finding": "T006-01a",
+      "title": "zero at t=1 with restart at t=2: order is KNOWN (zero observed before restart)",
+      "reproduced": true,
+      "expected_after_fix": "a state meaning 'zero observed before the restart', not ORDER_UNDETERMINED",
+      "observed": {
+        "iq_state_at_restart": "IQ_ZERO_AT_LAST_PRE_SAMPLE_ORDER_UNDETERMINED_AT_EXPORT_RESOLUTION",
+        "same_sample_as_restart_ambiguous": true
+      }
+    },
+    {
+      "finding": "T006-01b",
+      "title": "real 200 ms: zero-crossing bracket contains the restart instant but is NOT flagged ambiguous",
+      "reproduced": true,
+      "expected_after_fix": "the crossing bracket that contains the restart time is reported as undetermined order",
+      "observed": {
+        "restart_time_s": 5.2,
+        "last_pre_sample": 5.195,
+        "iq_at_restart": 72.0,
+        "zero_crossing_bracket_s": [
+          5.195,
+          5.2
+        ],
+        "bracket_contains_restart": true,
+        "same_sample_as_restart_ambiguous": false,
+        "iq_state_at_restart": "IQ_STILL_NONZERO_AT_RESTART"
+      }
+    },
+    {
+      "finding": "T006-01c",
+      "title": "constantly-positive Iq (never decaying) still gets a DECAY verdict",
+      "reproduced": true,
+      "expected_after_fix": "a neutral verdict ('last pre-restart sample nonzero'), with any decay/trend claim measured separately",
+      "observed": {
+        "verdict": "<inline in main(); source maps IQ_STILL_NONZERO_AT_RESTART -> RESTART_DURING_IQ_DECAY_*>",
+        "evaluated_via": "read from the shipped analyze.py source (not callable yet - see T006-01d)"
+      }
+    },
+    {
+      "finding": "T006-01d",
+      "title": "analyzer classification is not callable/testable (inline in main())",
+      "reproduced": true,
+      "expected_after_fix": "analyze exposes the shipped classification so tests exercise the real path",
+      "observed": {
+        "callable_path": false
+      }
+    },
+    {
+      "finding": "T006-01e",
+      "title": "already-positive Iq: first positive sample after restart is reported as a resume time",
+      "reproduced": true,
+      "expected_after_fix": "resume time/latency is None for an already-positive channel; the observation is kept under a diagnostic name",
+      "observed": {
+        "classification": "ALREADY_POSITIVE_AT_RESTART_NOT_A_RESUME",
+        "iq_resume_s": 1.2,
+        "iq_latency_s": 0.0
+      }
+    },
+    {
+      "finding": "T006-01f",
+      "title": "session transitions are reported as a name set with no times",
+      "reproduced": true,
+      "expected_after_fix": "session transitions carry the time of each change",
+      "observed": {
+        "has_session_transitions": false,
+        "fields": [
+          "session_states_in_window",
+          "session_states_in_window_decoded",
+          "session_state_before_restart"
+        ]
+      }
+    },
+    {
+      "finding": "T006-02-positive",
+      "title": "a complete, consistent manifest still loads",
+      "reproduced": false,
+      "expected_after_fix": "ACCEPTED",
+      "observed": "ACCEPTED"
+    },
+    {
+      "finding": "T006-02a",
+      "title": "regr_linear72_baseline status=ERROR (hashes intact) is accepted",
+      "reproduced": true,
+      "expected_after_fix": "rejected: a regression RUN is a required trial too",
+      "observed": "ACCEPTED"
+    },
+    {
+      "finding": "T006-02b",
+      "title": "step_up_clean_cad72 with a single repeat hash vs repeats_per_case=2 is accepted",
+      "reproduced": true,
+      "expected_after_fix": "rejected: repeat count must match the manifest's own contract",
+      "observed": "ACCEPTED"
+    },
+    {
+      "finding": "T006-02c",
+      "title": "regression entry whose new_csv_sha256 does not match its run is accepted",
+      "reproduced": true,
+      "expected_after_fix": "rejected: the regression entry must be linked to its run's CSV hash",
+      "observed": "ACCEPTED"
+    },
+    {
+      "finding": "T006-02d",
+      "title": "runner.check_required() and the ERROR regression run",
+      "reproduced": false,
+      "expected_after_fix": "rejected by the runner too - and by NAME, not only because an OK-per-group count happened to drop below its quota",
+      "observed": "rejected (RequiredTrialMissing): required trials missing (group: expected, got): {'regression_ac_t2': (4, 3)}"
+    },
+    {
+      "finding": "T006-02e",
+      "title": "runner.check_required() accepts a single repeat hash against repeats_per_case=2",
+      "reproduced": true,
+      "expected_after_fix": "rejected: the runner enforces the repeat-count contract as well",
+      "observed": "ACCEPTED"
+    },
+    {
+      "finding": "T006-03a",
+      "title": "torque_run_native is labelled [Nm] although it exports assist_delta_run_native (uint16 native sensor counts; controller_lab.c line 486, inc/torque_input.h line 194)",
+      "reproduced": true,
+      "expected_after_fix": "a native-counts unit, data unchanged",
+      "observed": {
+        "label": "torque_run_native [Nm]"
+      }
+    },
+    {
+      "finding": "T006-03b",
+      "title": "bitmask legend and limitations note are drawn at the same height and overflow the image width",
+      "reproduced": true,
+      "expected_after_fix": "wrapped footer text, separate rows, everything inside the image width",
+      "observed": {
+        "y_debug_flags": 1071,
+        "y_limitations": 1072,
+        "delta_px": 1,
+        "estimated_text_width_px": 1463,
+        "image_width_px": 1320,
+        "overflows": true
+      }
+    }
+  ]
+}

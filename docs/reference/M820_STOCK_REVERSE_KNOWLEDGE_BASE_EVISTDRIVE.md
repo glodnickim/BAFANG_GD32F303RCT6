@@ -990,3 +990,83 @@ keep neutral bridge state deterministic
 ```
 
 These principles are directly reusable in EVistDrive even when the next motor has different shunts, ADC channels, pole count, voltage dividers or current gain.
+
+---
+
+# 22. FT build: torque -> assist pipeline (TASK-EVD-AP-RE-01)
+
+Target: `FT_2026_05_22_w1.bin` (CR X30P.250.FC 2.1, "FAKE TAXI"), image base 0x08005000, container header 0x20.
+Status per single-ownership convention: CONFIRMED = multiple addresses + dataflow consistent; OPEN = still needs pin/hardware or G532 cross-check.
+
+## 22.1 Acquisition: ADC0/ADC1 dual-mode + DMA1 CH0 — CONFIRMED (FT)
+
+- DMA1 CH0 configured at 0x0800B520: helpers `bl 0x8006e18` (reset), `bl 0x8007088` (struct config on stack), `bl 0x8006d74` (enable).
+- Peripherial address of the DMA channel = **ADC0.RDATA (0x4001244C)** — literal at 0x0800B550 stored to [sp+0x4c]; memory target **0x200012A0** (8x32-bit circular); data width 32-bit.
+- DMA feeds packed pairs: each 32-bit word carries two 16-bit ADC fields (ADC0 low, ADC1 high; GD32 dual-mode). Unpacking in 0x08009EB0 uses `ubfx(w,4,12)` for the low field and `lsr #20` for the high field -> 12-bit values stored at bit positions 4..15 and 20..31.
+- ADC0 regular/blob (0x0800B700-0x0800B850): ADC0 seq-length=2 (`bl 0x8005c58`, r1=2) with ranks IN2/PA2 then IN0/PA0 (`bl 0x8005b00`, args r1=2,r2=1,r3=1 and r1=0,r2=2); ADC1 seq-length=2 ranks IN3/PA3 then IN5/PA5.
+- `bl 0x8008fe8` at 0x0800B7F8/B812/B82C/B84A programs channel config records (0x12,0x19,0x18,0x0B) - ADC/EXTI mapping, role OPEN.
+
+## 22.2 Torque unpack + time-domain IIR — CONFIRMED (FT), at 0x08009EB0
+
+Runs once per control-layer call (caller 0x0800BF8E). Steps:
+
+1. DMA1 status `0x40020000 & #2` -> clear via 0x40020004 (0x08009EB2-0x08009ECE).
+2. 16 halfwords copied from ring 0x200012A0 to RAM bank 0x20000118 (0x08009ED0-0x08009F64). Mapping per entry: low field -> [0x1e],[0x00],[0x02],[0x04],[0x06],[0x08],[0x0a],[0x0c]; high field -> [0x1c],[0x10],[0x12],[0x14],[0x16],[0x18],[0x1a].
+3. Torque raw = `0x20000118[2]` (DMA entry1 low field = ADC0 master second sample), scaled x8: 0x08009F6C `and.w r0,r1,r0,lsl#3` -> **0x200003FE**. Sibling channel `0x20000118[0]` x8 -> 0x20000400.
+4. Signed copy torque -> **0x20000484** (0x08009F86-0x08009F8E).
+5. Offset/zero removal: **0x20000468 = 0x200003FE - 0x200004F4** (0x200004F4 = 16-sample baseline mean, see 22.3) (0x08009F90-0x08009F9E).
+6. **IIR low-pass: 0x20000676 = (3*0x20000676 + 0x20000484) >> 2** — exact opcodes at 0x08009FA0-0x08009FBA (asrs#2; add r0,r0,r0,lsl#1 = 3/4; y=(3*old+new)/4). Pure time-domain, one zero-free pole, no crank-angle window.
+7. Tail (0x08009FC2-0x0800A00E): 0x20000660 = bank[0xa] (fast current var); if cal flag 0x20000788[0x33] set -> **0x2000036C = 0x200004F4 + cal_delta(0x20000788[0x36])**; torque demand **0x20000418 = cal(0x20000788[0x34])**, clamped to 0x7D0 (2000).
+
+## 22.3 Baseline (slow "zero") — CONFIRMED (FT), at 0x0800B860
+
+Called from 0x08017F7C / 0x080184B8 / 0x0801884E. Running 16-sample block mean of the torque channel 0x20000118+2:
+sum >> 1 -> **0x200004F4** (baseline subtracted in 22.2), sum >> 3 -> 0x2000038C, gate flag 0x200002D6.
+
+## 22.4 Assist law: PI-style controller — CONFIRMED (FT), at 0x0800934C
+
+Signature `f(0x20000676, 0x2000036C, struct*=0x20001130)`; two callers: 0x080076AA and 0x0800BFA0 (main layer).
+Computes, with error `e = torque_filt - torque_threshold`:
+`out = Kp_x(e) / f2 + clamp( integrate(e*f4) ) / f6`, bounded by struct limits, returns into **0x20000674 (assist addend)**.
+
+Config struct at 0x20001130 (fields): +0x00 Kp(s16), +0x02 divisor f2, +0x04 integrator gain f4 (signed; 0 = integral disabled), +0x06 divisor f6, +0x08 int32 min, +0x0C int32 max, +0x10 integrator min, +0x14 integrator max, +0x18 integrator state, +0x24 result.
+Once again: averaging/integration is done in TIME samples, not per crank angle.
+
+## 22.5 Main control layer — CONFIRMED (FT), at 0x0800BE70
+
+Runs ADC2 enable gate `bl 0x800d260(ADC2,1)` + `bl 0x800cb38(ADC2,1)` + bit0x20 in ADC2[0x14]; ADC0 enable `bl 0x8005e5c`; counters 0x2000067A / 0x20000680 to 0x320; integrators 0x20000580/84/88/8C/90/94 += 0x2000053A (drift/filter state). Then:
+- `bl 0x8009eb0` (torque unpack+IIR, 22.2) — 0x0800BF8E;
+- `bl 0x800934c` (PI assist law, 22.4) — 0x0800BFA0, feeding 0x20000674; sign flag 0x2000067E;
+- per-phase current magnitudes 0x20000668/6C/70 -> |abs| -> 0x20000378/7C/80 (0x0800BFD8-0x0800C01E);
+- overcurrent vs temperature-scaled thresholds T1/T2/T3 (0x20000366/68/6A from 0x0800E98C) -> flags 0x2000069C/9D/79, 5-count -> fault (mode 0x2000045B=9, 0x20000423=1, `bl 0x800ccf8(ADC2,0)`) — 0x0800C024-0x0800C0DE;
+- `bl 0x800eb3c` (ramp + final command, 22.6) — 0x0800C0E0.
+
+## 22.6 Ramp + final Iq command — CONFIRMED (FT), at 0x0800EB3C
+
+- Target magnitude: 0x20000374 = (demand 0x20000418 * 0x7FFF) / 2000, clamp 0x7FFF (0x0800EB3C-0x0800EB6E).
+- Ramp state **0x2000036E** follows target with asymmetric steps under torque/release conditions:
+  - gate flags 0x2000067E, 0x2000069C, 0x2000069D, counter 0x200003E0 (step accumulator),
+  - per-band hold/take-up logic driven by |0x20000370| current bands (0x32=50, 0x64=100) and torque comparisons `0x20000676 < 0x200004F4 + 0x200003CE/D0/D2`,
+  - increment by step bytes 0x200003D5/D6/D8/D9/DB/DC per call while counter allows; decrements -1/-2/-3/-4 on torque release/overshoot (0x0800ED28-0x0800EE5E);
+  - cap 0x7FF8 (0x0800ED28-0x0800ED38).
+- **Final current-parallel command 0x200004DE = 0x2000036E + 0x20000674** (0x0800EE66-0x0800EE72), zeroed below 0x1F4 (500) (0x0800EE7C-0x0800EE84). 0x200004DE is the FOC-side Iq/duty demand.
+
+## 22.7 Temperature derating — CONFIRMED (FT), at 0x0800E98C
+
+Maps temp 0x200002CE (s16, /10 C) into base percentage into 0x20000364 (breakpoints -200/0/200/400/600/800/1000/1200/1400/1600, output 0xC0..0x233), then
+T1 = 0x20000364*0x22E8>>8 -> 0x20000366 (cap 0x6F54); T2 = *0x2BA2>>8 -> 0x20000368 (cap 0x7530); T3 = *0x345D>>8 -> 0x2000036A (cap 0x7B0C) (0x0800EABA-0x0800EB24).
+Consumed as current limits in 22.5. Calibration writes come from calibration/comm area, OPEN.
+
+## 22.8 Answers for TASK-EVD-AP-RE-01 (FT build)
+
+- R2 (torque-ripple smoothing domain): **TIME domain, CONFIRMED on FT.** No crank-angle windowing in the torque path. Three nested time smoothings: (1) one-pole IIR (3 old + 1 new)/4 per control-layer call; (2) PI assist law with time integral; (3) hold-counter ramp with step logic. See 22.2/22.4/22.6. The G532 accel ramp doc agrees: time-based ramp over a 10 ms tick.
+- R1 (torque sensor channel/scale, FT): torque enters via ADC0/ADC1 dual-mode DMA; torque slot = 0x20000118[2] (DMA entry1 low) = ADC0 master second rank. Pin-level answer in FT is **OPEN**: rank order suggests IN0 (PA0) vs IN2 (PA2) depending on ring phase; do NOT assume PA7/ADC2 on FT (G532 uses ADC2 per §13 — cross-build pin map must be re-derived per board).
+- Scale observed in code: raw 12-bit field x8 -> signed 0x200003FE -> minus slow baseline -> IIR; assist law works on the x8 convention. Numeric N-m-to-LSB mapping needs bench data, OPEN.
+
+## 22.9 Open / next steps for TASK-EVD-AP-RE-01
+
+- Find the call cadence (period) of 0x0800BE70 layer -> IIR/ramp time constants (currently OPEN; step counter 0x200003E0 + thresholds give per-call units only).
+- Confirm 0x200004DE consumption in FOC loop (expected at the Iq-setpoint reader used by current-loop ISR).
+- Confirm the physical ADC0 pin feeding torque (ring-phase cross-check vs hardware / vs G532 ADC2 usage).
+- G532 build: repeat acquisition path (G532 uses different literal addressing, currently BLOCKED - no direct 0x4001xxxx literals found).
+- R3 (PAS 96 vs 64) and R4 (start/stop conditions) remain untouched in this session.

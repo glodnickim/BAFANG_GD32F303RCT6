@@ -1,0 +1,11 @@
+{
+  "checked_at": "2026-09-09T08:08:41+02:00",
+  "against": "integration/tasks/TASK-EVD-AP-01-BASELINE.json",
+  "manifest_sha256_recomputed": "a84898ed53d5385810c8b09699112ec6f6ba0f60a8e7fe2170c280a30044df8b",
+  "manifest_sha256_matches_card": true,
+  "total_files": 258,
+  "missing": 0,
+  "mismatches": 0,
+  "checked_after": "REWORK-001: metrics.py/extract_metrics.py/ap01_runner.py rework, ap01_runner.py + extract_metrics.py re-execution, test_pipeline_failure_handling.py",
+  "conclusion": "No drift detected between BASELINE capture (2026-09-08T20:43:58+02:00) and this rework session. Base does not need Master re-computation. Supersedes the EXEC-001 baseline_check_after.json entry (timestamp there was itself accurate; this is a fresh re-check after REV2 tool changes)."
+}

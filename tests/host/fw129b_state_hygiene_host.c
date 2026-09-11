@@ -233,7 +233,16 @@ static step_t base_step(void)
 static step_t establish_assist(void)
 {
 	step_t s = base_step();
-	ride_forward(&s, 30U);
+	/*
+	 * AP-03: 60 steps, was 30. Ordinary RUN is the FW-085 crank-angle window again (the
+	 * FW-112.4 tick-clocked filter that used to overwrite it is deleted), and the default
+	 * window is 48 steps - so 30 forward steps could no longer establish a fully charged
+	 * estimate, and T2's "the filter really is charged" PRECONDITION stopped being met.
+	 * This lengthens the SETUP so the precondition holds for a step-clocked estimator; it
+	 * does not touch a single asserted property. The properties below must still pass on
+	 * their own - if they do not, that is a real ghost-assist regression, not a test issue.
+	 */
+	ride_forward(&s, 60U);
 	CHECK(is_latched(), "setup: latched after a normal forward start");
 	CHECK(mode_iq() > 0, "setup: a real demand is flowing before the sequence under test");
 	return s;

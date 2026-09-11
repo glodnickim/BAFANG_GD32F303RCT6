@@ -1,0 +1,11 @@
+{
+  "checked_at": "UNKNOWN (verified at the start of the REWORK-001 session, before any file edit; exact wall-clock not captured - see EXEC-EVD-AP-01-002.md Wykonanie section for the sequencing)",
+  "against": "integration/tasks/TASK-EVD-AP-01-BASELINE.json",
+  "manifest_sha256_recomputed": "a84898ed53d5385810c8b09699112ec6f6ba0f60a8e7fe2170c280a30044df8b",
+  "manifest_sha256_matches_card": true,
+  "total_files": 258,
+  "missing": 0,
+  "mismatches": 0,
+  "checked_before": "Any REWORK-001 tool edits",
+  "conclusion": "No drift detected before starting rework. AP01-R6 correction: this file's V1 timestamp (2026-09-08T21:00:00+02:00) was a copy-paste of the after-check timestamp, not an independently logged before-check time; corrected here to UNKNOWN rather than repeating an unverified figure."
+}

@@ -1,0 +1,58 @@
+# EVistDrive Controller Lab — source-linked WWW analyzer
+
+Controller Lab is a forced-input host harness for **the production EVistDrive control path**.
+It is intentionally not a Python/JavaScript rewrite of assist or Iq math.
+
+## What it does
+
+Synthetic crank/rider input:
+
+- mean crank torque (Nm), two-leg ripple and left/right asymmetry;
+- cadence plus optional slow cadence variation;
+- forced wheel speed;
+- forced pack voltage and SOC;
+- assist level 0..5;
+- Power Linear / Progressive / eMTB / Torque / Power Curve mode.
+
+The native harness then executes the current checkout's production C path:
+
+`PAS + torque_input -> cadence_filter -> rider_input -> assist_modes -> ride_control -> iq_chain -> fast_iq_slew`
+
+The web UI plots generator torque/cadence and the production observations including FAST/RUN torque,
+raw/conditioned cadence, mode Iq request, Iq requested, Iq allowed/pre-ramp and final 16 kHz Iq reference.
+
+## Source synchronization
+
+`server.py` fingerprints the production C list used by `tools/run_level4.py`, all headers in `inc/`, and
+the Controller Lab harness. Every `/api/run` calls `ensure_built()`; if the fingerprint changed, the native
+executable is rebuilt before the scenario runs. The UI also polls `/api/status` and can auto-rerun after a
+source change.
+
+This means a change to the controller source becomes visible in the analyzer after rebuild/run without
+copying that algorithm into the web app.
+
+## Run
+
+From repository root:
+
+```bash
+python sim/controller_lab/server.py --open
+```
+
+Then open `http://127.0.0.1:8765/` if the browser did not open automatically.
+
+Windows shortcut from repository root:
+
+```text
+RUN_CONTROLLER_LAB_WINDOWS.bat
+```
+
+Host prerequisites are the same as Level 4: Python 3 and a supported host C compiler (`gcc` by default,
+or set the `CC` environment variable).
+
+## Important boundary
+
+Controller Lab is for **controller causality and ride-feel tuning**. It deliberately does not invent missing
+electrical measurements: battery current, voltage-vector utilization, measured Id/Iq and PMSM response are
+not modeled here. Use `sim/l4/` for closed-loop virtual-bike/electrical behavior and `sim/replay/` for real
+recorded sensor history.

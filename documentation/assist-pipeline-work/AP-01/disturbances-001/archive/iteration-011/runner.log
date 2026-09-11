@@ -1,0 +1,87 @@
+regr_linear72_baseline               OK  rows=  2000 det=True sha=eba8ce551e78
+regr_linear72_baseline               regression pre_existing_identical=True (28 cols x 2000 rows)
+regr_stop_release_cad72              OK  rows=  2000 det=True sha=e14a03ba2330
+regr_stop_release_cad72              regression pre_existing_identical=True (28 cols x 2000 rows)
+regr_floor_above_profile             OK  rows=  2000 det=True sha=9757e0c7f94f
+regr_floor_above_profile             regression pre_existing_identical=True (28 cols x 2000 rows)
+regr_floor_default_profile1          OK  rows=  2000 det=True sha=df1104c7c5ac
+regr_floor_default_profile1          regression pre_existing_identical=True (28 cols x 2000 rows)
+regr_step_up_clean_cad72             OK  rows=  2000 det=True sha=e376b25b3f1e
+regr_step_up_clean_cad72             regression pre_existing_identical=True (30 cols x 2000 rows)
+regr_restart_gap0195ms_speed18       OK  rows=  2400 det=True sha=e0af2ac8748b
+regr_restart_gap0195ms_speed18       regression pre_existing_identical=True (30 cols x 2400 rows)
+regr_restart_gap0200ms_speed18       OK  rows=  2400 det=True sha=2787c6509209
+regr_restart_gap0200ms_speed18       regression pre_existing_identical=True (30 cols x 2400 rows)
+control_8s_cad30_speed0              OK  rows=  8000 det=True sha=64011eef4830
+control_8s_cad30_speed18             OK  rows=  8000 det=True sha=35ce5a00127a
+control_8s_cad72_speed0              OK  rows=  8000 det=True sha=6fd0b029bfed
+control_8s_cad72_speed18             OK  rows=  8000 det=True sha=116f7dd856b0
+control_6s_cad30_speed0              OK  rows=  6000 det=True sha=9610eee100a5
+control_6s_cad30_speed18             OK  rows=  6000 det=True sha=03feb4de556a
+control_6s_cad72_speed0              OK  rows=  6000 det=True sha=819ab6d7f7a1
+control_6s_cad72_speed18             OK  rows=  6000 det=True sha=7292652d6b8f
+reverse_clean_cad30_speed0           OK  rows=  8000 det=True sha=16f93315b1dd
+reverse_bounce_cad30_speed0          OK  rows=  8000 det=True sha=28670cf238dd
+reverse_clean_cad30_speed18          OK  rows=  8000 det=True sha=bce5b97913b1
+reverse_bounce_cad30_speed18         OK  rows=  8000 det=True sha=10559d75d6dc
+reverse_clean_cad72_speed0           OK  rows=  8000 det=True sha=871f78795f58
+reverse_bounce_cad72_speed0          OK  rows=  8000 det=True sha=3ea59ea3007a
+reverse_clean_cad72_speed18          OK  rows=  8000 det=True sha=36da36aa2763
+reverse_bounce_cad72_speed18         OK  rows=  8000 det=True sha=96321a2b49f7
+tq_invalid_cad30_speed0              OK  rows=  8000 det=True sha=820ffa702586
+pas_invalid_cad30_speed0             OK  rows=  8000 det=True sha=57005c403f5b
+pas_invseq_cad30_speed0              OK  rows=  8000 det=True sha=3293575b1b0f
+tq_invalid_cad30_speed18             OK  rows=  8000 det=True sha=9c58219840e6
+pas_invalid_cad30_speed18            OK  rows=  8000 det=True sha=75e72d860842
+pas_invseq_cad30_speed18             OK  rows=  8000 det=True sha=cc6cf677da50
+tq_invalid_cad72_speed0              OK  rows=  8000 det=True sha=22abbd2275f4
+pas_invalid_cad72_speed0             OK  rows=  8000 det=True sha=7d87ce85c449
+pas_invseq_cad72_speed0              OK  rows=  8000 det=True sha=dd718ef5b93c
+tq_invalid_cad72_speed18             OK  rows=  8000 det=True sha=fceba5bd2352
+pas_invalid_cad72_speed18            OK  rows=  8000 det=True sha=c649e888a534
+pas_invseq_cad72_speed18             OK  rows=  8000 det=True sha=2b57bb033615
+pas_edge_drop3_cad30_speed0          OK  rows=  8000 det=True sha=5645ed237748
+pas_edge_jitter2_cad30_speed0        OK  rows=  8000 det=True sha=e0d8109af7b7
+pas_edge_jitter8_cad30_speed0        OK  rows=  8000 det=True sha=fee757158c2c
+pas_edge_drop3_cad30_speed18         OK  rows=  8000 det=True sha=a428977a3195
+pas_edge_jitter2_cad30_speed18       OK  rows=  8000 det=True sha=01a9f47a0d91
+pas_edge_jitter8_cad30_speed18       OK  rows=  8000 det=True sha=40d4c8ea28a0
+pas_edge_drop3_cad72_speed0          OK  rows=  8000 det=True sha=88bc522aea59
+pas_edge_jitter2_cad72_speed0        OK  rows=  8000 det=True sha=74f46997ad54
+pas_edge_jitter8_cad72_speed0        OK  rows=  8000 det=True sha=bc45f9d1403c
+pas_edge_drop3_cad72_speed18         OK  rows=  8000 det=True sha=737b6882a41f
+pas_edge_jitter2_cad72_speed18       OK  rows=  8000 det=True sha=854a2334b75d
+pas_edge_jitter8_cad72_speed18       OK  rows=  8000 det=True sha=b2d06756670e
+miss_tick2_cad30_speed0              OK  rows=  6000 det=True sha=1921e10671f3
+miss_tick4_cad30_speed0              OK  rows=  6000 det=True sha=0d2bad27ca30
+miss_tick20_cad30_speed0             OK  rows=  6000 det=True sha=24b96f081bc6
+fg_delay1_cad30_speed0               OK  rows=  6000 det=True sha=460401bf9953
+fg_delay4_cad30_speed0               OK  rows=  6000 det=True sha=6ab21de55781
+fg_delay20_cad30_speed0              OK  rows=  6000 det=True sha=456560bbba0c
+miss_tick2_cad30_speed18             OK  rows=  6000 det=True sha=0c65039a4203
+miss_tick4_cad30_speed18             OK  rows=  6000 det=True sha=fc618557a2a8
+miss_tick20_cad30_speed18            OK  rows=  6000 det=True sha=783b68b5b701
+fg_delay1_cad30_speed18              OK  rows=  6000 det=True sha=040e5fe86c77
+fg_delay4_cad30_speed18              OK  rows=  6000 det=True sha=acaae9ae9f28
+fg_delay20_cad30_speed18             OK  rows=  6000 det=True sha=525649efca93
+miss_tick2_cad72_speed0              OK  rows=  6000 det=True sha=b970ef19074f
+miss_tick4_cad72_speed0              OK  rows=  6000 det=True sha=dbd86d9fb780
+miss_tick20_cad72_speed0             OK  rows=  6000 det=True sha=488f7a3a9e34
+fg_delay1_cad72_speed0               OK  rows=  6000 det=True sha=871c54f8b576
+fg_delay4_cad72_speed0               OK  rows=  6000 det=True sha=5e32af09ac81
+fg_delay20_cad72_speed0              OK  rows=  6000 det=True sha=f455ed2d46db
+miss_tick2_cad72_speed18             OK  rows=  6000 det=True sha=f163f7862a64
+miss_tick4_cad72_speed18             OK  rows=  6000 det=True sha=1c04795f5003
+miss_tick20_cad72_speed18            OK  rows=  6000 det=True sha=6be0bfd1f16a
+fg_delay1_cad72_speed18              OK  rows=  6000 det=True sha=3baa9ffd007b
+fg_delay4_cad72_speed18              OK  rows=  6000 det=True sha=57419e5e59d9
+fg_delay20_cad72_speed18             OK  rows=  6000 det=True sha=266a7557b63a
+hires_fg_delay1_cad72_speed18        OK  rows=  6000 det=True sha=308fd3b4e364
+hires_fg_delay4_cad72_speed18        OK  rows=  6000 det=True sha=dad8c5afd00e
+hires_fg_delay20_cad72_speed18       OK  rows=  6000 det=True sha=84c37402a9e0
+{
+  "cases": 74,
+  "regression": 7,
+  "regression_all_identical": true,
+  "run_complete": true
+}

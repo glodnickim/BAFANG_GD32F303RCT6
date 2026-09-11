@@ -12,7 +12,7 @@
  * 84 kg at 2320 mV. The default conversion is piecewise-linear through
  * those measured points, so the firmware is usable without load calibration.
  * FW-129: a user load calibration corrects the sensor GAIN only - the measured delta is
- * referred back to the default sensor and then read on the SAME piecewise characteristic,TORQUE_RUN_ASYM_FALL_MS
+ * referred back to the default sensor and then read on the SAME piecewise characteristic,
  * so calibrating moves where the curve sits without changing its shape. span_native keeps
  * its meaning either way: the native delta this sensor produces at 60.00 kg. The zero point
  * is always automatic and never writable. The assist deadband is a separate
@@ -81,77 +81,32 @@
 #define TORQUE_RUN_ATTACK_MIN_DELTA      TORQUE_ASSIST_DEADBAND_NATIVE
 
 /*
- * FW-112.4: ordinary-RUN fast-rise / slow-fall asymmetric filter.
+ * AP-03: the FW-112.4 asymmetric time-domain filter is REMOVED, and with it
+ * TORQUE_RUN_ASYM_RISE_MS / TORQUE_RUN_ASYM_FALL_MS.
  *
- * WHY. The flat 48-step (180 deg default) moving average above is symmetric: a genuine rise
- * in pedal effort is smoothed exactly as heavily as the per-leg ripple it exists to kill. A
- * sharp step reaches ordinary RUN quickly regardless (the average of N recent-and-high samples
- * converges fast), but a SLOW, gradual rise from near-zero can spend most of a window's worth
- * of crank steps still averaging in the low samples from before the rise began - at 20 rpm
- * (48 steps/rev) that is up to 1.5 s. Rolling rearm never pays this cost (WAIT_FRESH_LOAD/
- * TRACK_FAST live-substitute the fast signal - see torque_input_recovery_run_native()); a cold
- * start never pays it either (torque_input_seed_run() fills the window instantly at the arm).
- * Only ORDINARY RUN - already ACTIVE, recovery IDLE, no rearm in progress - pays the full
- * window lag, and only on the way UP.
+ * It published a time-domain rate-limited value INSTEAD of the crank-angle window average
+ * above, on every 4 kHz tick and in all three recovery states, so the window it was layered
+ * on top of never reached the output at all. The problem it was written for was real - a slow
+ * rise from near-zero pays the window lag - but the cure discarded the one mechanism that
+ * makes the estimate cadence-independent, and the per-stroke ripple came back with it. A time
+ * constant is a fixed fraction of a pedal stroke at exactly one cadence; the stroke period
+ * runs from 612 ms at 49 rpm to 250 ms at 120 rpm.
  *
- * WHAT. update_run_asym_filter() (src/torque_input.c) replaces the PUBLISHED ordinary-RUN
- * value with a rate-limited filter, same Q8 fixed-point technique as update_assist_filter()
- * above, but with a DIFFERENT time constant depending on the direction of travel:
- *   afilt > current arun  ->  RISE, TORQUE_RUN_ASYM_RISE_MS   (fast: real pressure shows up
- *                                                                promptly)
- *   afilt <= current arun ->  FALL, TORQUE_RUN_ASYM_FALL_MS   (slower: keeps per-leg ripple
- *                                                                bounded on the way down)
- * It runs every 4 kHz control tick (not per crank step), driven directly by afilt
- * (assist_delta_filtered_native), which is itself already tick-clocked and noise-filtered.
+ * Measured on the recorded W1 ride at matched assist level, 90 rpm
+ * (integration/evidence/ap03-ab-w1/):
  *
- * WHAT IT DOES NOT TOUCH. The 48-step moving average itself (run_window_steps and the ring in
- * src/torque_input.c) is UNCHANGED and keeps running every crank step exactly as before -
- * torque_input_run_filter_step() is not modified. This filter only changes which value gets
- * PUBLISHED as assist_delta_run_native, and only while recovery_state == TORQUE_RECOVERY_IDLE;
- * WAIT_FRESH_LOAD (per-step reseed) and TRACK_FAST (live substitution) are read, never written,
- * by this card - see the unconditional branches in torque_input_update(). torque_input_seed_run()
- * seeds this filter's internal state to the seeded value too (cold arm, and the TRACK_FAST ->
- * IDLE hand-back), so ordinary tracking always resumes with zero discontinuity, never a jump.
+ *   autocorrelation at the stroke period   +0.458 with the filter   -0.126 without
+ *   10-90 % on a real load rise            11147 ms with           11253 ms without
  *
- * These were chosen from host comparison (tests/host/torque/torque_run_asym_host.c, S1-S8 at
- * 20/40/60/80 rpm), not tuned on a bike yet. The card's own suggested starting point (rise
- * 20-40 ms) measured a "first positive demand" time flat at ~54 ms regardless of cadence - a
- * clean win over the old window's 218-781 ms cadence-dependent lag - but let S5 (sinusoidal
- * per-leg ripple) through almost unattenuated at 20 rpm (94 of AFILT's own 148 native units,
- * only 36% attenuation beyond the existing 35 ms fast filter). 120/350 ms trades some of that
- * speed for real ripple rejection (62 of 148, 58% attenuation) while keeping the flat,
- * cadence-independent first-positive-demand time (~193 ms) and a still-large win over the old
- * window on a genuine slow ramp (S4 @ 20 rpm: 2228 ms vs the old window's 2781 ms to 50%, and
- * unlike the old window this does NOT keep growing as cadence drops further).
+ * The stroke rhythm goes away and the response does not measurably suffer. The slow-rise
+ * concern that motivated FW-112.4 is NOT closed by that ride - it contains no deliberate step
+ * change in effort - and needs the AP-01 step scenario before anyone calls it settled.
+ *
+ * Ordinary RUN is the crank-angle window again. Assist magnitude drops roughly 20-25 % for the
+ * same pedalling, because the window reports the true mean where the filter reported a
+ * peak-biased value (fast rise, slow fall). That is compensated by the rider's assist level,
+ * never by a hidden gain in this module.
  */
-#define TORQUE_RUN_ASYM_RISE_MS          120U  /* fast: flat ~193 ms first-positive-demand, any cadence */
-/*
- * Fall smoothing, measured rather than guessed, and SELECTED BY THE TEST SUITE rather than by
- * taste. tests/host/torque/torque_run_asym_host.c S5 drives the real per-leg ripple through the
- * real module; the numbers are RUN peak-to-peak in native units (27 native ~ 1 kg). The ease-off
- * cost is ~4x this constant (exponential with this time constant, plus the exact-zero snap):
- *
- *   FALL_MS | 20 rpm | 40 rpm | 60 rpm | 80 rpm | ease-off | existing suites
- *        0  |   142  |   126  |   106  |    89  | instant  | S5 bound (100) FAILS, FW-112 v2 x24 FAIL
- *      175  |    91  |    80  |    57  |    42  |  ~0.70 s | FW-112 v2 x2 FAIL
- *      225  |     -  |     -  |     -  |     -  |  ~0.90 s | FW-112 v2 x1 FAIL
- *      250  |    76  |    67  |    46  |    34  |  ~1.00 s | ALL GREEN  <- shipped
- *      350  |    62  |    55  |    38  |    28  |  ~1.40 s | ALL GREEN, too long on ease-off
- *
- * 250 is the FASTEST fall at which every existing behavioural test still passes. Below it,
- * fw112_run_rearm_recovery_host.c loses first its "warm RUN is high" precondition and then its
- * re-seed tolerance (S1 R3) - i.e. the estimator stops holding a warm value long enough for the
- * rearm behaviour those cards pinned. Lowering it further is a real change to that behaviour and
- * needs its own card, not a looser test.
- *
- * What it has to separate: a crank dead spot lasts 110-150 ms at riding cadence, a deliberate
- * ease-off lasts seconds. It does NOT lengthen a stop - when pedalling ceases the demand is
- * zeroed in the same tick by a different path (pedaling_active), so this constant only ever
- * shapes a REDUCTION while the rider keeps pedalling.
- *
- * 0 remains legal and is a deliberate bypass seam (exact target this tick), not a divisor bug.
- */
-#define TORQUE_RUN_ASYM_FALL_MS          250U
 
 typedef enum {
 	TORQUE_CAL_SOURCE_DEFAULT = 0,

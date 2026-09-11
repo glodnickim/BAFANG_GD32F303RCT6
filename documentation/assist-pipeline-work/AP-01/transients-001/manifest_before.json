@@ -1,0 +1,46 @@
+{
+  "phase": "before",
+  "generated_at": "2026-09-09T09:36:50.115984+02:00",
+  "task": "TASK-EVD-AP-01-TRANSIENTS-001",
+  "write_scope": [
+    "motor-controller-firmware/sim/controller_lab/README.md",
+    "motor-controller-firmware/sim/controller_lab/controller_lab.c",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/transients-001/"
+  ],
+  "base_check": {
+    "note": "'before' re-states the accepted base as captured: the two write-scope files are hashed from snapshot/, which is byte-identical to the task card's stated starting SHA256. The drift check itself is run in the 'after' phase.",
+    "baseline_file": "integration/tasks/TASK-EVD-AP-01-BASELINE.json",
+    "baseline_sha256": "a84898ed53d5385810c8b09699112ec6f6ba0f60a8e7fe2170c280a30044df8b"
+  },
+  "write_scope_file_hashes": {
+    "motor-controller-firmware/sim/controller_lab/README.md": "e60c97e0f95366c4efe8b250cf8fcfb7e67b4f5e8ac2ff6f97c05ac6a745bf71",
+    "motor-controller-firmware/sim/controller_lab/controller_lab.c": "e5ae235fcb915baee2be7dafe810a3daf038a23e8240da8187a4d0dedeb0c4e3"
+  },
+  "accepted_ap01_results_hashes": {
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/ap01-metrics.json": "70752ba410df87f7a92b780b9aa7f3ff08a9184de5b03bef197cb2d7f0c10151",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/ap01-results.json": "ffa7db04b44297cd888038a62b2a862780c1be03112064b3e7e9f8eb734a2578",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/floor_above_profile_repro.csv": "4d60544bcd7e084c162f4761a4ddfca9e39187461676dcea99d8436dc57642f7",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/floor_default_profile1_repro.csv": "2a60267f07d06d90416eb835102e047f707db1651d61a60777ec1acff73df79c",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/linear72_baseline.csv": "232f7cd2a6cb439046c11f89b359db859a69510a27539079d710ccf7cfa93a73",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/repro_v2_after_fix.json": "88818ebd40de2cad7b601e536087536f239f4bdb5e73fc4199e0ce0344f1aac2",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/repro_v2_before_fix.json": "1e9c1a55a44a00e3dd1ff516a90dbaaff5dd5b2e123003f12766f5ecf16519f4",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/stop_release_cad72.csv": "5d93abf06b478a109e483f59c99367e96c7fc1cbbd92093c25ab714e301401fe",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad110.csv": "1746be75984e257f8a685bc9c70af09a0d2e41dd4db4fb2d4940e92361b1d96c",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad120.csv": "1e847df8254577a5d485881b3bb004d5ebd71da9317fd40cf519cf7ee65c0504",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad20.csv": "4fc42a2badd12e30aeca8806b2dd4f840f79a94140b70b9ae31d1e12afad3426",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad30.csv": "2962a8422a0087e4c3d3d2e01811df9d313f1d124b01966c290725861eea9d61",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad40.csv": "be42f9ca6a6d7aaa14ba35d4529746d5b7f69cd53465658e7a8952ccd90889b8",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad60.csv": "c6cc88f8378ebde595a7270ccef84c2da86be573226b9cd84a4a6b45a2c0bd9d",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad72.csv": "232f7cd2a6cb439046c11f89b359db859a69510a27539079d710ccf7cfa93a73",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/sweep_mode1_cad90.csv": "1669844e32c368ed98150432beaadf7def826565b03ff3ff896ac4c5ab74babb",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/uneven_legs_asym0.csv": "baec53fb008aa61ffc4128ed3700c647e629d452e998ab8fba1326a76feef6cf",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/uneven_legs_asym30.csv": "63cfbc7495781539c26423811691de5105551c276e4e00bdffaa57e143b93589",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/uneven_legs_asym60.csv": "40c2c66b5547073570b5182d852a36be2e6e172cb7a71a46b3cd2fa710318908",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/uneven_legs_asym8.csv": "232f7cd2a6cb439046c11f89b359db859a69510a27539079d710ccf7cfa93a73",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/window180_repro.csv": "232f7cd2a6cb439046c11f89b359db859a69510a27539079d710ccf7cfa93a73",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/window30_repro.csv": "232f7cd2a6cb439046c11f89b359db859a69510a27539079d710ccf7cfa93a73",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/window360_repro.csv": "232f7cd2a6cb439046c11f89b359db859a69510a27539079d710ccf7cfa93a73",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/without_rotation_off_repro.csv": "e5bf45f19e43af34e2ef49921925ef5658fe839c361265e27a7a811762c71a2a",
+    "motor-controller-firmware/documentation/assist-pipeline-work/AP-01/results/without_rotation_repro.csv": "f3711893d28213efdc342fae8fd7f42d5dca78dba25a144f616141b5b75b1e8f"
+  }
+}

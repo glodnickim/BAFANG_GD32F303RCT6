@@ -308,10 +308,130 @@ int main(void)
 			"T7: before any measurement the caller's legacy sign is used, so a cold boot is unchanged");
 	}
 
+	/* ==================================================================
+	 * T8: THE EDGE RACE (FW-131.2). The production path supplies Hall sequence numbers, and the
+	 * timer restart reaches the FOC loop from the HARDWARE while the sequence number and the
+	 * sector angle are published by the Hall ISR. A FOC tick landing between the two must not be
+	 * read as a lost measurement.
+	 *
+	 * Ideal Hall signals, ~208 ERPS, every fifth edge served late. Before FW-131.2 this cost 48
+	 * losses of trust and a worst angle error of 179.75 degrees, because each spurious flip
+	 * latched a transfer_offset for a sector that was about to arrive anyway.
+	 * ================================================================== */
+	{
+		#define RACE_SECTORS      60U
+		#define TICKS_PER_SECTOR  13U    /* 801us sector at 16 kHz FOC = 208 ERPS */
+		#define RACE_DELAY_TICKS   2U    /* how late the Hall ISR is on the delayed edges */
+
+		rotor_angle_state_t st;
+		rotor_angle_reset(&st);
+
+		const uint32_t warmup = 3U * TICKS_PER_SECTOR;   /* the learning gate needs its edges */
+		int losses = 0;
+		int32_t worst = 0;
+		uint32_t held_ticks = 0U;
+
+		for (uint32_t n = 0; n < RACE_SECTORS * TICKS_PER_SECTOR; n++) {
+			const uint32_t phys_sector = n / TICKS_PER_SECTOR;
+			const uint32_t k = n % TICKS_PER_SECTOR;
+			const uint32_t tim2 = (PERIOD * k) / TICKS_PER_SECTOR;
+
+			/* The hardware timer has already restarted; on every fifth edge the ISR has not
+			 * caught up yet, so the sequence and the angle still name the previous sector. */
+			const bool late = (phys_sector % 5U) == 0U && phys_sector > 0U;
+			const uint32_t pub = (late && k < RACE_DELAY_TICKS) ? phys_sector - 1U : phys_sector;
+			if (late && k < RACE_DELAY_TICKS) held_ticks++;
+
+			rotor_angle_input_t in = make_input(tim2, PERIOD, +1, false, false);
+			in.hall_angle = (int32_t)((uint32_t)HALL_ANGLE +
+				pub * (uint32_t)ROTOR_ANGLE_DEG_60);
+			in.hall_sequence = pub;
+			in.hall_sequence_valid = true;
+
+			const uint8_t before = st.trusted;
+			const int32_t theta = rotor_angle_update(&st, &in);
+
+			if (n >= warmup) {
+				if (before == 1U && st.trusted == 0U) losses++;
+				if (st.trusted) {
+					/* Where the rotor actually is. q31 wraps, so this is uint32 arithmetic. */
+					const uint32_t truth = (uint32_t)HALL_ANGLE + (uint32_t)ANGLE_CORRECTION +
+						phys_sector * (uint32_t)ROTOR_ANGLE_DEG_60 +
+						(uint32_t)(((uint64_t)ROTOR_ANGLE_DEG_60 * k) / TICKS_PER_SECTOR);
+					const int32_t err = abs32((int32_t)((uint32_t)theta - truth));
+					if (err > worst) worst = err;
+				}
+			}
+		}
+
+		printf("    T8: %u raced edges, %d trust losses, worst angle error %.2f deg\n",
+			(unsigned)held_ticks, losses, q31_to_deg(worst));
+
+		CHECK(losses == 0,
+			"T8: an ISR that has not yet published the new sector is a race, not a lost measurement");
+		CHECK(worst < ROTOR_ANGLE_DEG_30,
+			"T8: holding across the race keeps the angle inside half a sector, not a sector away");
+
+		/*
+		 * The protection the original condition was written for must survive. A restart that no
+		 * sequence ever explains is a 16-bit rollover or a dead Hall, and past the bound it still
+		 * loses trust - it just waits long enough to be sure.
+		 */
+		rotor_angle_input_t roll = make_input(1U, PERIOD, +1, false, false);
+		roll.hall_sequence = st.prev_hall_sequence;   /* nothing new is ever published */
+		roll.hall_sequence_valid = true;
+		CHECK(st.trusted == 1U, "T8: interpolating before the rollover (setup)");
+		for (uint32_t i = 0; i <= ROTOR_ANGLE_EDGE_PENDING_TICKS + 1U; i++) {
+			roll.tim2_recent = 1U;   /* restarted and staying restarted: no edge explains it */
+			(void)rotor_angle_update(&st, &roll);
+		}
+		CHECK(st.trusted == 0U,
+			"T8: a restart no sequence ever explains still loses trust once the bound is spent");
+		CHECK(st.edges == 0U,
+			"T8: and it clears the edge history, so the next spin-up re-earns trust");
+
+		/*
+		 * T9: A MEASURED STALL OUTRANKS A PENDING EDGE. The hold may only ever cover the ABSENCE
+		 * of information. input->stalled is the opposite: the 4 kHz layer has measured that the
+		 * rotor stopped. The first version of this patch held across it, so a standing rotor kept
+		 * trusted = 1 and its edge history - precisely what the learning gate exists to refuse.
+		 */
+		rotor_angle_state_t sst;
+		rotor_angle_reset(&sst);
+		for (uint32_t n = 0; n < 5U * TICKS_PER_SECTOR; n++) {
+			const uint32_t ps = n / TICKS_PER_SECTOR;
+			const uint32_t k = n % TICKS_PER_SECTOR;
+			rotor_angle_input_t in = make_input((PERIOD * k) / TICKS_PER_SECTOR,
+				PERIOD, +1, false, false);
+			in.hall_angle = (int32_t)((uint32_t)HALL_ANGLE + ps * (uint32_t)ROTOR_ANGLE_DEG_60);
+			in.hall_sequence = ps;
+			in.hall_sequence_valid = true;
+			(void)rotor_angle_update(&sst, &in);
+		}
+		CHECK(sst.trusted == 1U, "T9: interpolating before the stall (setup)");
+
+		/* The rotor stops INSIDE a race window: the timer has restarted, the ISR has not published
+		 * the new sector, and the stall is reported in the same tick. */
+		rotor_angle_input_t stall = make_input(1U, PERIOD, +1, false, true);
+		stall.hall_angle = (int32_t)((uint32_t)HALL_ANGLE +
+			sst.prev_hall_sequence * (uint32_t)ROTOR_ANGLE_DEG_60);
+		stall.hall_sequence = sst.prev_hall_sequence;   /* unchanged: the ISR is late */
+		stall.hall_sequence_valid = true;
+		(void)rotor_angle_update(&sst, &stall);
+		CHECK(sst.trusted == 0U,
+			"T9: a measured stall is information, so it is never held across");
+		CHECK(sst.edges == 0U,
+			"T9: and it clears the edge history exactly like any other lost timing");
+
+		#undef RACE_SECTORS
+		#undef TICKS_PER_SECTOR
+		#undef RACE_DELAY_TICKS
+	}
+
 	if (host_test_failures == 0) {
-		printf("All FW-131/131.1 rotor angle checks passed.\n");
+		printf("All FW-131/131.1/131.2 rotor angle checks passed.\n");
 		return 0;
 	}
-	printf("\n%d FW-131/131.1 rotor angle check(s) FAILED.\n", host_test_failures);
+	printf("\n%d FW-131/131.1/131.2 rotor angle check(s) FAILED.\n", host_test_failures);
 	return 1;
 }

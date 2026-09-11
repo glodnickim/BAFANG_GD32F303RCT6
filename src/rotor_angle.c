@@ -31,6 +31,7 @@ void rotor_angle_reset(rotor_angle_state_t *state)
 	state->last_output = 0;
 	state->transfer_offset = 0;
 	state->prev_hall_sequence = 0U;
+	state->pending_ticks = 0U;
 }
 
 int32_t rotor_angle_sector_offset(const rotor_angle_input_t *input)
@@ -100,13 +101,54 @@ int32_t rotor_angle_update(rotor_angle_state_t *state, const rotor_angle_input_t
 	 * counting DOWN is the edge - the same technique walk_assist_motor.c uses on the same signal.
 	 */
 	uint16_t tim2 = (uint16_t)((input->tim2_recent > 0xFFFFU) ? 0xFFFFU : input->tim2_recent);
+	bool timer_restarted = state->have_prev_tim2 != 0U && tim2 < state->prev_tim2;
+	bool sequence_changed = input->hall_sequence_valid &&
+		input->hall_sequence != state->prev_hall_sequence;
 	bool edge = state->have_prev_tim2 != 0U &&
-		(input->hall_sequence_valid ? input->hall_sequence != state->prev_hall_sequence : tim2 < state->prev_tim2);
-	bool lost_timing = input->stalled || (state->have_prev_tim2 && input->hall_sequence_valid &&
-		!edge && tim2 < state->prev_tim2);
+		(input->hall_sequence_valid ? sequence_changed : timer_restarted);
+
+	/*
+	 * FW-131.2: the timer restart and the sequence number come from different contexts, so a FOC
+	 * tick can legitimately see the first without the second. Count how long the restart has been
+	 * waiting for its sector instead of calling it lost immediately. The count only ever runs on
+	 * the production path - a legacy caller without sequence numbers keeps the timer comparison
+	 * it has always had.
+	 */
+	if (input->hall_sequence_valid && !sequence_changed &&
+	    (timer_restarted || state->pending_ticks > 0U)) {
+		if (state->pending_ticks < 0xFFU) state->pending_ticks++;
+	} else {
+		state->pending_ticks = 0U;
+	}
+	bool edge_pending = state->pending_ticks > 0U &&
+		state->pending_ticks <= ROTOR_ANGLE_EDGE_PENDING_TICKS;
+	/*
+	 * Past the bound nothing published a sector, so this was never an edge: a 16-bit rollover, or
+	 * a Hall signal that really is gone. That is the case the original condition was written for
+	 * and it still loses trust here, only now it waits to be sure.
+	 */
+	bool lost_timing = input->stalled ||
+		(input->hall_sequence_valid && state->pending_ticks > ROTOR_ANGLE_EDGE_PENDING_TICKS);
+
 	state->prev_hall_sequence = input->hall_sequence;
 	state->prev_tim2 = tim2;
 	state->have_prev_tim2 = 1U;
+
+	/*
+	 * Hold the angle across the race. Returning here is deliberate: it leaves trust, edge history
+	 * and transfer_offset exactly as the last complete Hall snapshot left them, which is the whole
+	 * point - there is no new information yet, so there is nothing to react to.
+	 *
+	 * A hold may only ever cover the ABSENCE of information. Anything that is itself information
+	 * has to be let through, and there are two such facts here: a direction change, and
+	 * lost_timing. The second one matters most - input->stalled says the 4 kHz layer has already
+	 * MEASURED that the rotor stopped, which is not an ISR that is running late. Holding across it
+	 * would keep trusted=1 and the edge history alive for a rotor that is standing still, which is
+	 * exactly the state the learning gate exists to refuse.
+	 */
+	if (edge_pending && !lost_timing && state->have_output && !direction_changed) {
+		return state->last_output;
+	}
 	if (edge && state->edges < ROTOR_ANGLE_TRUST_EDGES) {
 		state->edges++;
 	}
